@@ -6,6 +6,7 @@ import { botInThread } from '../src/slack/threads';
 import { bindings, bindingBySlack, bindingByProject } from '../src/bindings';
 import { normalizeSlackMessage } from '../src/canonical';
 import { claimEvent, type KVLike } from '../src/idempotency';
+import { loadSkillBody, type D1Like } from '../src/skills';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -16,6 +17,7 @@ interface Env {
   SLACK_SIGNING_SECRET?: string;
   SLACK_EVENTS?: KVLike; // KV namespace for event_id idempotency
   HEARTBEAT_TOKEN?: string; // shared secret guarding the /__heartbeat trigger
+  DB?: D1Like; // D1 skill catalog (loaded fresh at fire time)
   [binding: string]: unknown;
 }
 
@@ -98,13 +100,37 @@ app.post('/__internal/scheduled', async (c) => {
   const binding = bindingByProject(body.projectId);
   if (!binding || binding.status !== 'active') return c.json({ skipped: 'no active binding' });
 
+  // Reference, not copy: a reminder holds a skill NAME; load the body FRESH here so
+  // edits to the skill apply to all future scheduled runs.
+  const payload = (body.payload ?? {}) as { skill?: string; prompt?: string; topic?: string };
+  const input: Record<string, unknown> = { kind: body.kind ?? 'heartbeat', now: new Date().toISOString() };
+  // skill body + one-off prompt are both "the procedure for this run" (Hermes semantics):
+  // follow them. `topic` is the legacy blog-on-a-subject path (the default 6h backstop).
+  let procedure = '';
+  if (payload.skill) {
+    const skillBody = c.env.DB ? await loadSkillBody(c.env.DB, body.projectId, payload.skill) : null;
+    if (skillBody) {
+      input.skill = payload.skill;
+      procedure = skillBody;
+    } else {
+      console.log(`[scheduled] skill "${payload.skill}" not found for project ${body.projectId}`);
+    }
+  }
+  if (payload.prompt) procedure = procedure ? `${procedure}\n\n${payload.prompt}` : String(payload.prompt);
+  if (procedure) input.instructions = procedure;
+  else if (payload.topic) input.topic = String(payload.topic);
+  // Skill named-but-missing AND no prompt/topic → nothing to run; skip the empty turn.
+  if (!input.instructions && !input.topic) {
+    return c.json({ skipped: 'nothing to run (skill missing, no prompt/topic)' });
+  }
+
   await dispatch({
     agent: 'project',
     id: `project:${body.projectId}`,
     session: `job:${body.projectId}:${body.jobId}`,
-    input: { kind: body.kind ?? 'heartbeat', now: new Date().toISOString(), ...(body.payload ?? {}) },
+    input,
   });
-  return c.json({ dispatched: true, jobId: body.jobId });
+  return c.json({ dispatched: true, jobId: body.jobId, skill: input.skill ?? null });
 });
 
 app.post('/slack/events', async (c) => {

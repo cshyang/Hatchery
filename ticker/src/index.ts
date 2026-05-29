@@ -48,6 +48,7 @@ function unauthorized(req: Request, env: Env): boolean {
 //   POST   /internal/projects/:projectId/schedules        -> enqueue (add/replace)
 //   GET    /internal/projects/:projectId/schedules        -> list
 //   DELETE /internal/projects/:projectId/schedules/:jobId  -> cancel
+//   PATCH  /internal/projects/:projectId/schedules/:jobId  -> pause/resume (body {enabled})
 const SCHEDULE_ROUTE = /^\/internal\/projects\/([^/]+)\/schedules(?:\/([^/]+))?$/;
 
 export default {
@@ -74,6 +75,11 @@ export default {
       }
       if (req.method === 'DELETE' && jobId) {
         return Response.json(await scheduler.cancel(jobId));
+      }
+      // Pause / resume: PATCH .../schedules/:jobId  body { enabled: boolean }
+      if (req.method === 'PATCH' && jobId) {
+        const { enabled } = (await req.json()) as { enabled?: boolean };
+        return Response.json(await scheduler.setEnabled(jobId, enabled !== false));
       }
       return new Response('method not allowed', { status: 405 });
     }

@@ -9,5 +9,11 @@
   // Reverse channel: the agent's schedule_self tool reaches the SchedulerDO in the
   // scheduler worker via env.TICKER (service binding avoids CF 1042). Flue MERGES
   // user wrangler config, so this survives the build — verified post-build.
-  "services": [{ "binding": "TICKER", "service": "hatchery-ticker" }]
+  "services": [{ "binding": "TICKER", "service": "hatchery-ticker" }],
+  // Skill catalog (the "what"): agent authors via tools (env.DB), and /__internal/scheduled
+  // loads skill bodies FRESH at fire time. D1 makes progressive disclosure a query split:
+  // SELECT name,description (L1) vs SELECT body_md (L2). Survives Flue's wrangler merge.
+  "d1_databases": [
+    { "binding": "DB", "database_name": "hatchery-skills", "database_id": "6ac5de79-a8c0-4e08-aab8-b9b636278a9d" }
+  ]
 }
