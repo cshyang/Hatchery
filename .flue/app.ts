@@ -3,7 +3,7 @@ import { flue } from '@flue/runtime/app';
 import { dispatch } from '@flue/runtime';
 import { verifySlackSignature } from '../src/slack/verify';
 import { botInThread } from '../src/slack/threads';
-import { bindings, bindingBySlack, bindingByProject } from '../src/bindings';
+import { bindings, bindingBySlack, bindingByProject, agentInstanceId } from '../src/bindings';
 import { normalizeSlackMessage } from '../src/canonical';
 import { claimEvent, type KVLike } from '../src/idempotency';
 import { loadSkillBody, type D1Like } from '../src/skills';
@@ -46,7 +46,7 @@ async function fireHeartbeat(topic?: string): Promise<number> {
     active.map((b) =>
       dispatch({
         agent: 'project',
-        id: `project:${b.projectId}`,
+        id: agentInstanceId(b.projectId),
         session: `heartbeat:${b.projectId}`,
         input: { kind: 'heartbeat', now, ...(topic ? { topic } : {}) },
       }),
@@ -124,7 +124,7 @@ app.post('/__internal/scheduled', async (c) => {
 
   await dispatch({
     agent: 'project',
-    id: `project:${body.projectId}`,
+    id: agentInstanceId(body.projectId),
     session: `job:${body.projectId}:${body.jobId}`,
     input,
   });
@@ -204,9 +204,17 @@ app.post('/slack/events', async (c) => {
 
   await dispatch({
     agent: 'project',
-    id: `project:${msg.projectId}`,
+    id: agentInstanceId(msg.projectId),
     session: `slack-thread:${msg.threadTs}`,
-    input: { message: msg.text, threadTs: msg.threadTs },
+    // Forward the author identity so the agent can scope `user` memory to the person talking.
+    // senderId is fully qualified into a subject (`slack:<team>:<user>`) in the agent.
+    input: {
+      message: msg.text,
+      threadTs: msg.threadTs,
+      provider: msg.provider,
+      teamId: msg.externalTeamId,
+      senderId: msg.senderId,
+    },
   });
 
   return c.body(null, 200); // ack within Slack's 3s window; agent replies async

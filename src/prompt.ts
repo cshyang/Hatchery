@@ -17,8 +17,12 @@ export interface BuildInstructionsOptions {
   projectName: string;
   /** The `personality` skill's body (frontmatter already stripped), or null for the general default. */
   personality: string | null;
-  /** L1 skill catalog: names + descriptions, sorted by name. Rendered last (most volatile). */
+  /** L1 skill catalog: names + descriptions, sorted by name. Rendered near the end (semi-volatile). */
   catalog: { name: string; description: string }[];
+  /** Pre-rendered "WHAT YOU REMEMBER" block (see src/memory.ts), or null when there's nothing to show.
+   *  Passed as an opaque string so this assembler stays pure; it's the most volatile block (changes
+   *  whenever memory changes), so it goes LAST. */
+  memoryBlock?: string | null;
 }
 
 // Anti-fabrication / finish-the-job. The deliverable is real output, not a description
@@ -69,7 +73,7 @@ function skillsBlock(catalog: { name: string; description: string }[]): string {
 }
 
 export function buildInstructions(opts: BuildInstructionsOptions): string {
-  const { projectName, personality, catalog } = opts;
+  const { projectName, personality, catalog, memoryBlock } = opts;
   const blocks: string[] = [];
 
   // 1. Identity (stable).
@@ -108,8 +112,11 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
       `resume_reminder, cancel_reminder. Use the "now" field for absolute times. Pick sensible cadences.`,
   );
 
-  // 8. Skills catalog — most volatile, so it trails to keep the stable prefix cacheable.
+  // 8. Skills catalog — semi-volatile (changes when skills change), so it trails the stable prefix.
   blocks.push(skillsBlock(catalog));
+
+  // 9. Memory — MOST volatile (changes per turn and per author), so it goes dead last.
+  if (memoryBlock) blocks.push(memoryBlock);
 
   return blocks.join('\n\n');
 }

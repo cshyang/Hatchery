@@ -11,6 +11,27 @@ export type SandboxMode = 'virtual' | 'cloudflare-sandbox' | 'daytona' | 'e2b';
 /** Default model when a binding doesn't pin one. */
 export const DEFAULT_MODEL = 'zai/glm-5.1';
 
+/** The persona slug used until a project hosts more than one agent. */
+export const DEFAULT_AGENT_SLUG = 'default';
+
+// Flue DO instance id for a project's agent persona: `project:<projectId>:agent:<slug>`.
+// The slug is 'default' today — baked in now because DO instance ids are sticky (renaming
+// one makes a NEW DO and orphans its sessions). A channel is the shared room; each persona
+// is its own instance inside it. Build + parse go through these two functions so the format
+// never drifts across the heartbeat / scheduled / event dispatch sites.
+export function agentInstanceId(projectId: string, slug: string = DEFAULT_AGENT_SLUG): string {
+  return `project:${projectId}:agent:${slug}`;
+}
+
+/** Parse projectId + slug from an instance id. Tolerates the legacy bare `project:<id>`
+ *  (no `:agent:` suffix) so any DO created before this change still resolves. */
+export function parseAgentInstanceId(id: string): { projectId: string; slug: string } {
+  const m = id.match(/^project:(.+):agent:([^:]+)$/);
+  if (m) return { projectId: m[1], slug: m[2] };
+  const projectId = id.startsWith('project:') ? id.slice('project:'.length) : id;
+  return { projectId, slug: DEFAULT_AGENT_SLUG };
+}
+
 export interface Binding {
   provider: 'slack';
   externalTeamId: string;
