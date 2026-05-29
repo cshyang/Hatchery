@@ -1,0 +1,28 @@
+{
+  "name": "hetchery",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@flue/runtime": "^0.8.1",
+    "@flue/sdk": "^0.8.1",
+    "agents": "^0.13.3",
+    "hono": "^4.12.23",
+    "valibot": "^1.4.1"
+  },
+  "devDependencies": {
+    "@flue/cli": "^0.8.1",
+    "typescript": "^6.0.3",
+    "wrangler": "^4.95.0"
+  },
+  "type": "module"
+}
