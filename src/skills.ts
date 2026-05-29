@@ -32,6 +32,13 @@ export function parseSkillFrontmatter(md: string): { name?: string; description?
 }
 
 const SKILL_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const MAX_DESCRIPTION = 1024; // matches the SKILL.md convention; the description is the L1 line
+
+// The markdown body after the frontmatter fence (used to apply a `personality` skill).
+export function skillBody(md: string): string {
+  const fence = md.match(/^\s*---\s*\n[\s\S]*?\n---\s*\n?/);
+  return (fence ? md.slice(fence[0].length) : md).trim();
+}
 
 // L1: the cheap catalog (names + descriptions) injected into the system prompt.
 export async function loadSkillCatalog(db: D1Like, projectId: string): Promise<{ name: string; description: string }[]> {
@@ -55,9 +62,11 @@ export function skillTools(db: D1Like, projectId: string): ToolDefinition[] {
   const saveSkill = defineTool({
     name: 'save_skill',
     description:
-      'Create or update one of your own reusable skills (a saved "how-to" you can run on demand or schedule). ' +
-      'Pass the full skill as SKILL.md text: a `---` frontmatter block with `name` (lowercase-kebab — this is its id) ' +
-      'and `description` (one line: when to use it), then a markdown body of steps. Reusing a name overwrites it.',
+      'Create or update one of your own reusable skills — a saved "how-to" you can run on demand or schedule. ' +
+      'Pass the full skill as SKILL.md text: a `---` frontmatter block with `name` (lowercase-kebab, its id) and ' +
+      '`description` (≤1024 chars, and START it with "Use when …" naming the trigger — that one line is all you see ' +
+      'until you open the skill), then the body. Structure the body Overview → When to use → numbered steps; keep it ' +
+      'to roughly a screenful; do not duplicate an existing skill — extend it instead. Reusing a name overwrites it.',
     parameters: Type.Object({
       skill_md: Type.String({ description: 'Full SKILL.md: `---` name/description frontmatter `---` then the body.' }),
     }),
@@ -66,6 +75,9 @@ export function skillTools(db: D1Like, projectId: string): ToolDefinition[] {
       const { name, description } = parseSkillFrontmatter(md);
       if (!name || !description) throw new Error('skill_md needs frontmatter with both `name` and `description`.');
       if (!SKILL_NAME.test(name)) throw new Error(`skill name must be lowercase-kebab (a-z 0-9 -); got "${name}".`);
+      if (description.length > MAX_DESCRIPTION) {
+        throw new Error(`description must be ≤ ${MAX_DESCRIPTION} chars (got ${description.length}).`);
+      }
       await db
         .prepare(
           `INSERT INTO skills(project_id, name, description, body_md, updated_at)

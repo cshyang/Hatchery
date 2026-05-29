@@ -34,23 +34,21 @@ function stripMention(text: string, botUserId: string): string {
     .trim();
 }
 
-// M1a heartbeat (scaffold). Flue's generated entry forwards ONLY `fetch`, so a
-// Cloudflare Cron Trigger (which calls `scheduled()`) cannot reach us. The
-// recurring tick therefore lives OUTSIDE Flue — an external ticker hitting this
-// fetch endpoint, or (M1.5) the per-project DO `this.schedule()` seam. This just
-// fires one heartbeat run on demand: dispatch a headless "do work" turn per
-// active project; the agent drafts on the topic and posts top-level to Slack.
-const DEFAULT_HEARTBEAT_TOPIC = 'a useful, evergreen tip for our audience'; // M1a placeholder; M1b sources topics from research/PostHog
-
-async function fireHeartbeat(topic: string): Promise<number> {
+// Liveness backstop. The 6h cron poke (and any manual /__heartbeat) wakes each active
+// project with NO specific work — the agent stays silent unless it has a self-scheduled
+// reminder due. A caller MAY pass {topic} to give the wake something to act on. Per-job
+// scheduled work arrives via /__internal/scheduled instead, carrying its skill/prompt.
+// (Flue's generated entry forwards only `fetch`, so this lives outside Flue — see ticker/.)
+async function fireHeartbeat(topic?: string): Promise<number> {
   const active = bindings.filter((b) => b.status === 'active');
+  const now = new Date().toISOString();
   await Promise.all(
     active.map((b) =>
       dispatch({
         agent: 'project',
         id: `project:${b.projectId}`,
         session: `heartbeat:${b.projectId}`,
-        input: { kind: 'heartbeat', topic },
+        input: { kind: 'heartbeat', now, ...(topic ? { topic } : {}) },
       }),
     ),
   );
@@ -65,15 +63,15 @@ const app = new Hono<{ Bindings: Env }>();
 app.post('/__heartbeat', async (c) => {
   const expected = c.env.HEARTBEAT_TOKEN;
   if (!expected || c.req.header('x-hatchery-token') !== expected) return c.body(null, 404);
-  let topic = DEFAULT_HEARTBEAT_TOPIC;
+  let topic: string | undefined;
   try {
     const body = (await c.req.json()) as { topic?: string };
     if (body?.topic) topic = String(body.topic);
   } catch {
-    // no/invalid body → default topic
+    // no/invalid body → bare liveness wake (agent stays silent unless it has scheduled work)
   }
   const dispatched = await fireHeartbeat(topic);
-  return c.json({ dispatched, topic });
+  return c.json({ dispatched, topic: topic ?? null });
 });
 
 // Per-job fire from the SchedulerDO (the agent's self-scheduled work). Unlike

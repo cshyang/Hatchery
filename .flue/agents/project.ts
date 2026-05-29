@@ -1,7 +1,7 @@
 import { createAgent, defineTool, Type, type AgentRuntimeConfig, type ToolDefinition } from '@flue/runtime';
 import { bindingByProject } from '../../src/bindings';
 import { postMessage } from '../../src/slack/post';
-import { skillTools, loadSkillCatalog, type D1Like } from '../../src/skills';
+import { skillTools, loadSkillCatalog, loadSkillBody, skillBody, type D1Like } from '../../src/skills';
 import { reminderTools } from '../../src/reminders';
 
 // The project agent. Addressed at /agents/project/<id> where id = "project:<projectId>".
@@ -50,6 +50,14 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
 
   // L1 catalog query — cheap, every turn. .catch keeps a D1 hiccup from breaking the agent.
   const skills = db ? await loadSkillCatalog(db, projectId).catch(() => []) : [];
+  // Personality (overwritable): a skill named `personality` defines the agent's role/voice and is
+  // applied to EVERY turn. Absent → a general default. This is the only purpose-layer; everything
+  // else below is fixed FUNCTION. Loaded eagerly (not on demand) so it colors all output.
+  const personality =
+    db && skills.some((s) => s.name === 'personality')
+      ? await loadSkillBody(db, projectId, 'personality').catch(() => null)
+      : null;
+  const catalog = skills.filter((s) => s.name !== 'personality'); // applied above, not load-on-demand
 
   const replyInChannel = defineTool({
     name: 'reply_in_channel',
@@ -80,23 +88,26 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   return {
     model: 'zai/glm-5.1',
     instructions:
-      `You are the content agent for the "${binding.projectId}" project. ` +
+      `You are an autonomous assistant operating in the "${binding.projectId}" Slack channel.\n` +
+      (personality
+        ? `\nROLE & VOICE — your "personality" skill; apply it to everything you do and say:\n${skillBody(personality)}\n`
+        : `\nNo personality set yet — be clear, capable, and straightforward. The user can give you a role, focus, and ` +
+          `voice anytime by saving a skill named "personality".\n`) +
+      `\nHOW YOU WORK (fixed):\n` +
       `Each turn arrives as a "[Dispatch Input]" block — read the JSON under "input:" and act on it:\n` +
-      `• "message" field → a user's Slack message. Respond helpfully and concisely; pass its "threadTs" to ` +
+      `• "message" field → a person's Slack message. Respond helpfully and concisely; pass its "threadTs" to ` +
       `reply_in_channel so your reply lands in their thread.\n` +
-      `• "kind":"heartbeat" → a scheduled run, no user. If it has an "instructions" field, that is one of your ` +
-      `saved skills — follow it as the procedure for this run. Otherwise write a concise, engaging blog-style draft ` +
-      `on the "topic" field. Post the result with reply_in_channel and OMIT threadTs (a new top-level post). ` +
-      `If there is genuinely nothing worth posting, simply don't call reply_in_channel.\n` +
-      `\nYOUR SKILLS & SCHEDULE:\n` +
-      `${skillCatalogBlock(skills)}\n` +
-      `• Capture reusable procedures as skills with save_skill (SKILL.md text: a --- name/description --- block, ` +
-      `then steps); open one with load_skill; remove with delete_skill.\n` +
-      `• Schedule your own work with set_reminder — cron in KL time (e.g. "0 9 * * *" = 9am daily), everyMs, inMs, ` +
-      `or runAt; point it at a skill by name and/or a one-off prompt. Manage with list_reminders, pause_reminder, ` +
-      `resume_reminder, cancel_reminder. Use the "now" field for absolute times. Pick sensible cadences; don't over-schedule.\n` +
-      `\nYour plain text is NOT delivered — reply_in_channel is the ONLY way your words reach the channel. ` +
-      `Do not mention tools or the dispatch envelope.`,
+      `• "kind":"heartbeat" → a scheduled/self-triggered run, nobody waiting. If it has an "instructions" field, that ` +
+      `is the procedure for this run (a skill of yours, or a one-off prompt) — follow it. Else address the "topic" if ` +
+      `one is given. If there is nothing meaningful to do, stay silent. When you do post, omit threadTs (top-level).\n` +
+      `• reply_in_channel is the ONLY way your words reach the channel — your plain text is NOT delivered. Don't ` +
+      `mention tools or the dispatch envelope.\n` +
+      `\nYOUR SKILLS (open one with load_skill when relevant):\n` +
+      `${skillCatalogBlock(catalog)}\n` +
+      `• Capture a reusable procedure as a skill with save_skill; remove one with delete_skill.\n` +
+      `\nYOUR SCHEDULE: use set_reminder to schedule your own work — cron in KL time (e.g. "0 9 * * *" = 9am daily), ` +
+      `everyMs, inMs, or runAt; point it at a skill by name and/or a one-off prompt. Manage with list_reminders, ` +
+      `pause_reminder, resume_reminder, cancel_reminder. Use the "now" field for absolute times. Pick sensible cadences.`,
     tools,
   };
 });
