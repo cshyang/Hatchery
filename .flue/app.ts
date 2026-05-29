@@ -5,6 +5,7 @@ import { verifySlackSignature } from '../src/slack/verify';
 import { botInThread } from '../src/slack/threads';
 import { bindingBySlack } from '../src/bindings';
 import { normalizeSlackMessage } from '../src/canonical';
+import { claimEvent, type KVLike } from '../src/idempotency';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -13,6 +14,7 @@ import { normalizeSlackMessage } from '../src/canonical';
 
 interface Env {
   SLACK_SIGNING_SECRET?: string;
+  SLACK_EVENTS?: KVLike; // KV namespace for event_id idempotency
   [binding: string]: unknown;
 }
 
@@ -87,9 +89,14 @@ app.post('/slack/events', async (c) => {
     if (!continuing) return c.body(null, 200);
   }
 
-  // TODO(idempotency): dedup body.event_id via KV/DO before dispatch (see
-  // docs/decisions/0001 — the doorbell tax). Fast ACK makes Slack's retries
-  // rare, but at-most-once delivery means this is the first slice's known gap.
+  // Idempotency: Slack redelivers the same event_id on retry (at-least-once).
+  // Claim it before dispatch so a retry can't fire a second reply. Only reached
+  // for dispatch-bound events (mention/continue) — chatter we ignore costs no KV.
+  const eventId = body.event_id ?? `${ev.channel}:${ev.ts}`;
+  if (!(await claimEvent(c.env.SLACK_EVENTS, eventId))) {
+    return c.body(null, 200); // duplicate delivery — already handled
+  }
+
   const msg = normalizeSlackMessage(
     body.event_id ?? `${ev.channel}:${ev.ts}`,
     body.team_id ?? '',
