@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { flue } from '@flue/runtime/app';
 import { dispatch } from '@flue/runtime';
 import { verifySlackSignature } from '../src/slack/verify';
+import { botInThread } from '../src/slack/threads';
 import { bindingBySlack } from '../src/bindings';
 import { normalizeSlackMessage } from '../src/canonical';
 
@@ -13,6 +14,19 @@ import { normalizeSlackMessage } from '../src/canonical';
 interface Env {
   SLACK_SIGNING_SECRET?: string;
   [binding: string]: unknown;
+}
+
+// Slack renders an @mention as "<@U0B6UB2E5HT>" (or "<@U…|label>"). We engage
+// only when the bot is mentioned, then strip the mention so the model sees a
+// clean message.
+function mentionsBot(text: string, botUserId: string): boolean {
+  return text.includes(`<@${botUserId}`);
+}
+function stripMention(text: string, botUserId: string): string {
+  return text
+    .replace(new RegExp(`<@${botUserId}(\\|[^>]*)?>`, 'g'), '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -57,13 +71,26 @@ app.post('/slack/events', async (c) => {
   const binding = bindingBySlack(body.team_id ?? '', ev.channel);
   if (!binding) return c.body(null, 200); // unbound channel: acknowledge, never dispatch
 
+  // Engage policy:
+  //  - @mention anywhere                         -> engage
+  //  - reply in a thread the bot already posted in -> continue (no re-mention)
+  //  - everything else                            -> stay silent
+  const text = ev.text ?? '';
+  if (!mentionsBot(text, binding.botUserId)) {
+    const threadTs = ev.thread_ts;
+    const token = (c.env as Record<string, string | undefined>)[binding.botTokenRef];
+    const continuing =
+      !!threadTs && !!token && (await botInThread(token, ev.channel, threadTs, binding.botUserId));
+    if (!continuing) return c.body(null, 200);
+  }
+
   // TODO(idempotency): dedup body.event_id via KV/DO before dispatch (see
   // docs/decisions/0001 — the doorbell tax). Fast ACK makes Slack's retries
   // rare, but at-most-once delivery means this is the first slice's known gap.
   const msg = normalizeSlackMessage(
     body.event_id ?? `${ev.channel}:${ev.ts}`,
     body.team_id ?? '',
-    { channel: ev.channel, ts: ev.ts, thread_ts: ev.thread_ts, user: ev.user, text: ev.text },
+    { channel: ev.channel, ts: ev.ts, thread_ts: ev.thread_ts, user: ev.user, text: stripMention(text, binding.botUserId) },
     binding,
   );
 
@@ -71,7 +98,7 @@ app.post('/slack/events', async (c) => {
     agent: 'project',
     id: `project:${msg.projectId}`,
     session: `slack-thread:${msg.threadTs}`,
-    input: { message: msg.text },
+    input: { message: msg.text, threadTs: msg.threadTs },
   });
 
   return c.body(null, 200); // ack within Slack's 3s window; agent replies async

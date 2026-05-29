@@ -12,6 +12,9 @@ export interface Binding {
   provider: 'slack';
   externalTeamId: string;
   externalChannelId: string;
+  /** The bot's own Slack user id (e.g. "U…"). Used to detect @mentions and to
+   *  check whether the bot is already participating in a thread. From auth.test. */
+  botUserId: string;
   projectId: string;
   defaultProfile: string;
   /** No-op today (always 'virtual'); the seam that lets a project graduate to a real sandbox later. */
@@ -26,6 +29,7 @@ export const bindings: readonly Binding[] = [
     provider: 'slack',
     externalTeamId: 'T0B6VB415TQ', // Slack workspace/team id (Ecodark)
     externalChannelId: 'C0B6VFMVCUW', // the bound channel id
+    botUserId: 'U0B6UB2E5HT', // hatch_agent's user id (auth.test)
     projectId: 'demo',
     defaultProfile: 'project-assistant',
     sandboxMode: 'virtual',
