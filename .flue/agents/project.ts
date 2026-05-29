@@ -5,6 +5,7 @@ import { skillTools, loadSkillCatalog, loadSkillBody, skillBody, type D1Like } f
 import { reminderTools } from '../../src/reminders';
 import { buildInstructions } from '../../src/prompt';
 import { loadProjectMemory, memoryTools, renderMemory } from '../../src/memory';
+import { logMessage } from '../../src/reflection';
 
 // The project agent. Addressed at /agents/project/<id>, id = "project:<projectId>:agent:<slug>"
 // (slug = "default" until a channel hosts multiple personas). Each instance is a persistent
@@ -70,6 +71,9 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       if (!botToken) throw new Error(`Missing bot token env "${binding.transportTokenRef}".`);
       const thread = conversationId ? String(conversationId) : undefined;
       await postMessage(botToken, binding.externalSpaceId, String(text), thread);
+      // Log the agent's own post to the transcript (the other half of the conversation reflection
+      // consolidates). REM turns are told not to post, so this never logs reflection's own output.
+      if (db) await logMessage(db, { projectId, conversationId: thread ?? '', senderId: 'agent', role: 'agent', text: String(text) }).catch(() => {});
       return 'sent';
     },
   });

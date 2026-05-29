@@ -7,8 +7,9 @@
   "name": "hatchery-ticker",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-01",
-  // Cron is UTC, 1-minute minimum. Content cadence wants hours — every 6h.
-  "triggers": { "crons": ["0 */6 * * *"] },
+  // Cron is UTC, 1-minute minimum. 6h backstop heartbeat + nightly REM reflection
+  // at 03:00 KL (= 19:00 UTC, KL is UTC+8).
+  "triggers": { "crons": ["0 */6 * * *", "0 19 * * *"] },
   // Worker→Worker over the public workers.dev URL is blocked on the same account
   // (CF error 1042). A SERVICE BINDING is the supported, private, faster channel:
   // env.HATCHERY.fetch(...) calls the Hatchery worker's fetch handler directly.

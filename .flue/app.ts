@@ -8,6 +8,7 @@ import { bindings, bindingBySlack, bindingByProject, agentInstanceId } from '../
 import { normalizeSlackMessage } from '../src/canonical';
 import { claimEvent, type KVLike } from '../src/idempotency';
 import { loadSkillBody, type D1Like } from '../src/skills';
+import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/reflection';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -120,6 +121,34 @@ app.post('/__internal/scheduled', async (c) => {
   return c.json({ dispatched: true, jobId: body.jobId, skill: input.skill ?? null });
 });
 
+// Nightly REM: the ticker's nightly cron pokes this. The GATE is cheap SQL (projects with
+// messages past their watermark) — idle projects never dispatch a token-costing turn. For each
+// qualifying project we take its batch (advancing the watermark server-side) and hand the
+// transcript INLINE to a fresh consolidation session, so the live agent can't consume the
+// watermark and reflection turns never pollute a real conversation thread.
+app.post('/__internal/reflect-sweep', async (c) => {
+  const expected = c.env.HEARTBEAT_TOKEN;
+  if (!expected || c.req.header('x-hatchery-token') !== expected) return c.body(null, 404);
+  const db = c.env.DB;
+  if (!db) return c.json({ swept: 0, reason: 'no DB binding' });
+
+  const projects = await projectsWithUnreflected(db);
+  const now = new Date().toISOString();
+  let swept = 0;
+  for (const projectId of projects) {
+    const transcript = await takeUnreflectedBatch(db, projectId);
+    if (!transcript) continue; // raced to empty; skip
+    await dispatch({
+      agent: 'project',
+      id: agentInstanceId(projectId),
+      session: `reflect:${projectId}:${Date.now()}`, // fresh session — no carryover, no thread pollution
+      input: { kind: 'heartbeat', now, instructions: buildReflectInstructions(transcript) },
+    });
+    swept++;
+  }
+  return c.json({ swept });
+});
+
 app.post('/slack/events', async (c) => {
   const raw = await c.req.text();
 
@@ -190,6 +219,18 @@ app.post('/slack/events', async (c) => {
     { channel: ev.channel, ts: ev.ts, thread_ts: ev.thread_ts, user: ev.user, text: stripMention(text, binding.transportBotId) },
     binding,
   );
+
+  // Log to the transcript so nightly reflection has something to consolidate (best-effort —
+  // a logging hiccup must never block the reply). We only log conversations the bot is part of.
+  if (c.env.DB) {
+    await logMessage(c.env.DB, {
+      projectId: msg.projectId,
+      conversationId: msg.conversationId,
+      senderId: msg.senderId,
+      role: 'user',
+      text: msg.text,
+    }).catch(() => {});
+  }
 
   await dispatch({
     agent: 'project',

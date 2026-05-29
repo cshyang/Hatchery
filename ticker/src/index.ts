@@ -38,6 +38,23 @@ async function tick(env: Env): Promise<string> {
   return `HTTP ${res.status}: ${body}`;
 }
 
+// Nightly REM: poke Hatchery's reflection sweep. Hatchery's gate (cheap SQL) decides which
+// projects actually have new messages to consolidate, so this is safe to fire unconditionally.
+async function reflectSweep(env: Env): Promise<string> {
+  const res = await env.HATCHERY.fetch(
+    new Request('https://hatchery.internal/__internal/reflect-sweep', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-hatchery-token': env.HEARTBEAT_TOKEN },
+      body: '{}',
+    }),
+  );
+  const body = (await res.text()).slice(0, 160);
+  console.log(`[ticker] nightly reflect-sweep -> HTTP ${res.status}: ${body}`);
+  return `HTTP ${res.status}: ${body}`;
+}
+
+const REFLECT_CRON = '0 19 * * *'; // 03:00 KL
+
 function unauthorized(req: Request, env: Env): boolean {
   return req.headers.get('x-hatchery-token') !== env.HEARTBEAT_TOKEN;
 }
@@ -52,8 +69,8 @@ function unauthorized(req: Request, env: Env): boolean {
 const SCHEDULE_ROUTE = /^\/internal\/projects\/([^/]+)\/schedules(?:\/([^/]+))?$/;
 
 export default {
-  async scheduled(_event: unknown, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<void> {
-    ctx.waitUntil(tick(env));
+  async scheduled(event: { cron?: string }, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<void> {
+    ctx.waitUntil(event.cron === REFLECT_CRON ? reflectSweep(env) : tick(env));
   },
 
   async fetch(req: Request, env: Env): Promise<Response> {
