@@ -64,6 +64,9 @@ app.post('/slack/events', async (c) => {
 
   const ev = body.event;
   // Ignore non-user messages and the bot's own echoes — never dispatch them.
+  // NOTE: dropping any `subtype` also drops `thread_broadcast` (a thread reply
+  // the user chose to also send to the channel) — so that variant won't continue
+  // a thread. Intentional for now; revisit if it bites.
   if (!ev || ev.type !== 'message' || ev.bot_id || ev.subtype || !ev.channel || !ev.ts) {
     return c.body(null, 200);
   }
