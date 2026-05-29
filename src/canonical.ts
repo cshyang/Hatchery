@@ -8,10 +8,10 @@ import type { Binding } from './bindings';
 export interface CanonicalMessage {
   provider: 'slack';
   providerEventId: string;
-  externalTeamId: string;
+  externalAccountId: string; // provider account / workspace (Slack: team id)
   projectId: string;
-  channelId: string;
-  threadTs: string;
+  externalSpaceId: string; // the space / room (Slack: channel id)
+  conversationId: string; // the conversation / thread (Slack: thread_ts, or the message ts)
   senderId: string;
   text: string;
 }
@@ -33,10 +33,10 @@ export function normalizeSlackMessage(
   return {
     provider: 'slack',
     providerEventId: eventId,
-    externalTeamId: teamId,
+    externalAccountId: teamId,
     projectId: binding.projectId,
-    channelId: ev.channel,
-    threadTs: ev.thread_ts ?? ev.ts,
+    externalSpaceId: ev.channel,
+    conversationId: ev.thread_ts ?? ev.ts,
     senderId: ev.user ?? 'unknown',
     text: ev.text ?? '',
   };

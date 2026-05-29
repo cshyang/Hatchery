@@ -30,7 +30,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   }
 
   const env = ctx.env as Record<string, unknown>;
-  const botToken = env[binding.botTokenRef] as string | undefined;
+  const botToken = env[binding.transportTokenRef] as string | undefined;
   const ticker = env.TICKER as { fetch(request: Request): Promise<Response> } | undefined;
   const heartbeatToken = (env.HEARTBEAT_TOKEN as string | undefined) ?? '';
   const db = env.DB as D1Like | undefined;
@@ -59,17 +59,17 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     description: "Send your reply to the user in the project's Slack channel. Call this with your final response text.",
     parameters: Type.Object({
       text: Type.String({ description: 'The message to post.' }),
-      threadTs: Type.Optional(
+      conversationId: Type.Optional(
         Type.String({
           description:
-            "When replying to a user message, copy the threadTs from the [Dispatch Input] block so your reply lands in their thread. OMIT for a heartbeat/new top-level post.",
+            "When replying to a user message, copy the conversationId from the [Dispatch Input] block so your reply lands in their thread. OMIT for a heartbeat/new top-level post.",
         }),
       ),
     }),
-    async execute({ text, threadTs }) {
-      if (!botToken) throw new Error(`Missing Slack bot token env "${binding.botTokenRef}".`);
-      const thread = threadTs ? String(threadTs) : undefined;
-      await postMessage(botToken, binding.externalChannelId, String(text), thread);
+    async execute({ text, conversationId }) {
+      if (!botToken) throw new Error(`Missing bot token env "${binding.transportTokenRef}".`);
+      const thread = conversationId ? String(conversationId) : undefined;
+      await postMessage(botToken, binding.externalSpaceId, String(text), thread);
       return 'sent';
     },
   });

@@ -3,6 +3,7 @@ import { flue } from '@flue/runtime/app';
 import { dispatch } from '@flue/runtime';
 import { verifySlackSignature } from '../src/slack/verify';
 import { botInThread } from '../src/slack/threads';
+import { mentionsBot, stripMention } from '../src/slack/mentions';
 import { bindings, bindingBySlack, bindingByProject, agentInstanceId } from '../src/bindings';
 import { normalizeSlackMessage } from '../src/canonical';
 import { claimEvent, type KVLike } from '../src/idempotency';
@@ -21,18 +22,6 @@ interface Env {
   [binding: string]: unknown;
 }
 
-// Slack renders an @mention as "<@U0B6UB2E5HT>" (or "<@U…|label>"). We engage
-// only when the bot is mentioned, then strip the mention so the model sees a
-// clean message.
-function mentionsBot(text: string, botUserId: string): boolean {
-  return text.includes(`<@${botUserId}`);
-}
-function stripMention(text: string, botUserId: string): string {
-  return text
-    .replace(new RegExp(`<@${botUserId}(\\|[^>]*)?>`, 'g'), '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 // Liveness backstop. The 6h cron poke (and any manual /__heartbeat) wakes each active
 // project with NO specific work — the agent stays silent unless it has a self-scheduled
@@ -179,11 +168,11 @@ app.post('/slack/events', async (c) => {
   //  - reply in a thread the bot already posted in -> continue (no re-mention)
   //  - everything else                            -> stay silent
   const text = ev.text ?? '';
-  if (!mentionsBot(text, binding.botUserId)) {
+  if (!mentionsBot(text, binding.transportBotId)) {
     const threadTs = ev.thread_ts;
-    const token = (c.env as Record<string, string | undefined>)[binding.botTokenRef];
+    const token = (c.env as Record<string, string | undefined>)[binding.transportTokenRef];
     const continuing =
-      !!threadTs && !!token && (await botInThread(token, ev.channel, threadTs, binding.botUserId));
+      !!threadTs && !!token && (await botInThread(token, ev.channel, threadTs, binding.transportBotId));
     if (!continuing) return c.body(null, 200);
   }
 
@@ -198,21 +187,22 @@ app.post('/slack/events', async (c) => {
   const msg = normalizeSlackMessage(
     body.event_id ?? `${ev.channel}:${ev.ts}`,
     body.team_id ?? '',
-    { channel: ev.channel, ts: ev.ts, thread_ts: ev.thread_ts, user: ev.user, text: stripMention(text, binding.botUserId) },
+    { channel: ev.channel, ts: ev.ts, thread_ts: ev.thread_ts, user: ev.user, text: stripMention(text, binding.transportBotId) },
     binding,
   );
 
   await dispatch({
     agent: 'project',
     id: agentInstanceId(msg.projectId),
-    session: `slack-thread:${msg.threadTs}`,
-    // Forward the author identity so the agent can scope `user` memory to the person talking.
-    // senderId is fully qualified into a subject (`slack:<team>:<user>`) in the agent.
+    session: `conv:${msg.conversationId}`,
+    // Forward the author identity in neutral terms so history retains who said what — the
+    // future reflection job reads senderId from it to attribute facts. (The initializer itself
+    // can't see this; only the model does.)
     input: {
       message: msg.text,
-      threadTs: msg.threadTs,
+      conversationId: msg.conversationId,
       provider: msg.provider,
-      teamId: msg.externalTeamId,
+      accountId: msg.externalAccountId,
       senderId: msg.senderId,
     },
   });

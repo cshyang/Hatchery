@@ -92,11 +92,11 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
   blocks.push(
     `HOW YOU WORK (fixed)\n` +
       `Each turn arrives as a "[Dispatch Input]" block — read the JSON under "input:" and act on it:\n` +
-      `• "message" field → a person's Slack message. Respond helpfully and concisely; pass its "threadTs" to ` +
+      `• "message" field → a person's message. Respond helpfully and concisely; pass its "conversationId" to ` +
       `reply_in_channel so your reply lands in their thread.\n` +
       `• "kind":"heartbeat" → a scheduled/self-triggered run, nobody waiting. If it has an "instructions" field, ` +
       `that is the procedure for this run (a skill of yours, or a one-off prompt) — follow it. Else address the ` +
-      `"topic" if one is given. If there is nothing meaningful to do, stay silent. When you do post, omit threadTs.\n` +
+      `"topic" if one is given. If there is nothing meaningful to do, stay silent. When you do post, omit conversationId.\n` +
       `• reply_in_channel is the ONLY way your words reach the channel — your plain text is NOT delivered. Don't ` +
       `mention tools or the dispatch envelope.`,
   );

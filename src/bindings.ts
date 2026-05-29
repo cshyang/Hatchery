@@ -34,11 +34,13 @@ export function parseAgentInstanceId(id: string): { projectId: string; slug: str
 
 export interface Binding {
   provider: 'slack';
-  externalTeamId: string;
-  externalChannelId: string;
-  /** The bot's own Slack user id (e.g. "U…"). Used to detect @mentions and to
-   *  check whether the bot is already participating in a thread. From auth.test. */
-  botUserId: string;
+  /** Provider account / workspace (Slack: team id). */
+  externalAccountId: string;
+  /** The space / room this project is bound to (Slack: channel id). */
+  externalSpaceId: string;
+  /** The transport's own id, used to detect when it's addressed/participating (Slack: bot user id).
+   *  Consumed by provider-specific engagement logic (e.g. Slack @mention parsing). From auth.test. */
+  transportBotId: string;
   projectId: string;
   defaultProfile: string;
   /** Model id passed to Flue (e.g. "zai/glm-5.1"). Optional → DEFAULT_MODEL. Per-project so a
@@ -47,30 +49,30 @@ export interface Binding {
   model?: string;
   /** No-op today (always 'virtual'); the seam that lets a project graduate to a real sandbox later. */
   sandboxMode: SandboxMode;
-  /** Name of the env var / secret holding this project's Slack bot token. Tokens never live in code or prompts. */
-  botTokenRef: string;
+  /** Name of the env var / secret holding this transport's token. Tokens never live in code or prompts. */
+  transportTokenRef: string;
   status: 'active' | 'disabled';
 }
 
 export const bindings: readonly Binding[] = [
   {
     provider: 'slack',
-    externalTeamId: 'T0B6VB415TQ', // Slack workspace/team id (Ecodark)
-    externalChannelId: 'C0B6VFMVCUW', // the bound channel id
-    botUserId: 'U0B6UB2E5HT', // hatch_agent's user id (auth.test)
+    externalAccountId: 'T0B6VB415TQ', // Slack workspace/team id (Ecodark)
+    externalSpaceId: 'C0B6VFMVCUW', // the bound channel id
+    transportBotId: 'U0B6UB2E5HT', // hatch_agent's bot user id (auth.test)
     projectId: 'demo',
     defaultProfile: 'project-assistant',
     model: 'zai/glm-5.1',
     sandboxMode: 'virtual',
-    botTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
+    transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
     status: 'active',
   },
 ];
 
-/** Route an inbound Slack event to its project. Only active bindings match. */
-export function bindingBySlack(teamId: string, channelId: string): Binding | undefined {
+/** Route an inbound message to its project by provider account + space. Only active bindings match. */
+export function bindingBySlack(accountId: string, spaceId: string): Binding | undefined {
   return bindings.find(
-    (b) => b.externalTeamId === teamId && b.externalChannelId === channelId && b.status === 'active',
+    (b) => b.externalAccountId === accountId && b.externalSpaceId === spaceId && b.status === 'active',
   );
 }
 
