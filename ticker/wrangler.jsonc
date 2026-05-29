@@ -12,6 +12,12 @@
   // Worker→Worker over the public workers.dev URL is blocked on the same account
   // (CF error 1042). A SERVICE BINDING is the supported, private, faster channel:
   // env.HATCHERY.fetch(...) calls the Hatchery worker's fetch handler directly.
-  "services": [{ "binding": "HATCHERY", "service": "hatchery" }]
+  "services": [{ "binding": "HATCHERY", "service": "hatchery" }],
   // HEARTBEAT_TOKEN is a secret (wrangler secret put) — must match Hatchery's.
+
+  // The durable timer the agent programs. One instance per project (getByName).
+  "durable_objects": {
+    "bindings": [{ "name": "SCHEDULER", "class_name": "SchedulerDO" }]
+  },
+  "migrations": [{ "tag": "v1-scheduler", "new_sqlite_classes": ["SchedulerDO"] }]
 }

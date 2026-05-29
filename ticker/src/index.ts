@@ -1,46 +1,89 @@
-// Hatchery heartbeat ticker. On each cron tick, call Hatchery's /__heartbeat,
-// which wakes the project agent(s) to do autonomous content work. This is the
-// external "clock" — Flue's generated Worker entry forwards only `fetch`, so a
-// Flue app can't host a `scheduled()` handler itself.
+// Hatchery scheduler worker (deploy name: hatchery-ticker).
+//
+// Two responsibilities:
+//   1. SchedulerDO — the durable per-project alarm the agent programs via its
+//      `schedule_self` tool. This is the "agent schedules its own work" engine.
+//      Flue can't host an alarm (it abstracts the DO away), so it lives here in a
+//      plain Worker. See ./scheduler.ts.
+//   2. Cron backstop — a fixed-cadence heartbeat-of-last-resort. If a turn crashes
+//      before re-arming its schedule, the project would otherwise go dark forever;
+//      this keeps a baseline beat. (Flue's generated entry forwards only `fetch`,
+//      so the cron can't live in Hatchery itself.)
 //
 // Worker→Worker on the same account is blocked over the public workers.dev URL
-// (CF error 1042), so we reach Hatchery via a SERVICE BINDING (env.HATCHERY),
-// which invokes its fetch handler directly — private and fast.
+// (CF error 1042), so we reach Hatchery via a SERVICE BINDING (env.HATCHERY).
+
+import { SchedulerDO } from './scheduler';
+
+export { SchedulerDO };
 
 interface Env {
   HATCHERY: { fetch(request: Request): Promise<Response> };
+  SCHEDULER: DurableObjectNamespace<SchedulerDO>;
   HEARTBEAT_TOKEN: string;
 }
 
+// Cron backstop: fire the default heartbeat across active projects. Separate path
+// from the SchedulerDO's per-job fires — this is the safety net, not the engine.
 async function tick(env: Env): Promise<string> {
-  // Host is irrelevant over a service binding — only the path routes. Token still
-  // sent so the same /__heartbeat guard works for the public path too.
   const res = await env.HATCHERY.fetch(
     new Request('https://hatchery.internal/__heartbeat', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-hatchery-token': env.HEARTBEAT_TOKEN },
-      body: '{}', // v1: default topic on the Hatchery side. Later: per-project topic/cadence.
+      body: '{}',
     }),
   );
   const body = (await res.text()).slice(0, 160);
-  console.log(`[ticker] heartbeat -> HTTP ${res.status}: ${body}`);
+  console.log(`[ticker] backstop heartbeat -> HTTP ${res.status}: ${body}`);
   return `HTTP ${res.status}: ${body}`;
 }
 
+function unauthorized(req: Request, env: Env): boolean {
+  return req.headers.get('x-hatchery-token') !== env.HEARTBEAT_TOKEN;
+}
+
+// Agent-facing schedule API, routed to the per-project SchedulerDO. Reached from
+// Hatchery's `schedule_self` tool over the TICKER service binding. Publicly
+// addressable (this worker has a workers.dev URL), so token-guard every route.
+//   POST   /internal/projects/:projectId/schedules        -> enqueue (add/replace)
+//   GET    /internal/projects/:projectId/schedules        -> list
+//   DELETE /internal/projects/:projectId/schedules/:jobId  -> cancel
+const SCHEDULE_ROUTE = /^\/internal\/projects\/([^/]+)\/schedules(?:\/([^/]+))?$/;
+
 export default {
-  // Cron-driven: the production entry point.
   async scheduled(_event: unknown, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<void> {
     ctx.waitUntil(tick(env));
   },
-  // Liveness + a token-guarded manual trigger (POST /run) to fire a tick on demand.
+
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
-    if (req.method === 'POST' && url.pathname === '/run') {
-      if (req.headers.get('x-hatchery-token') !== env.HEARTBEAT_TOKEN) {
-        return new Response('not found', { status: 404 });
+
+    const m = url.pathname.match(SCHEDULE_ROUTE);
+    if (m) {
+      if (unauthorized(req, env)) return new Response('not found', { status: 404 });
+      const projectId = decodeURIComponent(m[1]);
+      const jobId = m[2] ? decodeURIComponent(m[2]) : undefined;
+      const scheduler = env.SCHEDULER.getByName(projectId);
+
+      if (req.method === 'POST' && !jobId) {
+        const args = (await req.json()) as Parameters<SchedulerDO['enqueue']>[1];
+        return Response.json(await scheduler.enqueue(projectId, args));
       }
+      if (req.method === 'GET' && !jobId) {
+        return Response.json(await scheduler.list());
+      }
+      if (req.method === 'DELETE' && jobId) {
+        return Response.json(await scheduler.cancel(jobId));
+      }
+      return new Response('method not allowed', { status: 405 });
+    }
+
+    // Token-guarded manual trigger of the cron backstop, for on-demand testing.
+    if (req.method === 'POST' && url.pathname === '/run') {
+      if (unauthorized(req, env)) return new Response('not found', { status: 404 });
       return new Response(`ticked -> ${await tick(env)}\n`);
     }
-    return new Response('hatchery-ticker: alive (cron-driven)\n');
+
+    return new Response('hatchery-scheduler: alive\n');
   },
 };

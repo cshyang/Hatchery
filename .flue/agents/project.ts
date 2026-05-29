@@ -28,6 +28,13 @@ export default createAgent((ctx): AgentRuntimeConfig => {
 
   const env = ctx.env as Record<string, string | undefined>;
   const botToken = env[binding.botTokenRef];
+  // Service binding to the scheduler worker (an object, not a string) + the shared
+  // token. Tools close over ctx.env just like the bot token above — the "no DO
+  // context" limit is about `this`/the session, not env.
+  const ticker = (ctx.env as Record<string, unknown>).TICKER as
+    | { fetch(request: Request): Promise<Response> }
+    | undefined;
+  const heartbeatToken = env['HEARTBEAT_TOKEN'];
 
   const replyInChannel = defineTool({
     name: 'reply_in_channel',
@@ -51,6 +58,45 @@ export default createAgent((ctx): AgentRuntimeConfig => {
     },
   });
 
+  // Self-scheduling: the agent programs its own future wake-ups. The durable timer
+  // lives in the scheduler worker (Flue can't host a DO alarm); this tool just
+  // enqueues. On fire, that worker calls /__internal/scheduled which dispatches a
+  // fresh heartbeat turn back to this agent in a session scoped to the schedule id.
+  const scheduleSelf = defineTool({
+    name: 'schedule_self',
+    description:
+      'Schedule a future wake-up for yourself to do autonomous work. Give each schedule a stable `id` ' +
+      '(reuse an id to replace/update it; a new id adds another — you can hold several at once). ' +
+      'Provide ONE timing: `inMs` (wake once after this many ms), `runAt` (wake once at this epoch-ms time; ' +
+      'use the "now" field from your input to compute it), or `everyMs` (recurring interval). Put what to work ' +
+      'on in `payload.topic`. When it fires you get a fresh turn with kind "heartbeat" and your payload.',
+    parameters: Type.Object({
+      id: Type.String({ description: 'Stable schedule id, e.g. "daily-tip" or "oneshot-launch-recap".' }),
+      inMs: Type.Optional(Type.Number({ description: 'One-shot delay from now, in milliseconds (120000 = 2 min).' })),
+      runAt: Type.Optional(Type.Number({ description: 'One-shot absolute time, epoch milliseconds.' })),
+      everyMs: Type.Optional(Type.Number({ description: 'Recurring interval in ms; first run one interval from now.' })),
+      payload: Type.Optional(
+        Type.Object(
+          { topic: Type.Optional(Type.String({ description: 'What to work on / write about when this wakes you.' })) },
+          { additionalProperties: true },
+        ),
+      ),
+    }),
+    async execute({ id, inMs, runAt, everyMs, payload }) {
+      if (!ticker) throw new Error('Scheduling is unavailable (no TICKER binding configured).');
+      const res = await ticker.fetch(
+        new Request(`https://scheduler.internal/internal/projects/${encodeURIComponent(projectId)}/schedules`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-hatchery-token': heartbeatToken ?? '' },
+          body: JSON.stringify({ id, kind: 'heartbeat', inMs, runAt, everyMs, payload }),
+        }),
+      );
+      if (!res.ok) throw new Error(`scheduler rejected (${res.status}): ${(await res.text()).slice(0, 120)}`);
+      const out = (await res.json()) as { id: string; nextRun: number };
+      return `scheduled "${out.id}" — next run ${new Date(out.nextRun).toISOString()}`;
+    },
+  });
+
   return {
     model: 'zai/glm-5.1',
     instructions:
@@ -61,8 +107,11 @@ export default createAgent((ctx): AgentRuntimeConfig => {
       `• If it has "kind":"heartbeat", there is NO user — this is a scheduled run. Write a concise, engaging ` +
       `blog-style draft (a short title plus a few tight paragraphs) on the "topic" field, then post it with ` +
       `reply_in_channel and OMIT threadTs (it is a new top-level post for the team to review).\n` +
+      `• You can schedule your OWN future work with schedule_self — recurring (everyMs) or one-shot (inMs/runAt). ` +
+      `The "now" field (ISO time) is provided for computing absolute runAt values. Use a stable id per schedule, ` +
+      `pick sensible cadences, and don't over-schedule.\n` +
       `Your plain text is NOT delivered — reply_in_channel is the ONLY way your words reach the channel, so ` +
       `always call it with your final output. Do not mention the tool or the dispatch envelope.`,
-    tools: [replyInChannel],
+    tools: [replyInChannel, scheduleSelf],
   };
 });

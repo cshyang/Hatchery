@@ -5,5 +5,9 @@
   "compatibility_flags": ["nodejs_compat"],
   "kv_namespaces": [
     { "binding": "SLACK_EVENTS", "id": "21c63a4fa37540159e6e8b0a1ac19b66" }
-  ]
+  ],
+  // Reverse channel: the agent's schedule_self tool reaches the SchedulerDO in the
+  // scheduler worker via env.TICKER (service binding avoids CF 1042). Flue MERGES
+  // user wrangler config, so this survives the build — verified post-build.
+  "services": [{ "binding": "TICKER", "service": "hatchery-ticker" }]
 }

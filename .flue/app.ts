@@ -3,7 +3,7 @@ import { flue } from '@flue/runtime/app';
 import { dispatch } from '@flue/runtime';
 import { verifySlackSignature } from '../src/slack/verify';
 import { botInThread } from '../src/slack/threads';
-import { bindings, bindingBySlack } from '../src/bindings';
+import { bindings, bindingBySlack, bindingByProject } from '../src/bindings';
 import { normalizeSlackMessage } from '../src/canonical';
 import { claimEvent, type KVLike } from '../src/idempotency';
 
@@ -72,6 +72,39 @@ app.post('/__heartbeat', async (c) => {
   }
   const dispatched = await fireHeartbeat(topic);
   return c.json({ dispatched, topic });
+});
+
+// Per-job fire from the SchedulerDO (the agent's self-scheduled work). Unlike
+// /__heartbeat (which fans out to every active project), this targets ONE project,
+// in a session dedicated to the job id so each named schedule keeps its own memory.
+// `fireId` makes it idempotent against alarm retries via the same KV claim layer.
+app.post('/__internal/scheduled', async (c) => {
+  const expected = c.env.HEARTBEAT_TOKEN;
+  if (!expected || c.req.header('x-hatchery-token') !== expected) return c.body(null, 404);
+
+  const body = (await c.req.json().catch(() => null)) as {
+    fireId?: string;
+    projectId?: string;
+    jobId?: string;
+    kind?: string;
+    payload?: Record<string, unknown>;
+  } | null;
+  if (!body?.fireId || !body.projectId || !body.jobId) return c.json({ error: 'bad request' }, 400);
+
+  if (!(await claimEvent(c.env.SLACK_EVENTS, `sched:${body.fireId}`))) {
+    return c.json({ deduped: true }); // alarm retry / double-fire — already dispatched
+  }
+
+  const binding = bindingByProject(body.projectId);
+  if (!binding || binding.status !== 'active') return c.json({ skipped: 'no active binding' });
+
+  await dispatch({
+    agent: 'project',
+    id: `project:${body.projectId}`,
+    session: `job:${body.projectId}:${body.jobId}`,
+    input: { kind: body.kind ?? 'heartbeat', now: new Date().toISOString(), ...(body.payload ?? {}) },
+  });
+  return c.json({ dispatched: true, jobId: body.jobId });
 });
 
 app.post('/slack/events', async (c) => {
