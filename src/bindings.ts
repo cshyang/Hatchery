@@ -8,6 +8,9 @@
 
 export type SandboxMode = 'virtual' | 'cloudflare-sandbox' | 'daytona' | 'e2b';
 
+/** Default model when a binding doesn't pin one. */
+export const DEFAULT_MODEL = 'zai/glm-5.1';
+
 export interface Binding {
   provider: 'slack';
   externalTeamId: string;
@@ -17,6 +20,10 @@ export interface Binding {
   botUserId: string;
   projectId: string;
   defaultProfile: string;
+  /** Model id passed to Flue (e.g. "zai/glm-5.1"). Optional → DEFAULT_MODEL. Per-project so a
+   *  project can run a different model; the prompt itself is model-agnostic. NOTE: a non-default
+   *  model also needs Flue provider routing + creds to actually run — this field is just the seam. */
+  model?: string;
   /** No-op today (always 'virtual'); the seam that lets a project graduate to a real sandbox later. */
   sandboxMode: SandboxMode;
   /** Name of the env var / secret holding this project's Slack bot token. Tokens never live in code or prompts. */
@@ -32,6 +39,7 @@ export const bindings: readonly Binding[] = [
     botUserId: 'U0B6UB2E5HT', // hatch_agent's user id (auth.test)
     projectId: 'demo',
     defaultProfile: 'project-assistant',
+    model: 'zai/glm-5.1',
     sandboxMode: 'virtual',
     botTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
     status: 'active',
