@@ -1,0 +1,17 @@
+{
+  // Hatchery heartbeat ticker — a SEPARATE, plain Cloudflare Worker (NOT a Flue
+  // app), because Flue's generated entry forwards only `fetch` and drops
+  // `scheduled()`. This worker hosts the cron and pokes Hatchery's /__heartbeat
+  // on a schedule — the recurring "clock" Flue can't host itself.
+  "$schema": "https://workers.cloudflare.com/schema/wrangler.json",
+  "name": "hatchery-ticker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-01",
+  // Cron is UTC, 1-minute minimum. Content cadence wants hours — every 6h.
+  "triggers": { "crons": ["0 */6 * * *"] },
+  // Worker→Worker over the public workers.dev URL is blocked on the same account
+  // (CF error 1042). A SERVICE BINDING is the supported, private, faster channel:
+  // env.HATCHERY.fetch(...) calls the Hatchery worker's fetch handler directly.
+  "services": [{ "binding": "HATCHERY", "service": "hatchery" }]
+  // HEARTBEAT_TOKEN is a secret (wrangler secret put) — must match Hatchery's.
+}
