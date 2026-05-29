@@ -3,7 +3,7 @@ import { flue } from '@flue/runtime/app';
 import { dispatch } from '@flue/runtime';
 import { verifySlackSignature } from '../src/slack/verify';
 import { botInThread } from '../src/slack/threads';
-import { bindingBySlack } from '../src/bindings';
+import { bindings, bindingBySlack } from '../src/bindings';
 import { normalizeSlackMessage } from '../src/canonical';
 import { claimEvent, type KVLike } from '../src/idempotency';
 
@@ -15,6 +15,7 @@ import { claimEvent, type KVLike } from '../src/idempotency';
 interface Env {
   SLACK_SIGNING_SECRET?: string;
   SLACK_EVENTS?: KVLike; // KV namespace for event_id idempotency
+  HEARTBEAT_TOKEN?: string; // shared secret guarding the /__heartbeat trigger
   [binding: string]: unknown;
 }
 
@@ -31,7 +32,47 @@ function stripMention(text: string, botUserId: string): string {
     .trim();
 }
 
+// M1a heartbeat (scaffold). Flue's generated entry forwards ONLY `fetch`, so a
+// Cloudflare Cron Trigger (which calls `scheduled()`) cannot reach us. The
+// recurring tick therefore lives OUTSIDE Flue — an external ticker hitting this
+// fetch endpoint, or (M1.5) the per-project DO `this.schedule()` seam. This just
+// fires one heartbeat run on demand: dispatch a headless "do work" turn per
+// active project; the agent drafts on the topic and posts top-level to Slack.
+const DEFAULT_HEARTBEAT_TOPIC = 'a useful, evergreen tip for our audience'; // M1a placeholder; M1b sources topics from research/PostHog
+
+async function fireHeartbeat(topic: string): Promise<number> {
+  const active = bindings.filter((b) => b.status === 'active');
+  await Promise.all(
+    active.map((b) =>
+      dispatch({
+        agent: 'project',
+        id: `project:${b.projectId}`,
+        session: `heartbeat:${b.projectId}`,
+        input: { kind: 'heartbeat', topic },
+      }),
+    ),
+  );
+  return active.length;
+}
+
 const app = new Hono<{ Bindings: Env }>();
+
+// Manual heartbeat trigger. Token-guarded (inert unless HEARTBEAT_TOKEN is set
+// and the x-hatchery-token header matches) so it can't be fired publicly. An
+// optional {topic} in the body overrides the default.
+app.post('/__heartbeat', async (c) => {
+  const expected = c.env.HEARTBEAT_TOKEN;
+  if (!expected || c.req.header('x-hatchery-token') !== expected) return c.body(null, 404);
+  let topic = DEFAULT_HEARTBEAT_TOPIC;
+  try {
+    const body = (await c.req.json()) as { topic?: string };
+    if (body?.topic) topic = String(body.topic);
+  } catch {
+    // no/invalid body → default topic
+  }
+  const dispatched = await fireHeartbeat(topic);
+  return c.json({ dispatched, topic });
+});
 
 app.post('/slack/events', async (c) => {
   const raw = await c.req.text();
