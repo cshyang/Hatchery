@@ -1,5 +1,5 @@
-// System-prompt assembly for the project agent — Hatchery's analog of Hermes's
-// agent/prompt_builder.py, scaled to this agent's surface.
+// System-prompt assembly for the project agent — a block-composed system prompt scaled to
+// this agent's surface.
 //
 // The prompt is COMPOSED from blocks and ordered stable-first so models with prefix
 // caching stay warm across turns: identity and fixed mechanics never change, so they
@@ -52,13 +52,22 @@ const SLACK_FORMATTING =
   `for code blocks, and <https://example.com|label> for links. Standard Markdown — **double-asterisk ` +
   `bold**, # headings, and [label](url) links — does NOT render in Slack; avoid it.`;
 
+// Guidance on AUTHORING skills — kept consistent whether or not the catalog is empty, because
+// the failure mode of a self-improving agent is skill SPRAWL (many narrow one-off skills nobody
+// finds), not too few skills. So: write broad/class-level, extend before adding, archive (never
+// silently abandon) what's wrong. Discovery matches on descriptions, so one umbrella skill with
+// labelled sections beats five narrow siblings.
+const SKILL_AUTHORING =
+  `When a procedure is reusable, capture it with save_skill (full SKILL.md text) — you can schedule it ` +
+  `later with set_reminder. Write skills BROAD and class-level, about a screenful: one "research a topic" ` +
+  `skill, not five near-duplicates. Before adding one, check your list — if a similar skill exists, EXTEND ` +
+  `it (save_skill with its name overwrites) rather than create a sibling. If a skill is wrong or stale, fix ` +
+  `it with save_skill; if it's obsolete or folded into another, archive_skill it (reversible — restore_skill ` +
+  `brings it back). Don't hoard dead skills.`;
+
 function skillsBlock(catalog: { name: string; description: string }[]): string {
   if (!catalog.length) {
-    return (
-      `YOUR SKILLS\n` +
-      `You have no saved skills yet. When a repeatable procedure emerges, capture it with save_skill ` +
-      `(full SKILL.md text); you can schedule it later with set_reminder.`
-    );
+    return `YOUR SKILLS\n` + `You have no saved skills yet. ${SKILL_AUTHORING}`;
   }
   const list = catalog.map((s) => `  - ${s.name}: ${s.description}`).join('\n');
   return (
@@ -67,8 +76,7 @@ function skillsBlock(catalog: { name: string; description: string }[]): string {
     `load_skill and follow it. Err on the side of loading; better to have context you don't need than to miss ` +
     `a step or convention.\n` +
     `${list}\n` +
-    `Capture a new reusable procedure with save_skill; if a skill you used was wrong or incomplete, fix it with ` +
-    `save_skill before finishing; remove one with delete_skill.`
+    SKILL_AUTHORING
   );
 }
 

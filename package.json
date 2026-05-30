@@ -7,7 +7,7 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "tsx src/memory.test.ts && tsx src/reflection.test.ts"
+    "test": "tsx src/memory.test.ts && tsx src/reflection.test.ts && tsx src/skills.test.ts"
   },
   "keywords": [],
   "author": "",

@@ -25,7 +25,9 @@ const stmts = readdirSync(dir)
     const name = fm.match(/^name:\s*(.+)$/m)[1].trim();
     const description = fm.match(/^description:\s*(.+)$/m)[1].trim();
     if (description.length > 1024) throw new Error(`${name}: description exceeds 1024 chars`);
-    return `INSERT INTO skills(project_id,name,description,body_md,updated_at) VALUES('${esc(projectId)}','${esc(name)}','${esc(description)}','${esc(md)}',1780000000000) ON CONFLICT(project_id,name) DO UPDATE SET description=excluded.description, body_md=excluded.body_md, updated_at=excluded.updated_at;`;
+    // created_by='seed' marks these as platform-shipped starters (vs 'agent' for self-authored);
+    // state='active' + archived_at=NULL so a re-seed also reactivates anything the agent archived.
+    return `INSERT INTO skills(project_id,name,description,body_md,state,created_by,updated_by,created_at,updated_at,archived_at) VALUES('${esc(projectId)}','${esc(name)}','${esc(description)}','${esc(md)}','active','seed','seed',1780000000000,1780000000000,NULL) ON CONFLICT(project_id,name) DO UPDATE SET description=excluded.description, body_md=excluded.body_md, state='active', updated_by='seed', updated_at=excluded.updated_at, archived_at=NULL;`;
   });
 
 process.stdout.write(stmts.join('\n') + '\n');

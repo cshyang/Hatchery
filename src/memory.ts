@@ -1,5 +1,5 @@
 // Agent memory: durable, declarative facts injected into the prompt every turn (the "what
-// it knows"). Mirrors Hermes's first-class memory, scaled to D1 + this multi-tenant agent.
+// it knows"). First-class durable memory, scaled to D1 + this multi-tenant agent.
 //
 // v1 is PROJECT-SCOPED ONLY — shared channel facts, keyed by projectId, injected every turn
 // (incl. autonomous heartbeats). Facts about people live here too, as shared channel knowledge
@@ -9,12 +9,12 @@
 // tools) blind to the turn's author — `ctx.payload` is `undefined` on dispatch, and only the
 // MODEL sees senderId (in the [Dispatch Input] block). So neither the initializer can inject
 // per-author memory nor a tool can attribute a write server-side. The planned path is a
-// self-scheduled "reflection" job (the Hermes Curator pattern, reusing the SchedulerDO) that
+// self-scheduled "reflection" job (the nightly REM curator pattern, reusing the SchedulerDO) that
 // reads a thread's history — which DOES retain senderId — and distils durable facts into this
 // project store. The `memories` schema already reserves scope='user'/'agent' for when a true
 // per-user-private path (app.ts injecting the author's facts into the input) earns its keep.
 //
-// Borrowed from Hermes: bounds + usage header, id-scoped edit/delete, dedupe. CUT (don't apply
+// Design: bounds + usage header, id-scoped edit/delete, dedupe. CUT (don't apply
 // to D1 / a positional-cache prompt): file locks, .bak drift detection, the frozen snapshot
 // (we load live every turn — a fact saved this turn shows up next turn), and regex injection-
 // scanning (the real defense is the framing in renderMemory + tool-bound FUNCTION).

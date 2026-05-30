@@ -1,7 +1,7 @@
 import { createAgent, defineTool, Type, type AgentRuntimeConfig, type ToolDefinition } from '@flue/runtime';
 import { bindingByProject, parseAgentInstanceId, DEFAULT_MODEL } from '../../src/bindings';
 import { postMessage } from '../../src/slack/post';
-import { skillTools, loadSkillCatalog, loadSkillBody, skillBody, type D1Like } from '../../src/skills';
+import { skillTools, loadSkillCatalog, loadActiveSkillBody, skillBody, type D1Like } from '../../src/skills';
 import { reminderTools } from '../../src/reminders';
 import { buildInstructions } from '../../src/prompt';
 import { loadProjectMemory, memoryTools, renderMemory } from '../../src/memory';
@@ -43,7 +43,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   // else below is fixed FUNCTION. Loaded eagerly (not on demand) so it colors all output.
   const personality =
     db && skills.some((s) => s.name === 'personality')
-      ? await loadSkillBody(db, projectId, 'personality').catch(() => null)
+      ? await loadActiveSkillBody(db, projectId, 'personality').catch(() => null)
       : null;
   const catalog = skills.filter((s) => s.name !== 'personality'); // applied above, not load-on-demand
 

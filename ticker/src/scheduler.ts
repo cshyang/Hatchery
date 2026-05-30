@@ -11,7 +11,7 @@
 // One instance per project (getByName(projectId)) — matches Hatchery's
 // DO-per-project tenancy. Cloudflare gives one alarm per DO, so we multiplex: many
 // jobs in the table, the alarm points at min(next_run), and `alarm()` fires all due
-// jobs then re-arms to the next-soonest (the agents-SDK / Hermes pattern).
+// jobs then re-arms to the next-soonest (the agents-SDK multiplexed-alarm pattern).
 
 import { DurableObject } from 'cloudflare:workers';
 import { nextCron, isValidCron, KL_OFFSET_MIN } from './cron';
@@ -122,7 +122,7 @@ export class SchedulerDO extends DurableObject<Env> {
     return { cancelled: id };
   }
 
-  // Pause (enabled=0) or resume (enabled=1) — Hermes-style. Paused jobs are skipped
+  // Pause (enabled=0) or resume (enabled=1). Paused jobs are skipped
   // by rearm()/alarm() but kept, so resume picks them back up.
   async setEnabled(id: string, enabled: boolean): Promise<{ id: string; enabled: boolean; found: boolean }> {
     const cur = this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM jobs WHERE id=?', id).one();

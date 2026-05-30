@@ -7,7 +7,7 @@ import { mentionsBot, stripMention } from '../src/slack/mentions';
 import { bindings, bindingBySlack, bindingByProject, agentInstanceId } from '../src/bindings';
 import { normalizeSlackMessage } from '../src/canonical';
 import { claimEvent, type KVLike } from '../src/idempotency';
-import { loadSkillBody, type D1Like } from '../src/skills';
+import { loadRunnableSkillBody, type D1Like } from '../src/skills';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/reflection';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
@@ -88,18 +88,26 @@ app.post('/__internal/scheduled', async (c) => {
   const binding = bindingByProject(body.projectId);
   if (!binding || binding.status !== 'active') return c.json({ skipped: 'no active binding' });
 
-  // Reference, not copy: a reminder holds a skill NAME; load the body FRESH here so
-  // edits to the skill apply to all future scheduled runs.
+  // Reference, not copy: a reminder holds a skill NAME; resolve it FRESH here so edits to the
+  // skill apply to all future scheduled runs. An archived skill is REFUSED (not run, not silently
+  // dropped): archived = retired from automation, so running its stale steps on a schedule would be
+  // a footgun. The agent can restore_skill or repoint/cancel the reminder.
   const payload = (body.payload ?? {}) as { skill?: string; prompt?: string; topic?: string };
   const input: Record<string, unknown> = { kind: body.kind ?? 'heartbeat', now: new Date().toISOString() };
-  // skill body + one-off prompt are both "the procedure for this run" (Hermes semantics):
-  // follow them. `topic` is the legacy blog-on-a-subject path (the default 6h backstop).
+  // skill body + one-off prompt are both "the procedure for this run": follow them. `topic` is the
+  // legacy blog-on-a-subject path (the default 6h backstop).
   let procedure = '';
   if (payload.skill) {
-    const skillBody = c.env.DB ? await loadSkillBody(c.env.DB, body.projectId, payload.skill) : null;
-    if (skillBody) {
+    const resolved = c.env.DB
+      ? await loadRunnableSkillBody(c.env.DB, body.projectId, payload.skill)
+      : ({ status: 'absent' } as const);
+    if (resolved.status === 'active') {
       input.skill = payload.skill;
-      procedure = skillBody;
+      procedure = resolved.body;
+    } else if (resolved.status === 'archived') {
+      console.log(
+        `[scheduled] skill "${payload.skill}" is archived for project ${body.projectId} — refusing stale automation; restore it or repoint the reminder`,
+      );
     } else {
       console.log(`[scheduled] skill "${payload.skill}" not found for project ${body.projectId}`);
     }
