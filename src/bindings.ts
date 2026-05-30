@@ -76,10 +76,10 @@ export const bindings: readonly Binding[] = [
     model: 'zai/glm-5.1',
     sandboxMode: 'virtual',
     transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
-    // GitHub connection (ADR 0003). Shows as "not connected" until the GITHUB_PAT_DEMO Worker
-    // secret is set (`wrangler secret put GITHUB_PAT_DEMO`). Set `config.repo` to the real
-    // owner/name before going live — it's the default repo for the read tools.
-    connections: [{ provider: 'github', tokenRef: 'GITHUB_PAT_DEMO', config: { repo: 'OWNER/REPO' } }],
+    // GitHub connection (ADR 0003). Shows as "not connected" until the GITHUB_PAT_ECODARK Worker
+    // secret is set (`wrangler secret put GITHUB_PAT_ECODARK --name hatchery`). config.repo is the
+    // default repo for the read tools when the model omits owner/name.
+    connections: [{ provider: 'github', tokenRef: 'GITHUB_PAT_ECODARK', config: { repo: 'ecodark/website' } }],
     status: 'active',
   },
 ];
