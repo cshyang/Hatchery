@@ -78,5 +78,5 @@ export function bindingBySlack(accountId: string, spaceId: string): Binding | un
 
 /** Resolve a project's binding from an agent instance id. */
 export function bindingByProject(projectId: string): Binding | undefined {
-  return bindings.find((b) => b.projectId === projectId);
+  return bindings.find((b) => b.projectId === projectId && b.status === 'active');
 }

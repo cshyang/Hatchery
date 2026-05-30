@@ -11,7 +11,8 @@ export interface CanonicalMessage {
   externalAccountId: string; // provider account / workspace (Slack: team id)
   projectId: string;
   externalSpaceId: string; // the space / room (Slack: channel id)
-  conversationId: string; // the conversation / thread (Slack: thread_ts, or the message ts)
+  conversationId: string; // Hatchery-stable id: provider/account/space/native conversation
+  externalConversationId: string; // provider-native conversation/thread id (Slack: thread_ts, or message ts)
   senderId: string;
   text: string;
 }
@@ -30,14 +31,16 @@ export function normalizeSlackMessage(
   ev: SlackMessageEvent,
   binding: Binding,
 ): CanonicalMessage {
+  const externalConversationId = ev.thread_ts ?? ev.ts;
   return {
     provider: 'slack',
     providerEventId: eventId,
     externalAccountId: teamId,
     projectId: binding.projectId,
     externalSpaceId: ev.channel,
-    conversationId: ev.thread_ts ?? ev.ts,
-    senderId: ev.user ?? 'unknown',
+    conversationId: `slack:${teamId}:${ev.channel}:${externalConversationId}`,
+    externalConversationId,
+    senderId: ev.user ? `slack:${teamId}:${ev.user}` : 'unknown',
     text: ev.text ?? '',
   };
 }

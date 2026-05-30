@@ -5,7 +5,7 @@
 //   npx wrangler d1 execute hatchery-skills --remote --file=/tmp/seed.sql
 //
 // These seeds describe FUNCTION and writing quality only — never a fixed purpose. The
-// agent can edit or delete any of them (save_skill / delete_skill). `personality` is
+// agent can edit or archive any of them (save_skill / archive_skill). `personality` is
 // intentionally NOT seeded: empty = a general default; the user/agent sets it later.
 
 import { readFileSync, readdirSync } from 'node:fs';

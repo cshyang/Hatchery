@@ -106,7 +106,7 @@ const REFLECT_PROCEDURE =
   `skills overlap, fold them into the broader one and archive_skill the absorbed one. Be conservative — ` +
   `only crystallise a procedure that clearly recurs; a one-off task is not a skill.\n` +
   `\n` +
-  `Then stop. Do NOT reply_in_channel and do NOT take any action beyond updating memory and skills.`;
+  `Then stop. Do NOT reply_to_conversation and do NOT take any action beyond updating memory and skills.`;
 
 export function buildReflectInstructions(transcript: string): string {
   return `${REFLECT_PROCEDURE}\n\n--- CONVERSATION TO CONSOLIDATE ---\n${transcript}`;

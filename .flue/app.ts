@@ -6,6 +6,7 @@ import { botInThread } from '../src/slack/threads';
 import { mentionsBot, stripMention } from '../src/slack/mentions';
 import { bindings, bindingBySlack, bindingByProject, agentInstanceId } from '../src/bindings';
 import { normalizeSlackMessage } from '../src/canonical';
+import { upsertConversationTarget } from '../src/conversations';
 import { claimEvent, type KVLike } from '../src/idempotency';
 import { loadRunnableSkillBody, type D1Like } from '../src/skills';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/reflection';
@@ -19,7 +20,7 @@ interface Env {
   SLACK_SIGNING_SECRET?: string;
   SLACK_EVENTS?: KVLike; // KV namespace for event_id idempotency
   HEARTBEAT_TOKEN?: string; // shared secret guarding the /__heartbeat trigger
-  DB?: D1Like; // D1 skill catalog (loaded fresh at fire time)
+  DB?: D1Like; // D1 skill catalog, transcript, memory, and conversation targets
   [binding: string]: unknown;
 }
 
@@ -213,6 +214,28 @@ app.post('/slack/events', async (c) => {
     if (!continuing) return c.body(null, 200);
   }
 
+  const msg = normalizeSlackMessage(
+    body.event_id ?? `${ev.channel}:${ev.ts}`,
+    body.team_id ?? '',
+    { channel: ev.channel, ts: ev.ts, thread_ts: ev.thread_ts, user: ev.user, text: stripMention(text, binding.transportBotId) },
+    binding,
+  );
+
+  // Store the exact reply target before the idempotency claim. If this D1 write fails,
+  // Slack can retry and repair the target instead of us suppressing a turn that can no
+  // longer reply to its originating conversation.
+  if (c.env.DB) {
+    await upsertConversationTarget(c.env.DB, {
+      projectId: msg.projectId,
+      conversationId: msg.conversationId,
+      provider: msg.provider,
+      externalAccountId: msg.externalAccountId,
+      externalSpaceId: msg.externalSpaceId,
+      externalConversationId: msg.externalConversationId,
+      transportTokenRef: binding.transportTokenRef,
+    });
+  }
+
   // Idempotency: Slack redelivers the same event_id on retry (at-least-once).
   // Claim it before dispatch so a retry can't fire a second reply. Only reached
   // for dispatch-bound events (mention/continue) — chatter we ignore costs no KV.
@@ -220,13 +243,6 @@ app.post('/slack/events', async (c) => {
   if (!(await claimEvent(c.env.SLACK_EVENTS, eventId))) {
     return c.body(null, 200); // duplicate delivery — already handled
   }
-
-  const msg = normalizeSlackMessage(
-    body.event_id ?? `${ev.channel}:${ev.ts}`,
-    body.team_id ?? '',
-    { channel: ev.channel, ts: ev.ts, thread_ts: ev.thread_ts, user: ev.user, text: stripMention(text, binding.transportBotId) },
-    binding,
-  );
 
   // Log to the transcript so nightly reflection has something to consolidate (best-effort —
   // a logging hiccup must never block the reply). We only log conversations the bot is part of.

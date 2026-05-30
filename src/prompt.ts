@@ -13,7 +13,7 @@
 // the steering too, not that we maintain a substring allow-list that silently skips it.
 
 export interface BuildInstructionsOptions {
-  /** Project id, shown to the agent as the channel it operates in. */
+  /** Project id, shown to the agent as the workspace it operates in. */
   projectName: string;
   /** The `personality` skill's body (frontmatter already stripped), or null for the general default. */
   personality: string | null;
@@ -85,7 +85,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
   const blocks: string[] = [];
 
   // 1. Identity (stable).
-  blocks.push(`You are an autonomous assistant operating in the "${projectName}" Slack channel.`);
+  blocks.push(`You are an autonomous assistant operating in the "${projectName}" project space.`);
 
   // 2. Role & voice — the one overwritable layer (the `personality` skill), or a general default.
   blocks.push(
@@ -101,11 +101,11 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
     `HOW YOU WORK (fixed)\n` +
       `Each turn arrives as a "[Dispatch Input]" block — read the JSON under "input:" and act on it:\n` +
       `• "message" field → a person's message. Respond helpfully and concisely; pass its "conversationId" to ` +
-      `reply_in_channel so your reply lands in their thread.\n` +
+      `reply_to_conversation so your reply lands in the originating thread/chat.\n` +
       `• "kind":"heartbeat" → a scheduled/self-triggered run, nobody waiting. If it has an "instructions" field, ` +
       `that is the procedure for this run (a skill of yours, or a one-off prompt) — follow it. Else address the ` +
       `"topic" if one is given. If there is nothing meaningful to do, stay silent. When you do post, omit conversationId.\n` +
-      `• reply_in_channel is the ONLY way your words reach the channel — your plain text is NOT delivered. Don't ` +
+      `• reply_to_conversation is the ONLY way your words reach the project space — your plain text is NOT delivered. Don't ` +
       `mention tools or the dispatch envelope.`,
   );
 

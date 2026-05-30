@@ -1,6 +1,6 @@
 import { createAgent, defineTool, Type, type AgentRuntimeConfig, type ToolDefinition } from '@flue/runtime';
 import { bindingByProject, parseAgentInstanceId, DEFAULT_MODEL } from '../../src/bindings';
-import { postMessage } from '../../src/slack/post';
+import { loadConversationTarget, sendToConversationTarget, topLevelTargetFromBinding } from '../../src/conversations';
 import { skillTools, loadSkillCatalog, loadActiveSkillBody, skillBody, type D1Like } from '../../src/skills';
 import { reminderTools } from '../../src/reminders';
 import { buildInstructions } from '../../src/prompt';
@@ -11,15 +11,15 @@ import { logMessage } from '../../src/reflection';
 // (slug = "default" until a channel hosts multiple personas). Each instance is a persistent
 // Durable Object — the per-(project, persona) boundary.
 //
-// Access is enforced by TOOLS, not the prompt: reply is bound to the project's channel +
-// bot token from trusted config; skills/reminders/memory are scoped to this projectId. The
-// model controls only the content, never the destination or another project's data.
+// Access is enforced by TOOLS, not the prompt: replies resolve a stored conversation target
+// plus token ref from trusted config; skills/reminders/memory are scoped to this projectId.
+// The model controls only the content, never the destination or another project's data.
 //
 // NOTE: the work below runs in Flue's `createAgent` INITIALIZER (which may be async), NOT
 // the Durable Object constructor. The DO constructor stays boring — no D1/network there.
 
 export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
-  const { projectId } = parseAgentInstanceId(ctx.id);
+  const { projectId, slug } = parseAgentInstanceId(ctx.id);
   const binding = bindingByProject(projectId);
 
   // No active binding → an inert agent with no posting capability.
@@ -31,7 +31,6 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   }
 
   const env = ctx.env as Record<string, unknown>;
-  const botToken = env[binding.transportTokenRef] as string | undefined;
   const ticker = env.TICKER as { fetch(request: Request): Promise<Response> } | undefined;
   const heartbeatToken = (env.HEARTBEAT_TOKEN as string | undefined) ?? '';
   const db = env.DB as D1Like | undefined;
@@ -55,31 +54,39 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   const projectMem = db ? await loadProjectMemory(db, projectId).catch(() => []) : [];
   const memoryBlock = renderMemory(projectMem);
 
-  const replyInChannel = defineTool({
-    name: 'reply_in_channel',
-    description: "Send your reply to the user in the project's Slack channel. Call this with your final response text.",
+  const replyToConversation = defineTool({
+    name: 'reply_to_conversation',
+    description:
+      "Send your reply to the current conversation. Call this with your final response text; pass conversationId for user-message replies.",
     parameters: Type.Object({
       text: Type.String({ description: 'The message to post.' }),
       conversationId: Type.Optional(
         Type.String({
           description:
-            "When replying to a user message, copy the conversationId from the [Dispatch Input] block so your reply lands in their thread. OMIT for a heartbeat/new top-level post.",
+            "When replying to a user message, copy the conversationId from the [Dispatch Input] block. OMIT for a heartbeat/new top-level post.",
         }),
       ),
     }),
     async execute({ text, conversationId }) {
-      if (!botToken) throw new Error(`Missing bot token env "${binding.transportTokenRef}".`);
-      const thread = conversationId ? String(conversationId) : undefined;
-      await postMessage(botToken, binding.externalSpaceId, String(text), thread);
+      const conv = conversationId ? String(conversationId) : '';
+      const target = conv
+        ? db
+          ? await loadConversationTarget(db, projectId, slug, conv)
+          : null
+        : topLevelTargetFromBinding(binding, slug);
+      if (!target) {
+        throw new Error(`No reply target found for conversationId "${conv}".`);
+      }
+      await sendToConversationTarget(env, target, String(text));
       // Log the agent's own post to the transcript (the other half of the conversation reflection
       // consolidates). REM turns are told not to post, so this never logs reflection's own output.
-      if (db) await logMessage(db, { projectId, conversationId: thread ?? '', senderId: 'agent', role: 'agent', text: String(text) }).catch(() => {});
+      if (db) await logMessage(db, { projectId, conversationId: conv, senderId: 'agent', role: 'agent', text: String(text) }).catch(() => {});
       return 'sent';
     },
   });
 
   const tools: ToolDefinition[] = [
-    replyInChannel,
+    replyToConversation,
     ...(db ? skillTools(db, projectId) : []),
     ...reminderTools(ticker, heartbeatToken, projectId),
     ...(db ? memoryTools(db, projectId) : []),
