@@ -2,9 +2,10 @@
 -- Apply: npx wrangler d1 execute hatchery-skills --remote --file=migrations/0003_skills.sql
 --
 -- This table had no migration before (src/skills.ts read/wrote it, but nothing created it).
--- Per ADR 0002 there are zero PERSISTED skills, so this creates it fresh with the lifecycle
--- shape from the start. If an old-shape `skills` table somehow exists in a target db, drop it
--- first (it holds nothing) — CREATE IF NOT EXISTS would otherwise no-op and skip the new columns.
+-- An earlier seed run created an OLD-SHAPE table (project_id, name, description, body_md,
+-- updated_at) holding only regenerable seed rows. CREATE IF NOT EXISTS would no-op against it
+-- and skip the new lifecycle columns — so on a db with the old table, DROP it first, run this,
+-- then re-seed (seeds/seed.mjs). On a fresh db this just creates the table.
 --
 -- Lifecycle (ADR 0002):
 --   state='active'   → in the catalog, loadable, runnable on a schedule
