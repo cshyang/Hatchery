@@ -23,6 +23,9 @@ export interface BuildInstructionsOptions {
    *  Passed as an opaque string so this assembler stays pure; it's the most volatile block (changes
    *  whenever memory changes), so it goes LAST. */
   memoryBlock?: string | null;
+  /** Pre-rendered "YOUR CONNECTIONS" block (see src/connections.ts), or null. Semi-stable (changes
+   *  only when a connection is added/removed), so it sits with the skills catalog, before memory. */
+  connectionsBlock?: string | null;
 }
 
 // Anti-fabrication / finish-the-job. The deliverable is real output, not a description
@@ -81,7 +84,7 @@ function skillsBlock(catalog: { name: string; description: string }[]): string {
 }
 
 export function buildInstructions(opts: BuildInstructionsOptions): string {
-  const { projectName, personality, catalog, memoryBlock } = opts;
+  const { projectName, personality, catalog, memoryBlock, connectionsBlock } = opts;
   const blocks: string[] = [];
 
   // 1. Identity (stable).
@@ -123,7 +126,10 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
   // 8. Skills catalog — semi-volatile (changes when skills change), so it trails the stable prefix.
   blocks.push(skillsBlock(catalog));
 
-  // 9. Memory — MOST volatile (changes per turn and per author), so it goes dead last.
+  // 9. Connections — semi-volatile (changes when a connection is added/removed), after skills.
+  if (connectionsBlock) blocks.push(connectionsBlock);
+
+  // 10. Memory — MOST volatile (changes per turn and per author), so it goes dead last.
   if (memoryBlock) blocks.push(memoryBlock);
 
   return blocks.join('\n\n');

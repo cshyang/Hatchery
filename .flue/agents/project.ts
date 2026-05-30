@@ -6,6 +6,14 @@ import { reminderTools } from '../../src/reminders';
 import { buildInstructions } from '../../src/prompt';
 import { loadProjectMemory, memoryTools, renderMemory } from '../../src/memory';
 import { logMessage } from '../../src/reflection';
+import {
+  connectionState,
+  resolveConnection,
+  connectionTools,
+  connectionsBlock,
+  PROVIDER_CATALOG,
+  type ConnectionState,
+} from '../../src/connections';
 
 // The project agent. Addressed at /agents/project/<id>, id = "project:<projectId>:agent:<slug>"
 // (slug = "default" until a channel hosts multiple personas). Each instance is a persistent
@@ -54,6 +62,24 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   const projectMem = db ? await loadProjectMemory(db, projectId).catch(() => []) : [];
   const memoryBlock = renderMemory(projectMem);
 
+  // Connections (ADR 0003): which external services this project can reach. The initializer
+  // resolves each CONNECTED provider's secret once (decrypt in memory, keyed by projectId) and
+  // hands it to connectionTools, which contributes that provider's tools (v2a = reads only).
+  // Tool visibility = connection state (gating). A missing MASTER_ENCRYPTION_KEY or D1 hiccup
+  // degrades to "no connection tools", never a broken agent.
+  const masterKey = (env.MASTER_ENCRYPTION_KEY as string | undefined) ?? '';
+  let connState: ConnectionState[] = [];
+  const connSecrets: Record<string, { secret: string; config: Record<string, unknown> }> = {};
+  if (db && masterKey) {
+    connState = await connectionState(db, projectId).catch(() => []);
+    for (const s of connState) {
+      if (s.status !== 'connected') continue;
+      const resolved = await resolveConnection(db, projectId, s.provider, masterKey).catch(() => null);
+      if (resolved) connSecrets[s.provider] = resolved;
+    }
+  }
+  const connBlock = connState.length ? connectionsBlock(connState, PROVIDER_CATALOG) : null;
+
   const replyToConversation = defineTool({
     name: 'reply_to_conversation',
     description:
@@ -90,6 +116,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     ...(db ? skillTools(db, projectId) : []),
     ...reminderTools(ticker, heartbeatToken, projectId),
     ...(db ? memoryTools(db, projectId) : []),
+    ...(db ? connectionTools(db, projectId, connState, connSecrets) : []),
   ];
 
   return {
@@ -99,6 +126,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       personality: personality ? skillBody(personality) : null,
       catalog,
       memoryBlock,
+      connectionsBlock: connBlock,
     }),
     tools,
   };

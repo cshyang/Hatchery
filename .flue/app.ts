@@ -10,6 +10,7 @@ import { upsertConversationTarget } from '../src/conversations';
 import { claimEvent, type KVLike } from '../src/idempotency';
 import { loadRunnableSkillBody, type D1Like } from '../src/skills';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/reflection';
+import { upsertConnection } from '../src/connections';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -20,7 +21,9 @@ interface Env {
   SLACK_SIGNING_SECRET?: string;
   SLACK_EVENTS?: KVLike; // KV namespace for event_id idempotency
   HEARTBEAT_TOKEN?: string; // shared secret guarding the /__heartbeat trigger
-  DB?: D1Like; // D1 skill catalog, transcript, memory, and conversation targets
+  ADMIN_CONNECTIONS_TOKEN?: string; // SEPARATE secret guarding credential provisioning (ADR D11)
+  MASTER_ENCRYPTION_KEY?: string; // 64-hex AES key for credential envelope encryption (ADR D5)
+  DB?: D1Like; // D1 skill catalog, transcript, memory, connections, and conversation targets
   [binding: string]: unknown;
 }
 
@@ -156,6 +159,44 @@ app.post('/__internal/reflect-sweep', async (c) => {
     swept++;
   }
   return c.json({ swept });
+});
+
+// Out-of-band credential provisioning (ADR 0003, D11). Takes a RAW secret in the body — the
+// highest-risk endpoint in v2a — so it is guarded by its OWN token, NOT the shared
+// HEARTBEAT_TOKEN/scheduler boundary (provisioning credentials != poking heartbeats). The body
+// is never logged; the secret is encrypted before the row write so plaintext exists only in this
+// request; the response carries a fingerprint, never the secret.
+app.post('/__admin/connections', async (c) => {
+  const expected = c.env.ADMIN_CONNECTIONS_TOKEN;
+  if (!expected || c.req.header('x-hatchery-admin-token') !== expected) return c.body(null, 404);
+  const key = c.env.MASTER_ENCRYPTION_KEY;
+  if (!key) return c.json({ error: 'MASTER_ENCRYPTION_KEY not configured' }, 500);
+  if (!c.env.DB) return c.json({ error: 'no DB binding' }, 500);
+
+  const body = (await c.req.json().catch(() => null)) as {
+    projectId?: string;
+    provider?: string;
+    secret?: string;
+    config?: Record<string, unknown>;
+  } | null;
+  if (!body?.projectId || !body.provider || !body.secret) {
+    return c.json({ error: 'projectId, provider, and secret are required' }, 400);
+  }
+
+  try {
+    const result = await upsertConnection(
+      c.env.DB,
+      body.projectId,
+      body.provider,
+      body.secret,
+      key,
+      body.config ?? {},
+    );
+    return c.json(result); // { provider, fingerprint, status } — no secret echoed back
+  } catch (e) {
+    // Never include the body/secret in the error.
+    return c.json({ error: `provisioning failed: ${(e as Error).message}` }, 500);
+  }
 });
 
 app.post('/slack/events', async (c) => {
