@@ -31,7 +31,7 @@ Cloudflare is the preferred deployment target for the first slice because Flue c
 
 ## Decision Frame
 
-The goal is not to build "a Slack bot." Hermes already has broad messaging integrations and can do that quickly. The goal is to build a foundation for project-scoped agents with clean routing, isolation, and future channel/provider extension.
+The goal is not to build "a Slack bot." Off-the-shelf agent frameworks already have broad messaging integrations and can do that quickly. The goal is to build a foundation for project-scoped agents with clean routing, isolation, and future channel/provider extension.
 
 The foundation should include extension seams now, not every extension:
 
@@ -76,7 +76,7 @@ Slack Events API
 - Admin UI.
 - Billing.
 - Multiple channel providers.
-- Hermes adapter.
+- Third-party agent-harness adapter.
 - Full sandbox lifecycle manager.
 - Per-thread full Linux sandbox allocation.
 - Complex permission management UI.

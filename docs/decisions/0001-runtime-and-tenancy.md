@@ -10,7 +10,7 @@
 
 We need to choose where a project-scoped agent's runtime lives, and how tenants are
 isolated, before writing code. The choice was pressure-tested against the alternative of
-adopting an existing harness (Hermes profiles) rather than building on Cloudflare.
+adopting an existing always-on, process-per-tenant agent harness rather than building on Cloudflare.
 
 Two facts about *this* project frame the decision:
 
@@ -26,7 +26,7 @@ Two facts about *this* project frame the decision:
 
 The original plan bundled two independent choices. We separate them:
 
-1. **Runtime placement** — always-on VM (Hermes / Flue-local) vs sleep-and-wake (Flue → CF
+1. **Runtime placement** — always-on VM (existing process-per-tenant harness / Flue-local) vs sleep-and-wake (Flue → CF
    Workers + Durable Objects).
 2. **Foundation depth** — thin concrete loop vs control-plane / provider-abstraction layer.
 
@@ -34,7 +34,7 @@ The original plan bundled two independent choices. We separate them:
 
 | Option | Tenancy model | Idle cost | Wake | Verdict |
 |---|---|---|---|---|
-| **A. Hermes profiles, always-on** | Level 3 (process-per-tenant) — free | flat (~$4–8/mo) | n/a | Best for *personal*; can't hibernate per-tenant → RAM ceiling at scale |
+| **A. Process-per-tenant harness, always-on** | Level 3 (process-per-tenant) — free | flat (~$4–8/mo) | n/a | Best for *personal*; can't hibernate per-tenant → RAM ceiling at scale |
 | **B. Flue-local, always-on, thin loop** | per-process | flat (~$4–8/mo) | n/a | Good if goal were pure near-term utility |
 | **C. Flue → CF DO** (chosen) | DO-per-tenant actor — isolated SQLite | $0 hibernated | ~5ms | Right for the multi-tenant target |
 
@@ -45,9 +45,9 @@ The original plan bundled two independent choices. We separate them:
 ### Why C, given the goal
 
 - The target regime is genuinely multi-tenant, where the vault's own conclusion holds:
-  *"per-tenant hibernation becomes the only affordable model."* Hermes profiles give
-  Level-3 isolation but are **always-on** — N processes sharing one host's RAM, which
-  ceilings out. Per-tenant hibernation dissolves that ceiling; Hermes cannot do it.
+  *"per-tenant hibernation becomes the only affordable model."* A process-per-tenant harness gives
+  Level-3 isolation but is **always-on** — N processes sharing one host's RAM, which
+  ceilings out. Per-tenant hibernation dissolves that ceiling; an always-on harness cannot do it.
 - CF DO **is** the rung the vault repeatedly flagged as *missing*:
   *"is there a 'Level-3-with-hibernation' rung between flat-cost VM and pay-per-use
   sandbox?"* — ~5ms wake, $0 idle, isolated SQLite per DO, fan-out to millions. We are
@@ -65,7 +65,7 @@ Even with the learning license, learning licenses the **spine**, not everything:
 - **Bindings** live in DO storage or a typed config file — **not** a control-plane service.
 - **`CanonicalMessage`** stays a *type* (cheap, documents the seam) but Slack is built
   **concretely** — no provider-adapter *framework* for providers we don't have.
-- Still excluded: billing, admin UI, Hermes adapter, full sandbox lifecycle manager.
+- Still excluded: billing, admin UI, third-party agent-harness adapter, full sandbox lifecycle manager.
 
 ## The two axes that must not be conflated
 
