@@ -2,6 +2,31 @@
 
 Status: Proposed (design) · Date: 2026-05-30 · Builds on [0001](0001-runtime-and-tenancy.md), [0002](0002-skill-self-improvement.md)
 
+> **Update 2026-05-30 — v2a simplification (supersedes the secret-storage parts below).**
+> v2a as built does NOT use encrypted-D1 secret storage. Codex + a simplicity review surfaced
+> that "self-service UX" and "self-managed secret vault" are independent decisions I'd wrongly
+> welded: the operator (you) provisions a handful of projects, so a credential is a **Worker
+> secret referenced by name from the binding** (`connections: [{provider, tokenRef, config}]`,
+> resolved as `env[tokenRef]`) — identical to how `transportTokenRef` already handles the Slack
+> token, and no less secure at rest (CF KMS, write-only) than hand-rolled ciphertext.
+>
+> **Cut from v2a:** `crypto.ts` (AES envelope), `MASTER_ENCRYPTION_KEY`, `ADMIN_CONNECTIONS_TOKEN`,
+> `/__admin/connections`, the `connections`/`pending_actions`/`approval_policies` D1 tables
+> (migration 0005), and `secret_ciphertext`. No new secrets, no key-management burden.
+> **Kept:** the `resolveConnection` SEAM, REST read tools, gating, the prompt block.
+>
+> The encrypted-D1 design below (D5/D9/D10/D11, schema, admin route) is NOT deleted — it is the
+> documented answer for the day a backend must hold a raw secret that arrives at RUNTIME:
+> **static-key self-service** (a client pastes a key in Slack, no operator). Its code lives in git
+> history at commit `56cc049`. Per-provider routing of the seam:
+> - **operator static keys (NOW):** Worker-secret ref — the v2a path.
+> - **OAuth providers (Google Ads, Meta — LATER):** a Composio/Nango account-ref; the vendor holds
+>   + refreshes the token, Hatchery stores only the ref. No master key.
+> - **static-key self-service (IF the pain is real):** encrypted D1 or a managed vault — decide then.
+>
+> `pending_actions`/`approval_policies` (the write-approval machinery) return in **v2b**, which is
+> where they're actually used.
+
 ## Context
 
 The agent has identity, skills, memory, and self-scheduling — but no hands. It can't

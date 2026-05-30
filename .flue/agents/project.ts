@@ -62,21 +62,18 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   const projectMem = db ? await loadProjectMemory(db, projectId).catch(() => []) : [];
   const memoryBlock = renderMemory(projectMem);
 
-  // Connections (ADR 0003): which external services this project can reach. The initializer
-  // resolves each CONNECTED provider's secret once (decrypt in memory, keyed by projectId) and
-  // hands it to connectionTools, which contributes that provider's tools (v2a = reads only).
-  // Tool visibility = connection state (gating). A missing MASTER_ENCRYPTION_KEY or D1 hiccup
-  // degrades to "no connection tools", never a broken agent.
-  const masterKey = (env.MASTER_ENCRYPTION_KEY as string | undefined) ?? '';
-  let connState: ConnectionState[] = [];
+  // Connections (ADR 0003): which external services this project can reach. Each connection is a
+  // binding spec naming the Worker secret that holds the provider's token (like the Slack token).
+  // The initializer reads connection state from the binding + env, resolves each CONNECTED
+  // provider's token, and hands it to connectionTools, which contributes that provider's tools
+  // (v2a = reads only). Tool visibility = connection state (gating). No secret missing → that
+  // provider is simply "not connected"; never a broken agent.
+  const connState: ConnectionState[] = connectionState(binding, env);
   const connSecrets: Record<string, { secret: string; config: Record<string, unknown> }> = {};
-  if (db && masterKey) {
-    connState = await connectionState(db, projectId).catch(() => []);
-    for (const s of connState) {
-      if (s.status !== 'connected') continue;
-      const resolved = await resolveConnection(db, projectId, s.provider, masterKey).catch(() => null);
-      if (resolved) connSecrets[s.provider] = resolved;
-    }
+  for (const s of connState) {
+    if (s.status !== 'connected') continue;
+    const resolved = resolveConnection(binding, env, s.provider);
+    if (resolved) connSecrets[s.provider] = resolved;
   }
   const connBlock = connState.length ? connectionsBlock(connState, PROVIDER_CATALOG) : null;
 
@@ -116,7 +113,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     ...(db ? skillTools(db, projectId) : []),
     ...reminderTools(ticker, heartbeatToken, projectId),
     ...(db ? memoryTools(db, projectId) : []),
-    ...(db ? connectionTools(db, projectId, connState, connSecrets) : []),
+    ...connectionTools(connState, connSecrets),
   ];
 
   return {

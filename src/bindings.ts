@@ -51,7 +51,18 @@ export interface Binding {
   sandboxMode: SandboxMode;
   /** Name of the env var / secret holding this transport's token. Tokens never live in code or prompts. */
   transportTokenRef: string;
+  /** External tool connections (ADR 0003). Each names the Worker secret holding the provider's
+   *  token (like transportTokenRef) + non-secret config (e.g. the pinned repo). The secret is set
+   *  with `wrangler secret put`; a connection is "connected" once its secret is present. */
+  connections?: ConnectionSpec[];
   status: 'active' | 'disabled';
+}
+
+export interface ConnectionSpec {
+  provider: string;
+  /** Worker-secret name holding this provider's token (e.g. 'GITHUB_PAT_DEMO'). */
+  tokenRef: string;
+  config?: Record<string, unknown>;
 }
 
 export const bindings: readonly Binding[] = [
@@ -65,6 +76,10 @@ export const bindings: readonly Binding[] = [
     model: 'zai/glm-5.1',
     sandboxMode: 'virtual',
     transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
+    // GitHub connection (ADR 0003). Shows as "not connected" until the GITHUB_PAT_DEMO Worker
+    // secret is set (`wrangler secret put GITHUB_PAT_DEMO`). Set `config.repo` to the real
+    // owner/name before going live — it's the default repo for the read tools.
+    connections: [{ provider: 'github', tokenRef: 'GITHUB_PAT_DEMO', config: { repo: 'OWNER/REPO' } }],
     status: 'active',
   },
 ];
