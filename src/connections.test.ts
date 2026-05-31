@@ -297,6 +297,14 @@ test('request_connection: refuses a provider not in the catalog (no session star
   assert.equal(started, 0, 'no Nango session for an unsupported provider');
 });
 
+test('connectionsBlock: canRequest=true tells the agent to use request_connection; default does not', async () => {
+  const withReq = connectionsBlock(connectionState(GH, {}), PROVIDER_CATALOG, true);
+  assert.match(withReq, /request_connection/);
+  const without = connectionsBlock(connectionState(GH, {}), PROVIDER_CATALOG);
+  assert.doesNotMatch(without, /request_connection/);
+  assert.match(without, /wired by an operator first/);
+});
+
 const main = async () => {
   let pass = 0;
   let fail = 0;
