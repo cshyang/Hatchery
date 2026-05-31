@@ -85,7 +85,10 @@ export function connectionsBlock(state: ConnectionState[], catalog: { provider: 
     'YOUR CONNECTIONS\n' +
     'External services you can reach. Connected ones expose tools you can call now; the rest must be ' +
     'wired by an operator first (mention that you need it — you cannot connect it yourself).\n' +
-    lines.join('\n')
+    lines.join('\n') +
+    '\nKeep API work tight: reach the answer in as few calls as you can (ideally 1–3). Do NOT fan out ' +
+    'to read every result of a search/list — fetch the list, then read details only for what the user ' +
+    'actually asked about. Long chains of calls can stall the turn.'
   );
 }
 

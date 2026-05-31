@@ -69,6 +69,11 @@ export const PROVIDER_API_PROFILES: Record<string, ProviderApiProfile> = {
 };
 
 const MAX_BODY = 8000; // keep tool results small for the chat context
+// Per-call fetch ceiling. A DO turn holds the input gate while it runs; if a turn drags past ~30s,
+// a concurrent hibernation-wake / alarm runs partyserver's blockConcurrencyWhile(onStart), which
+// waits for the turn to drain, times out, and resets the DO mid-turn → the agent goes silent. An
+// uncapped fetch is the sharpest contributor, so bound every external call well under that budget.
+const FETCH_TIMEOUT_MS = 12_000;
 
 /** The generic call tool for one connected provider. `secret` is the resolved credential; `config`
  *  is the connection's non-secret config (e.g. {repo}). Returns ONE tool named `<provider>_call_api`. */
@@ -109,7 +114,18 @@ export function genericApiTool(profile: ProviderApiProfile, secret: string, conf
         headers['content-type'] = 'application/json';
         init.body = String(body);
       }
-      const res = await fetch(`${profile.baseUrl}${p}`, init);
+      init.signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+      let res: Response;
+      try {
+        res = await fetch(`${profile.baseUrl}${p}`, init);
+      } catch (e) {
+        const aborted = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
+        throw new Error(
+          aborted
+            ? `${profile.provider} request timed out after ${FETCH_TIMEOUT_MS}ms (${m} ${p}). Try a narrower call.`
+            : `${profile.provider} request failed: ${(e as Error).message}`,
+        );
+      }
       const text = await res.text();
       if (!res.ok) {
         let msg = text.slice(0, 300);

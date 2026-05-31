@@ -20,8 +20,19 @@ function ghHeaders(pat: string): Record<string, string> {
   };
 }
 
+// Bound every GitHub call well under the ~30s DO-turn budget (see FETCH_TIMEOUT_MS in api.ts):
+// an uncapped fetch that hangs can drag a turn past the point where a concurrent
+// blockConcurrencyWhile(onStart) times out and resets the DO mid-turn.
+const GH_FETCH_TIMEOUT_MS = 12_000;
+
 async function ghGet(pat: string, path: string): Promise<unknown> {
-  const res = await fetch(`${API}${path}`, { headers: ghHeaders(pat) });
+  let res: Response;
+  try {
+    res = await fetch(`${API}${path}`, { headers: ghHeaders(pat), signal: AbortSignal.timeout(GH_FETCH_TIMEOUT_MS) });
+  } catch (e) {
+    const aborted = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
+    throw new Error(aborted ? `GitHub request timed out after ${GH_FETCH_TIMEOUT_MS}ms (${path}).` : `GitHub request failed: ${(e as Error).message}`);
+  }
   const text = await res.text();
   if (!res.ok) {
     // Surface a sanitized error to the model — status + GitHub's message, never the PAT.
