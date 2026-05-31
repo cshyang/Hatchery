@@ -411,6 +411,8 @@ git commit -m "feat(connections): connection_ref + platform key reads as connect
 
 ---
 
+> **EXECUTION NOTE (2026-06-01):** Tasks 3 and 4 are executed as ONE atomic commit. The credential-type widening (`ResolvedConnection.secret: string | (() => Promise<string>)`) spans `connections.ts` (resolveConnection return + connectionTools param/body) AND `api.ts` (genericApiTool param), and `connectionTools`'s edit (e) passes the widened union straight into `genericApiTool` — so neither file type-checks without the other. Splitting them breaks the per-task `tsc` gate. Treat Task 3 + Task 4 below as a single unit.
+
 ## Task 3: `resolveConnection` — lazy, per-turn-memoized Nango token
 
 **Files:**

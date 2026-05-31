@@ -16,6 +16,7 @@ import {
   loadConnectionSpecs,
   PROVIDER_CATALOG,
   type ConnectionState,
+  type ResolvedConnection,
 } from '../../src/connections';
 
 // The project agent. Addressed at /agents/project/<id>, id = "project:<projectId>:agent:<slug>"
@@ -75,7 +76,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   // can be added/changed without a redeploy. .catch keeps a D1 hiccup from breaking the agent.
   const connSpecs = await loadConnectionSpecs(db, binding).catch(() => binding.connections ?? []);
   const connState: ConnectionState[] = connectionState(connSpecs, env);
-  const connSecrets: Record<string, { secret: string; config: Record<string, unknown> }> = {};
+  const connSecrets: Record<string, ResolvedConnection> = {};
   for (const s of connState) {
     if (s.status !== 'connected') continue;
     const resolved = resolveConnection(connSpecs, env, s.provider);
