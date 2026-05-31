@@ -11,8 +11,11 @@ import {
   connectionsBlock,
   PROVIDER_CATALOG,
 } from './connections';
-import { GITHUB_READ_TOOL_NAMES, GITHUB_CALL_API_TOOL_NAME } from './github';
+import { GITHUB_READ_TOOL_NAMES } from './github';
 import type { Binding } from './bindings';
+
+const GITHUB_CALL_API_TOOL_NAME = 'github_call_api';
+const NOTION_CALL_API_TOOL_NAME = 'notion_call_api';
 
 // A minimal binding with a GitHub connection declared (secret provided via env, not here).
 function binding(connections?: Binding['connections']): Binding {
@@ -93,6 +96,35 @@ test('github_call_api refuses non-GET (writes go through the approval gate, not 
     () => (callApi.execute as (a: unknown) => Promise<unknown>)({ method: 'POST', path: '/repos/o/r/issues' }),
     /Only GET is allowed/,
   );
+});
+
+test('notion defaults to the generic call_api tool (no typed tools), gated on its secret', async () => {
+  const NO = [{ provider: 'notion', tokenRef: 'NOTION_TOKEN_DEMO', config: {} }];
+  // not connected → no tools
+  assert.equal(connectionTools(connectionState(binding(NO), {}), {}).length, 0, 'no tool before the secret is set');
+  // connected → exactly notion_call_api (no apiMode needed: notion has no typed fallback)
+  const env = { NOTION_TOKEN_DEMO: 'secret_ntn' };
+  const creds = resolveConnection(binding(NO), env, 'notion')!;
+  const names = connectionTools(connectionState(binding(NO), env), { notion: creds }).map((t) => t.name as string);
+  assert.deepEqual(names, [NOTION_CALL_API_TOOL_NAME], 'notion = exactly the one generic call tool');
+});
+
+test('notion_call_api allows POST (reads use POST; token is read-only at the provider)', async () => {
+  // Notion search/query are READS via POST — the GET-only rule would wrongly block them. The
+  // profile uses methodPolicy 'all', so POST must NOT be refused on the gate (it will hit the
+  // network and fail on the fake token, but it must get PAST the method check).
+  const NO = [{ provider: 'notion', tokenRef: 'NOTION_TOKEN_DEMO', config: {} }];
+  const env = { NOTION_TOKEN_DEMO: 'secret_ntn' };
+  const creds = resolveConnection(binding(NO), env, 'notion')!;
+  const [callApi] = connectionTools(connectionState(binding(NO), env), { notion: creds });
+  await assert.doesNotReject(async () => {
+    try {
+      await (callApi.execute as (a: unknown) => Promise<unknown>)({ method: 'POST', path: '/v1/search', body: '{}' });
+    } catch (e) {
+      // A network/auth error is fine — that means it passed the method gate. A method-gate refusal is NOT.
+      if (/Only GET is allowed/.test((e as Error).message)) throw e;
+    }
+  });
 });
 
 test('connectionsBlock shows connected vs not-connected from real state', async () => {

@@ -79,10 +79,16 @@ export const bindings: readonly Binding[] = [
     // GitHub connection (ADR 0003). Shows as "not connected" until the GITHUB_PAT_ECODARK Worker
     // secret is set (`wrangler secret put GITHUB_PAT_ECODARK --name hatchery`). config.repo is the
     // default repo for the read tools when the model omits owner/name.
-    // apiMode 'generic' runs Test A (bet-on-intelligence): the agent gets ONE github_call_api tool
-    // and composes REST calls itself. Drop apiMode (or set 'typed') to revert to the v2a read tools.
+    // apiMode 'generic' runs the bet-on-intelligence path (Test A): the agent gets ONE
+    // <provider>_call_api tool and composes REST calls itself. Drop apiMode (or set 'typed') to
+    // revert GitHub to the v2a typed read tools.
+    //
+    // notion shows "not connected" until `wrangler secret put NOTION_TOKEN_DEMO --name hatchery`
+    // is set to a READ-ONLY Notion internal-integration token (shared with the pages/dbs to test).
+    // No apiMode needed — notion has no typed tools, so it defaults to the generic call_api tool.
     connections: [
       { provider: 'github', tokenRef: 'GITHUB_PAT_ECODARK', config: { repo: 'ecodarklabs/website', apiMode: 'generic' } },
+      { provider: 'notion', tokenRef: 'NOTION_TOKEN_DEMO', config: {} },
     ],
     status: 'active',
   },

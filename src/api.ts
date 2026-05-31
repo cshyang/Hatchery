@@ -1,0 +1,127 @@
+// Generic "call_api" — the bet-on-intelligence path (ADR 0003, Test A result). ONE tool per
+// connected provider: the model composes the REST call from its own knowledge, the broker injects
+// the credential at the network boundary. Test A proved this passes cold through Tier 4 on GitHub.
+//
+// The generalization finding (ADR 0003, 2026-05-31): a single generic tool is NOT enough on its
+// own for every provider. Two things vary per provider, so they live in a PROFILE here:
+//   1. methodPolicy — GitHub's PAT may carry write scope, so generic GitHub is GET-only (writes go
+//      through the v2b approval gate). Notion's token is provisioned READ-ONLY at Notion's side, so
+//      isolation = the token's own scope and ALL methods are allowed — which matters because Notion
+//      READS go through POST (/v1/search, /v1/databases/{id}/query). The HTTP method is NOT a
+//      reliable read/write signal across providers; the profile decides.
+//   2. crib — low-training-density / quirky providers need a few hundred tokens of hints (base URL,
+//      required headers like Notion-Version, the handful of endpoints that matter). GitHub needs
+//      almost none; Notion needs the version header it routinely forgets. The crib rides in the
+//      tool DESCRIPTION (loads only when the tool exists, right where the model decides to call).
+
+import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+
+export interface ProviderApiProfile {
+  provider: string;
+  /** API origin, no trailing slash. e.g. 'https://api.github.com'. */
+  baseUrl: string;
+  /** Auth headers built from the resolved secret (never logged, never in the prompt). */
+  auth: (secret: string) => Record<string, string>;
+  /** Always-sent headers a provider requires (e.g. Notion-Version). */
+  staticHeaders?: Record<string, string>;
+  /** 'get-only' refuses writes with a pointer to the (not-yet-wired) approval gate. 'all' trusts
+   *  the token's own scope — use ONLY when the provisioned token is read-only at the provider. */
+  methodPolicy: 'get-only' | 'all';
+  /** Provider hints injected into the tool description, computed from the connection's config. */
+  crib: (config: Record<string, unknown>) => string;
+}
+
+const UA = 'hatchery-agent';
+
+export const PROVIDER_API_PROFILES: Record<string, ProviderApiProfile> = {
+  github: {
+    provider: 'github',
+    baseUrl: 'https://api.github.com',
+    auth: (s) => ({ authorization: `Bearer ${s}`, 'x-github-api-version': '2022-11-28', accept: 'application/vnd.github+json' }),
+    methodPolicy: 'get-only',
+    crib: (config) => {
+      const repo = typeof config.repo === 'string' ? config.repo : undefined;
+      return (
+        'Base: https://api.github.com (well-known REST — compose paths from your knowledge). ' +
+        (repo ? `Connected repo: ${repo} — use it as owner/name unless told otherwise. ` : '') +
+        'Handy: /repos/{owner}/{repo}/issues?state=open · /contents/{path} · /languages · /contributors · /search/code?q=…'
+      );
+    },
+  },
+  notion: {
+    provider: 'notion',
+    baseUrl: 'https://api.notion.com',
+    auth: (s) => ({ authorization: `Bearer ${s}` }),
+    // Notion requires a version header on EVERY request; the model omits it unless told.
+    staticHeaders: { 'Notion-Version': '2022-06-28' },
+    // 'all': the test token is provisioned read-only in Notion, so even a stray POST write is
+    // rejected provider-side. This also lets the genuine READS (search/query) through, which POST.
+    methodPolicy: 'all',
+    crib: () =>
+      'Base: https://api.notion.com. Auth + Notion-Version header are added for you. ' +
+      'Note: Notion READS often use POST. Key endpoints: ' +
+      'POST /v1/search (body {} lists everything shared with the integration) · ' +
+      'GET /v1/users/me (the integration bot) · GET /v1/users · ' +
+      'GET /v1/pages/{page_id} · GET /v1/blocks/{block_id}/children (a page\'s content) · ' +
+      'GET /v1/databases/{database_id} (schema) · POST /v1/databases/{database_id}/query (body {} for all rows). ' +
+      'A page/database is only visible if it was shared with the integration.',
+  },
+};
+
+const MAX_BODY = 8000; // keep tool results small for the chat context
+
+/** The generic call tool for one connected provider. `secret` is the resolved credential; `config`
+ *  is the connection's non-secret config (e.g. {repo}). Returns ONE tool named `<provider>_call_api`. */
+export function genericApiTool(profile: ProviderApiProfile, secret: string, config: Record<string, unknown>): ToolDefinition {
+  const getOnly = profile.methodPolicy === 'get-only';
+  const methodNote = getOnly
+    ? 'Read-only for now: only method "GET" is allowed (writes need human approval and are not wired yet). '
+    : 'Reads and writes share this tool; some reads use POST. ';
+  return defineTool({
+    name: `${profile.provider}_call_api`,
+    description:
+      `Call the ${profile.provider} API directly — you compose the request from your knowledge of the API. ` +
+      methodNote +
+      'path is the API path after the base origin, beginning with "/", including any query string. ' +
+      'Authentication is handled for you — never include tokens. ' +
+      profile.crib(config),
+    parameters: Type.Object({
+      method: Type.String({ description: getOnly ? 'HTTP method. Only "GET" is permitted right now.' : 'HTTP method (GET, POST, …).' }),
+      path: Type.String({ description: 'API path beginning with "/", including any query string.' }),
+      body: Type.Optional(
+        Type.String({ description: 'Request body as a JSON string, for non-GET calls (e.g. a Notion query filter). Omit for GET.' }),
+      ),
+    }),
+    async execute({ method, path, body }) {
+      const m = String(method).toUpperCase();
+      if (getOnly && m !== 'GET') {
+        throw new Error(`Only GET is allowed for ${profile.provider} via ${profile.provider}_call_api; "${m}" is a write and needs approval (not wired yet).`);
+      }
+      const p = String(path).startsWith('/') ? String(path) : `/${String(path)}`;
+      const headers: Record<string, string> = {
+        ...profile.auth(secret),
+        ...(profile.staticHeaders ?? {}),
+        'user-agent': UA,
+      };
+      if (!headers.accept) headers.accept = 'application/json';
+      const init: RequestInit = { method: m, headers };
+      if (body != null && body !== '' && m !== 'GET') {
+        headers['content-type'] = 'application/json';
+        init.body = String(body);
+      }
+      const res = await fetch(`${profile.baseUrl}${p}`, init);
+      const text = await res.text();
+      if (!res.ok) {
+        let msg = text.slice(0, 300);
+        try {
+          msg = (JSON.parse(text) as { message?: string }).message ?? msg;
+        } catch {
+          /* keep raw slice */
+        }
+        throw new Error(`${profile.provider} ${res.status}: ${msg}`);
+      }
+      const out = text ?? '';
+      return out.length > MAX_BODY ? out.slice(0, MAX_BODY) + '\n…(truncated)' : out;
+    },
+  });
+}

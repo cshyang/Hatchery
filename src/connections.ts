@@ -17,7 +17,8 @@
 
 import type { ToolDefinition } from '@flue/runtime';
 import type { Binding } from './bindings';
-import { githubReadTools, githubCallApiTool } from './github';
+import { githubReadTools } from './github';
+import { genericApiTool, PROVIDER_API_PROFILES } from './api';
 
 export interface ConnectionState {
   provider: string;
@@ -53,11 +54,23 @@ export function resolveConnection(
   return { secret: token, config: spec.config ?? {} };
 }
 
-// The provider catalog (what Hatchery supports at all). v2a: GitHub only. Curated platform-side;
-// the agent picks from it, never adds to it.
+// The provider catalog (what Hatchery supports at all). Curated platform-side; the agent picks
+// from it, never adds to it.
 export const PROVIDER_CATALOG: { provider: string; summary: string }[] = [
   { provider: 'github', summary: 'read issues/code, search (creating issues comes later, with approval)' },
+  { provider: 'notion', summary: 'read pages/databases, search (read-only token)' },
 ];
+
+// Providers that ship hand-written typed tools as a fallback. For these, the generic call_api tool
+// is opt-IN via config.apiMode='generic'. Everyone else defaults to the generic tool (the
+// bet-on-intelligence path) whenever a provider API profile exists.
+const TYPED_TOOL_PROVIDERS = new Set<string>(['github']);
+
+function useGenericApi(provider: string, config: Record<string, unknown>): boolean {
+  if (config.apiMode === 'typed') return false;
+  if (config.apiMode === 'generic') return true;
+  return !TYPED_TOOL_PROVIDERS.has(provider);
+}
 
 // The CONNECTIONS prompt block (mirrors the skills catalog injection). Tells the agent what it
 // can reach and what is connectable but not yet wired by an operator.
@@ -87,19 +100,25 @@ export function connectionTools(
 ): ToolDefinition[] {
   const tools: ToolDefinition[] = [];
 
-  const github = state.find((s) => s.provider === 'github' && s.status === 'connected');
-  const ghCreds = secrets['github'];
-  if (github && ghCreds) {
-    const repo = typeof ghCreds.config.repo === 'string' ? ghCreds.config.repo : undefined;
-    // apiMode 'generic' (Test A, bet-on-intelligence): expose ONLY the one generic call tool, so
-    // the experiment measures whether the model composes raw API calls — not whether it falls back
-    // to the typed tools. Default = the proven typed reads (v2a, untouched + reversible).
-    if (ghCreds.config.apiMode === 'generic') {
-      tools.push(githubCallApiTool(ghCreds.secret, repo));
-    } else {
-      tools.push(...githubReadTools(ghCreds.secret, repo));
+  for (const s of state) {
+    if (s.status !== 'connected') continue;
+    const creds = secrets[s.provider];
+    if (!creds) continue;
+
+    // Generic path (default unless a provider has typed tools and isn't opted into generic): one
+    // <provider>_call_api tool driven by the provider's API profile. The model composes the call.
+    const profile = PROVIDER_API_PROFILES[s.provider];
+    if (useGenericApi(s.provider, creds.config) && profile) {
+      tools.push(genericApiTool(profile, creds.secret, creds.config));
+      continue;
     }
-    // v2b plugs the github_create_issue propose-tool in here.
+
+    // Typed fallback (github, apiMode !== 'generic'): the proven v2a read tools, untouched.
+    if (s.provider === 'github') {
+      const repo = typeof creds.config.repo === 'string' ? creds.config.repo : undefined;
+      tools.push(...githubReadTools(creds.secret, repo));
+      // v2b plugs the github_create_issue propose-tool in here.
+    }
   }
 
   return tools;
