@@ -55,6 +55,27 @@ class FakeD1 implements D1Like {
   }
 
   private select(q: string, v: unknown[]): Record<string, unknown>[] {
+    // Global-merge catalog: SELECT name, description, project_id WHERE project_id IN (?, ?) AND state='active'
+    if (q.includes('SELECT name, description') && q.includes('IN (')) {
+      const [pGlobal, pChannel] = v as [string, string];
+      const byName = new Map<string, { name: string; description: string; project_id: string }>();
+      for (const r of this.rows.filter((x) => x.project_id === pGlobal && x.state === 'active')) {
+        byName.set(r.name, { name: r.name, description: r.description, project_id: r.project_id });
+      }
+      for (const r of this.rows.filter((x) => x.project_id === pChannel && x.state === 'active')) {
+        byName.set(r.name, { name: r.name, description: r.description, project_id: r.project_id });
+      }
+      return [...byName.values()];
+    }
+    // Global-merge body: SELECT body_md, project_id WHERE name=? AND project_id IN (?, ?) AND state='active'
+    if (q.includes('SELECT body_md') && q.includes('IN (')) {
+      const [name, pGlobal, pChannel] = v as [string, string, string];
+      const out: Record<string, unknown>[] = [];
+      for (const r of this.rows.filter((x) => x.name === name && (x.project_id === pGlobal || x.project_id === pChannel) && x.state === 'active')) {
+        out.push({ body_md: r.body_md, project_id: r.project_id });
+      }
+      return out;
+    }
     if (q.includes('body_md, state')) {
       // loadRunnableSkillBody: any state
       const row = this.find(v[0] as string, v[1] as string);
@@ -220,6 +241,39 @@ test('toolset has no hard-delete', async () => {
   const names = skillTools(new FakeD1(), 'P').map((t) => t.name).sort();
   assert.deepEqual(names, ['archive_skill', 'load_skill', 'restore_skill', 'save_skill']);
   assert.ok(!names.includes('delete_skill'), 'delete_skill must not exist — archive is the destructive ceiling');
+});
+
+test('catalog merges __global__ with the channel; channel wins on name', async () => {
+  const db = new FakeD1();
+  const base = { description: 'd', body_md: 'b', state: 'active', created_by: 'seed', updated_by: 'seed', created_at: 1, updated_at: 1, archived_at: null };
+  db.rows.push({ project_id: '__global__', name: 'using-connections', ...base });
+  db.rows.push({ project_id: '__global__', name: 'personality', description: 'global-personality', body_md: 'GLOBAL', state: 'active', created_by: 'seed', updated_by: 'seed', created_at: 1, updated_at: 1, archived_at: null });
+  db.rows.push({ project_id: 'C_X', name: 'personality', description: 'channel-personality', body_md: 'CHANNEL', state: 'active', created_by: 'agent', updated_by: 'agent', created_at: 1, updated_at: 1, archived_at: null });
+  db.rows.push({ project_id: 'C_X', name: 'channel-only', ...base });
+
+  const cat = await loadSkillCatalog(db, 'C_X');
+  const names = cat.map((c) => c.name);
+  assert.deepEqual(names, ['channel-only', 'personality', 'using-connections'], 'global ∪ channel, sorted, deduped');
+  assert.equal(cat.find((c) => c.name === 'personality')!.description, 'channel-personality', 'channel wins on name');
+});
+
+test('loadActiveSkillBody: channel body wins over global; falls back to global', async () => {
+  const db = new FakeD1();
+  db.rows.push({ project_id: '__global__', name: 'using-connections', description: 'd', body_md: 'GLOBAL-BODY', state: 'active', created_by: 'seed', updated_by: 'seed', created_at: 1, updated_at: 1, archived_at: null });
+  db.rows.push({ project_id: '__global__', name: 'personality', description: 'd', body_md: 'GLOBAL-P', state: 'active', created_by: 'seed', updated_by: 'seed', created_at: 1, updated_at: 1, archived_at: null });
+  db.rows.push({ project_id: 'C_X', name: 'personality', description: 'd', body_md: 'CHANNEL-P', state: 'active', created_by: 'agent', updated_by: 'agent', created_at: 1, updated_at: 1, archived_at: null });
+
+  assert.equal(await loadActiveSkillBody(db, 'C_X', 'using-connections'), 'GLOBAL-BODY', 'inherits global');
+  assert.equal(await loadActiveSkillBody(db, 'C_X', 'personality'), 'CHANNEL-P', 'channel overrides global');
+  assert.equal(await loadActiveSkillBody(db, 'C_X', 'nope'), null, 'absent in both → null');
+});
+
+test('a channel write does NOT touch __global__ (global catalog stays empty)', async () => {
+  const db = new FakeD1();
+  db.rows.push({ project_id: 'C_X', name: 'mine', description: 'd', body_md: 'b', state: 'active', created_by: 'agent', updated_by: 'agent', created_at: 1, updated_at: 1, archived_at: null });
+  const globalCat = await loadSkillCatalog(db, '__global__');
+  // loadSkillCatalog('__global__') binds (GLOBAL, '__global__') → both args identical → only global rows (none)
+  assert.equal(globalCat.length, 0, '__global__ unaffected by a channel write');
 });
 
 const main = async () => {

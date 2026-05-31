@@ -16,6 +16,12 @@
 
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
 
+// Reserved project holding the shared skill baseline every channel inherits. Double-underscore can't
+// collide with a Slack channel id (e.g. "C0B6VFM…"). Skills here are seeded/operator-written; a
+// channel agent can only ever write its OWN project's skills (save/archive/restore stay channel-scoped),
+// so it can never edit the shared baseline.
+export const GLOBAL_PROJECT_ID = '__global__';
+
 // Minimal D1 surface we use (avoids pulling all of @cloudflare/workers-types here).
 export interface D1Like {
   prepare(query: string): {
@@ -50,22 +56,34 @@ export function skillBody(md: string): string {
 }
 
 // L1: the cheap catalog (names + descriptions of ACTIVE skills) injected into the system prompt.
+// Merges the shared __global__ baseline with the channel's own skills; the channel WINS on name.
 export async function loadSkillCatalog(db: D1Like, projectId: string): Promise<{ name: string; description: string }[]> {
   const { results } = await db
-    .prepare("SELECT name, description FROM skills WHERE project_id=? AND state='active' ORDER BY name")
-    .bind(projectId)
-    .all<{ name: string; description: string }>();
-  return results ?? [];
+    .prepare(
+      "SELECT name, description, project_id FROM skills WHERE project_id IN (?, ?) AND state='active'",
+    )
+    .bind(GLOBAL_PROJECT_ID, projectId)
+    .all<{ name: string; description: string; project_id: string }>();
+  const byName = new Map<string, { name: string; description: string }>();
+  // global first, then channel overwrites on name collision.
+  for (const r of results ?? []) if (r.project_id === GLOBAL_PROJECT_ID) byName.set(r.name, { name: r.name, description: r.description });
+  for (const r of results ?? []) if (r.project_id === projectId) byName.set(r.name, { name: r.name, description: r.description });
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// L2 (active-only): full body of an ACTIVE skill. Used by the load_skill tool and to apply the
-// `personality` skill. An archived skill is not loadable — returns null, same as a missing one.
+// L2 (active-only): full body of an ACTIVE skill, channel-first then __global__ fallback. Used by the
+// load_skill tool and to apply the `personality` skill. An archived skill is not loadable → null.
 export async function loadActiveSkillBody(db: D1Like, projectId: string, name: string): Promise<string | null> {
-  const row = await db
-    .prepare("SELECT body_md FROM skills WHERE project_id=? AND name=? AND state='active'")
-    .bind(projectId, name)
-    .first<{ body_md: string }>();
-  return row?.body_md ?? null;
+  const { results } = await db
+    .prepare(
+      "SELECT body_md, project_id FROM skills WHERE name=? AND project_id IN (?, ?) AND state='active'",
+    )
+    .bind(name, GLOBAL_PROJECT_ID, projectId)
+    .all<{ body_md: string; project_id: string }>();
+  const channel = (results ?? []).find((r) => r.project_id === projectId);
+  if (channel) return channel.body_md;
+  const global = (results ?? []).find((r) => r.project_id === GLOBAL_PROJECT_ID);
+  return global?.body_md ?? null;
 }
 
 // What a scheduled fire learns when it resolves a reminder's skill name: the body if active,
