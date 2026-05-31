@@ -17,7 +17,7 @@
 
 import type { ToolDefinition } from '@flue/runtime';
 import type { Binding } from './bindings';
-import { githubReadTools } from './github';
+import { githubReadTools, githubCallApiTool } from './github';
 
 export interface ConnectionState {
   provider: string;
@@ -91,7 +91,14 @@ export function connectionTools(
   const ghCreds = secrets['github'];
   if (github && ghCreds) {
     const repo = typeof ghCreds.config.repo === 'string' ? ghCreds.config.repo : undefined;
-    tools.push(...githubReadTools(ghCreds.secret, repo));
+    // apiMode 'generic' (Test A, bet-on-intelligence): expose ONLY the one generic call tool, so
+    // the experiment measures whether the model composes raw API calls — not whether it falls back
+    // to the typed tools. Default = the proven typed reads (v2a, untouched + reversible).
+    if (ghCreds.config.apiMode === 'generic') {
+      tools.push(githubCallApiTool(ghCreds.secret, repo));
+    } else {
+      tools.push(...githubReadTools(ghCreds.secret, repo));
+    }
     // v2b plugs the github_create_issue propose-tool in here.
   }
 

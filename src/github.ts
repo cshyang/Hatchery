@@ -163,6 +163,41 @@ export const GITHUB_READ_TOOL_NAMES = [
   'github_get_file_contents',
 ] as const;
 
+// "Bet on intelligence" (ADR 0003, the 10-star reframe). ONE generic tool: the model composes the
+// GitHub REST call itself from what it knows, the broker injects the PAT at the network boundary.
+// If this works reliably, the hand-written read tools above (and any vendor's bundled tools) are
+// unnecessary. GET-only here — writes (POST/PATCH/DELETE) are the sharp edge and go through the
+// v2b approval gate, never a blind model-issued call. The method param exists so the shape is the
+// real generic one; non-GET is refused with a pointer to the gate, not silently dropped.
+export const GITHUB_CALL_API_TOOL_NAME = 'github_call_api';
+
+export function githubCallApiTool(pat: string, repo: string | undefined): ToolDefinition {
+  const repoHint = repo ? ` The connected repo is ${repo} (use it as owner/name unless told otherwise).` : '';
+  return defineTool({
+    name: GITHUB_CALL_API_TOOL_NAME,
+    description:
+      'Call the GitHub REST API directly. You compose the request from your knowledge of the API. ' +
+      'Read-only for now: only method "GET" is allowed (writes need human approval and are not wired yet). ' +
+      'path is the API path after https://api.github.com, e.g. "/repos/owner/name/issues?state=open&per_page=20" ' +
+      'or "/repos/owner/name/contents/README.md". Authentication is handled for you — never include tokens.' +
+      repoHint,
+    parameters: Type.Object({
+      method: Type.String({ description: 'HTTP method. Only "GET" is permitted right now.' }),
+      path: Type.String({ description: 'API path beginning with "/", including any query string.' }),
+    }),
+    async execute({ method, path }) {
+      const m = String(method).toUpperCase();
+      if (m !== 'GET') {
+        throw new Error(`Only GET is allowed via github_call_api; "${m}" is a write and needs approval (not wired yet).`);
+      }
+      const p = String(path).startsWith('/') ? String(path) : `/${String(path)}`;
+      const data = await ghGet(pat, p);
+      const out = JSON.stringify(data, null, 2);
+      return out.length > 8000 ? out.slice(0, 8000) + '\n…(truncated)' : out;
+    },
+  });
+}
+
 /** The post-approval write executor (ADR D4). Stateless — called by the gateway after the
  *  operator approves, reading args from the stored pending_actions row. Never model-callable. */
 export async function executeCreateIssue(

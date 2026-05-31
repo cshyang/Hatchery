@@ -11,7 +11,7 @@ import {
   connectionsBlock,
   PROVIDER_CATALOG,
 } from './connections';
-import { GITHUB_READ_TOOL_NAMES } from './github';
+import { GITHUB_READ_TOOL_NAMES, GITHUB_CALL_API_TOOL_NAME } from './github';
 import type { Binding } from './bindings';
 
 // A minimal binding with a GitHub connection declared (secret provided via env, not here).
@@ -70,6 +70,29 @@ test('gating: GitHub read tools appear only when connected, and the write is NOT
   const names: string[] = tools.map((t) => t.name as string).sort();
   assert.ok(!names.includes('github_create_issue'), 'write tool must NOT be exposed in v2a');
   assert.deepEqual(names, [...GITHUB_READ_TOOL_NAMES].sort(), 'exactly the read tools');
+});
+
+test('apiMode "generic" (Test A) exposes ONLY github_call_api, not the typed reads', async () => {
+  const GEN = [{ provider: 'github', tokenRef: 'GITHUB_PAT_DEMO', config: { repo: 'o/r', apiMode: 'generic' } }];
+  const env = { GITHUB_PAT_DEMO: 'ghp_realtoken' };
+  const state = connectionState(binding(GEN), env);
+  const creds = resolveConnection(binding(GEN), env, 'github')!;
+  const tools = connectionTools(state, { github: creds });
+  const names = tools.map((t) => t.name as string);
+  assert.deepEqual(names, [GITHUB_CALL_API_TOOL_NAME], 'generic mode = exactly the one call tool');
+  // and the typed reads must NOT also be present (else the experiment is muddied)
+  for (const typed of GITHUB_READ_TOOL_NAMES) assert.ok(!names.includes(typed), `${typed} must be hidden in generic mode`);
+});
+
+test('github_call_api refuses non-GET (writes go through the approval gate, not a blind call)', async () => {
+  const GEN = [{ provider: 'github', tokenRef: 'GITHUB_PAT_DEMO', config: { repo: 'o/r', apiMode: 'generic' } }];
+  const env = { GITHUB_PAT_DEMO: 'ghp_realtoken' };
+  const creds = resolveConnection(binding(GEN), env, 'github')!;
+  const [callApi] = connectionTools(connectionState(binding(GEN), env), { github: creds });
+  await assert.rejects(
+    () => (callApi.execute as (a: unknown) => Promise<unknown>)({ method: 'POST', path: '/repos/o/r/issues' }),
+    /Only GET is allowed/,
+  );
 });
 
 test('connectionsBlock shows connected vs not-connected from real state', async () => {

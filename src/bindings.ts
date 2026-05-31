@@ -79,7 +79,11 @@ export const bindings: readonly Binding[] = [
     // GitHub connection (ADR 0003). Shows as "not connected" until the GITHUB_PAT_ECODARK Worker
     // secret is set (`wrangler secret put GITHUB_PAT_ECODARK --name hatchery`). config.repo is the
     // default repo for the read tools when the model omits owner/name.
-    connections: [{ provider: 'github', tokenRef: 'GITHUB_PAT_ECODARK', config: { repo: 'ecodarklabs/website' } }],
+    // apiMode 'generic' runs Test A (bet-on-intelligence): the agent gets ONE github_call_api tool
+    // and composes REST calls itself. Drop apiMode (or set 'typed') to revert to the v2a read tools.
+    connections: [
+      { provider: 'github', tokenRef: 'GITHUB_PAT_ECODARK', config: { repo: 'ecodarklabs/website', apiMode: 'generic' } },
+    ],
     status: 'active',
   },
 ];

@@ -27,6 +27,38 @@ Status: Proposed (design) · Date: 2026-05-30 · Builds on [0001](0001-runtime-a
 > `pending_actions`/`approval_policies` (the write-approval machinery) return in **v2b**, which is
 > where they're actually used.
 
+> **Update 2026-05-31 — Test A (bet-on-intelligence) result + the generalization finding.**
+> Built ONE generic tool `github_call_api(method, path)` (gated to `apiMode: 'generic'` on the
+> connection config; default stays the typed v2a reads). The broker injects the PAT at the network
+> boundary; the model composes the REST call from its own knowledge. Deployed live (version
+> `7286e71a`). **Result: passed cold through Tier 4.** The model correctly composed endpoints we
+> never hand-wrote — `/repos/{r}/languages` (exact byte counts) and `/repos/{r}/contributors`
+> (commit counts) — plus README-via-contents (base64-decoded). Transcript verified in D1.
+>
+> **What it proves and what it does NOT.** It proves the *mechanism*: a single generic tool +
+> broker-injected credential lets the model reach the long tail of an API for free, so for a
+> well-represented provider we need neither hand-written typed tools nor a vendor's bundled tools.
+> It does NOT prove universal coverage. Bet-on-intelligence is really a bet on **training density ×
+> API regularity**, and GitHub REST maxes both — it's the ceiling, not the floor. Two structural
+> limits surfaced, not tuning issues:
+> 1. **The method-based write-gate is GitHub-shaped.** "GET = read, POST = write→approval" breaks
+>    on APIs that read via POST. **Notion** queries a database with `POST /v1/databases/{id}/query`
+>    and searches with `POST /v1/search` — both reads. **Linear** is GraphQL: one endpoint, every
+>    op is `POST /graphql`. So a GET-only gate blocks legitimate reads on both. Read-vs-write must
+>    be a per-provider classification, not an HTTP-method heuristic.
+> 2. **Low-density / quirky providers need a crib.** Notion needs a required `Notion-Version`
+>    header the model routinely omits; PostHog's project-scoped paths and HogQL are sparse in
+>    training; Google/Meta Ads paths are versioned and arcane. The fix is a small per-provider
+>    **crib** (base URL, required headers, the handful of endpoints that matter, GraphQL pointer)
+>    injected into the prompt via the existing skills/blocks mechanism — a few hundred tokens, not
+>    a maintained typed toolkit.
+>
+> **Architecture conclusion (refines the vendor question):** generic `call_api` is the DEFAULT for
+> every provider; a per-provider crib closes the density gap only where needed; the read/write
+> classification is per-provider. The **vendor stays auth-only** — Composio's tool-bundling is not
+> needed. Next: a live test on a LOW-density provider (Notion) to find the floor; that test, not
+> GitHub, decides the design. See `src/github.ts` (`githubCallApiTool`) and the `apiMode` seam.
+
 ## Context
 
 The agent has identity, skills, memory, and self-scheduling — but no hands. It can't
