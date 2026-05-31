@@ -223,6 +223,48 @@ test('D1 layer: loadConnections returns metadata only and never a secret value',
   assert.ok(!('secret' in rows[0]) && !('value' in rows[0]));
 });
 
+test('resolveConnection: tokenRef path still returns a literal string secret', async () => {
+  const resolved = resolveConnection(GH, { GITHUB_PAT_DEMO: 'ghp_realtoken' }, 'github');
+  assert.equal(typeof resolved?.secret, 'string');
+  assert.equal(resolved?.secret, 'ghp_realtoken');
+});
+
+test('resolveConnection: connectionRef path returns a LAZY thunk, memoized to ONE fetch per turn', async () => {
+  let fetchCount = 0;
+  const fakeFetchToken = async () => { fetchCount++; return 'live_at_777'; };
+  const resolved = resolveConnection(NANGO_REF, { NANGO_SECRET_KEY: 'nk' }, 'notion', { fetchToken: fakeFetchToken });
+  assert.equal(typeof resolved?.secret, 'function', 'Nango credential is a deferred fetch');
+  assert.equal(fetchCount, 0, 'building the credential must NOT fetch (initializer stays network-light)');
+  const get = resolved!.secret as () => Promise<string>;
+  assert.equal(await get(), 'live_at_777');
+  assert.equal(await get(), 'live_at_777');
+  assert.equal(fetchCount, 1, 'a multi-call turn pays exactly one Nango round-trip (memoized)');
+});
+
+test('resolveConnection: connectionRef but NO platform key → null (no broken tool)', async () => {
+  assert.equal(resolveConnection(NANGO_REF, {}, 'notion'), null);
+});
+
+test('a Nango-backed notion connection builds notion_call_api whose execute resolves the lazy token', async () => {
+  let fetchCount = 0;
+  const fakeFetchToken = async () => { fetchCount++; return 'live_notion_at'; };
+  const specs: ConnectionSpec[] = [{ provider: 'notion', connectionRef: 'conn_42', config: {} }];
+  const env = { NANGO_SECRET_KEY: 'nk' };
+  const creds = resolveConnection(specs, env, 'notion', { fetchToken: fakeFetchToken })!;
+  const tools = connectionTools(connectionState(specs, env), { notion: creds });
+  assert.deepEqual(tools.map((t) => t.name), ['notion_call_api'], 'connected Nango notion exposes the generic call tool');
+  assert.equal(fetchCount, 0, 'building the tool must not fetch a token');
+  // execute resolves the lazy token (a network error after that is fine; a method-gate refusal is not).
+  await assert.doesNotReject(async () => {
+    try {
+      await (tools[0].execute as (a: unknown) => Promise<unknown>)({ method: 'POST', path: '/v1/search', body: '{}' });
+    } catch (e) {
+      if (/Only GET is allowed/.test((e as Error).message)) throw e;
+    }
+  });
+  assert.ok(fetchCount >= 1, 'execute resolved the lazy token at least once');
+});
+
 const main = async () => {
   let pass = 0;
   let fail = 0;
