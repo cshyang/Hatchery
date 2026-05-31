@@ -3,6 +3,9 @@
   "name": "hatchery",
   "compatibility_date": "2026-04-01",
   "compatibility_flags": ["nodejs_compat"],
+  // Persisted logs (queryable in the dashboard) so a failed turn can be inspected after the fact
+  // instead of racing a live `wrangler tail`. head_sampling_rate 1 = keep every invocation.
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
   "kv_namespaces": [
     { "binding": "SLACK_EVENTS", "id": "21c63a4fa37540159e6e8b0a1ac19b66" }
   ],
