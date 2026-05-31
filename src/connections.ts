@@ -199,17 +199,28 @@ function useGenericApi(provider: string, config: Record<string, unknown>): boole
 
 // The CONNECTIONS prompt block (mirrors the skills catalog injection). Tells the agent what it
 // can reach and what is connectable but not yet wired by an operator.
-export function connectionsBlock(state: ConnectionState[], catalog: { provider: string; summary: string }[]): string {
+export function connectionsBlock(
+  state: ConnectionState[],
+  catalog: { provider: string; summary: string }[],
+  canRequest = false,
+): string {
   const byProvider = new Map(state.map((s) => [s.provider, s]));
   const lines = catalog.map((c) => {
     const s = byProvider.get(c.provider);
     if (s?.status === 'connected') return `  ✅ ${c.provider} (connected) — ${c.summary}`;
     return `  ⚪ ${c.provider} (not connected) — ${c.summary}`;
   });
+  const intro = canRequest
+    ? 'External services you can reach. Connected ones expose tools you can call now. For one that is NOT ' +
+      'connected, call request_connection with the provider name — you get a secure link to share; the ' +
+      'person authorizes off-Slack (you never see the credential) and that provider\'s tools appear ' +
+      'automatically once they finish.'
+    : 'External services you can reach. Connected ones expose tools you can call now; the rest must be ' +
+      'wired by an operator first (mention that you need it — you cannot connect it yourself).';
   return (
     'YOUR CONNECTIONS\n' +
-    'External services you can reach. Connected ones expose tools you can call now; the rest must be ' +
-    'wired by an operator first (mention that you need it — you cannot connect it yourself).\n' +
+    intro +
+    '\n' +
     lines.join('\n') +
     '\nKeep API work tight: reach the answer in as few calls as you can (ideally 1–3). Do NOT fan out ' +
     'to read every result of a search/list — fetch the list, then read details only for what the user ' +
