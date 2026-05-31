@@ -40,6 +40,7 @@ function binding(connections?: ConnectionSpec[]): Binding {
 }
 
 const GH: ConnectionSpec[] = [{ provider: 'github', tokenRef: 'GITHUB_PAT_DEMO', config: { repo: 'o/r' } }];
+const NANGO_REF: ConnectionSpec[] = [{ provider: 'notion', connectionRef: 'conn_42', config: {} }];
 
 // In-memory D1 fake — only the two statements connections.ts issues (coupled on purpose).
 interface Row {
@@ -110,6 +111,18 @@ test('connected: state flips when the Worker secret is present; resolve returns 
 test('no declared connection → nothing, even if a stray secret exists in env', async () => {
   assert.equal(connectionState([], { GITHUB_PAT_DEMO: 'ghp_x' }).length, 0);
   assert.equal(resolveConnection([], { GITHUB_PAT_DEMO: 'ghp_x' }, 'github'), null);
+});
+
+test('connectionRef + NANGO_SECRET_KEY present → connected (managed-OAuth backend)', async () => {
+  assert.equal(connectionState(NANGO_REF, {}).length, 1);
+  assert.equal(connectionState(NANGO_REF, {})[0].status, 'not_connected', 'no platform key → cannot fetch → not connected');
+  assert.equal(connectionState(NANGO_REF, { NANGO_SECRET_KEY: 'nk_secret' })[0].status, 'connected');
+});
+
+test('a Worker-secret connection still drives state independently of NANGO_SECRET_KEY', async () => {
+  // tokenRef path is unaffected by the Nango branch.
+  assert.equal(connectionState(GH, { NANGO_SECRET_KEY: 'nk_secret' })[0].status, 'not_connected');
+  assert.equal(connectionState(GH, { GITHUB_PAT_DEMO: 'ghp_x' })[0].status, 'connected');
 });
 
 test('gating: GitHub typed read tools appear only when connected, and the write is NOT exposed', async () => {

@@ -29,14 +29,20 @@ export interface ConnectionState {
 
 /** Derive each declared connection's state from its specs + whether its Worker secret is present.
  *  Drives gating + the prompt block. Pure over specs (the initializer resolves specs first via
- *  loadConnectionSpecs). Never exposes the secret. A connectionRef-only row (managed-OAuth, no
- *  tokenRef) reads as not_connected until that backend lands. */
+ *  loadConnectionSpecs). Never exposes the secret. A connectionRef row reads as connected once
+ *  NANGO_SECRET_KEY is present (the managed-OAuth backend; the token is fetched lazily in the tool). */
 export function connectionState(specs: ConnectionSpec[], env: Record<string, unknown>): ConnectionState[] {
+  const nangoKey = env.NANGO_SECRET_KEY;
+  const hasNangoPlatform = typeof nangoKey === 'string' && !!nangoKey;
   return specs.map((s) => {
     const token = s.tokenRef ? env[s.tokenRef] : undefined;
+    const hasWorkerSecret = typeof token === 'string' && !!token;
+    // Managed-OAuth (Nango): a connection_ref means a connection exists; the platform key means we
+    // can fetch its token. Both → connected (the token itself is fetched lazily in the tool).
+    const hasNango = !!s.connectionRef && hasNangoPlatform;
     return {
       provider: s.provider,
-      status: typeof token === 'string' && token ? 'connected' : 'not_connected',
+      status: hasWorkerSecret || hasNango ? 'connected' : 'not_connected',
       config: s.config ?? {},
     };
   });
