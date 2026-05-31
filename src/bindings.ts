@@ -172,20 +172,17 @@ export function bindingRecordToBinding(r: BindingRecord): Binding {
 
 /** Live binding rows. Pass a projectId to filter to one; omit for all. Metadata only — never a token. */
 export async function loadBindings(db: D1Like, projectId?: string): Promise<BindingRecord[]> {
-  const stmt = projectId
-    ? db.prepare(
-        'SELECT project_id, provider, external_account_id, external_space_id, transport_bot_id, transport_token_ref, default_profile, model, status FROM bindings WHERE project_id=?',
-      ).bind(projectId)
-    : db.prepare(
-        'SELECT project_id, provider, external_account_id, external_space_id, transport_bot_id, transport_token_ref, default_profile, model, status FROM bindings',
-      ).bind();
+  const cols =
+    'SELECT project_id, external_account_id, external_space_id, transport_bot_id, transport_token_ref, default_profile, model, status FROM bindings';
+  const sql = projectId ? `${cols} WHERE project_id=?` : cols;
+  const stmt = projectId ? db.prepare(sql).bind(projectId) : db.prepare(sql).bind();
   const { results } = await stmt.all<{
-    project_id: string; provider: string; external_account_id: string; external_space_id: string;
+    project_id: string; external_account_id: string; external_space_id: string;
     transport_bot_id: string; transport_token_ref: string; default_profile: string; model: string | null; status: string;
   }>();
   return (results ?? []).map((r) => ({
     projectId: r.project_id,
-    provider: 'slack',
+    provider: 'slack', // schema enforces provider DEFAULT 'slack'; multi-provider is a future schema change
     externalAccountId: r.external_account_id,
     externalSpaceId: r.external_space_id,
     transportBotId: r.transport_bot_id,
@@ -205,8 +202,9 @@ export interface AutoCreateBindingInput {
   createdBy?: string;
 }
 
-/** Upsert a binding row. INSERT ... ON CONFLICT(project_id) DO NOTHING — race-safe: two near-simultaneous
- *  @mentions in a new channel create exactly one row. The bot token is referenced by name, never stored. */
+/** Insert a per-channel binding row on first @mention. INSERT ... ON CONFLICT(project_id) DO NOTHING —
+ *  race-safe: two near-simultaneous @mentions in a new channel create exactly one row. The bot token is
+ *  referenced by name, never stored. */
 export async function autoCreateBinding(db: D1Like, input: AutoCreateBindingInput): Promise<void> {
   const now = Date.now();
   await db

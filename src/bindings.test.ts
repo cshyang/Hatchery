@@ -37,19 +37,28 @@ class FakeD1 implements D1Like {
     };
   }
   #mutate(sql: string, a: unknown[]) {
-    if (sql.startsWith('INSERT INTO bindings')) {
-      const [projectId, , accountId, spaceId, botId, tokenRef, , model, status, createdBy, createdAt, updatedAt] = a;
-      // ON CONFLICT(project_id) DO NOTHING — a second insert for the same project_id is a no-op.
-      if (this.rows.some((r) => r.project_id === projectId)) return;
-      this.rows.push({
-        project_id: projectId, provider: 'slack', external_account_id: accountId, external_space_id: spaceId,
-        transport_bot_id: botId, transport_token_ref: tokenRef, default_profile: 'project-assistant', model,
-        status, created_by: createdBy, created_at: createdAt, updated_at: updatedAt,
+    if (!sql.startsWith('INSERT INTO bindings')) return;
+    // Both inserts share the same 12-bind column order:
+    // [project_id, 'slack', account, space, bot, tokenRef, profile, model, status, created_by, created_at, updated_at]
+    const [projectId, , accountId, spaceId, botId, tokenRef, profile, model, status, createdBy, createdAt, updatedAt] = a;
+    const existing = this.rows.find((r) => r.project_id === projectId);
+    if (existing) {
+      if (sql.includes('DO NOTHING')) return; // autoCreateBinding: ignore on conflict
+      // upsertBinding: DO UPDATE — overwrite mutable fields, preserve created_at.
+      Object.assign(existing, {
+        external_account_id: accountId, external_space_id: spaceId, transport_bot_id: botId,
+        transport_token_ref: tokenRef, default_profile: profile, model, status, updated_at: updatedAt,
       });
+      return;
     }
+    this.rows.push({
+      project_id: projectId, provider: 'slack', external_account_id: accountId, external_space_id: spaceId,
+      transport_bot_id: botId, transport_token_ref: tokenRef, default_profile: profile, model,
+      status, created_by: createdBy, created_at: createdAt, updated_at: updatedAt,
+    });
   }
   #query(sql: string, a: unknown[]): Row[] {
-    if (sql.startsWith('SELECT project_id, provider')) {
+    if (sql.startsWith('SELECT project_id, external_account_id')) {
       // loadBindings(projectId?) — if a projectId arg is bound, filter; else all.
       return a.length ? this.rows.filter((r) => r.project_id === a[0]) : this.rows;
     }
@@ -138,6 +147,21 @@ test('disabled D1 binding does not resolve', async () => {
   });
   assert.equal(await bindingBySlack('T0B6VB415TQ', 'C_OFF', db), undefined, 'disabled is not active');
   assert.equal(await bindingByProject('C_OFF', db), undefined);
+});
+
+test('upsertBinding overwrites an existing row (DO UPDATE), preserving project_id', async () => {
+  const db = new FakeD1();
+  await autoCreateBinding(db, { teamId: 'T0B6VB415TQ', channelId: 'C_UP', transportBotId: 'U1', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT' });
+  // operator overwrites the bot id + pins a model on the SAME project
+  await upsertBinding(db, {
+    projectId: 'C_UP', provider: 'slack', externalAccountId: 'T0B6VB415TQ', externalSpaceId: 'C_UP',
+    transportBotId: 'U2_CHANGED', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT', defaultProfile: 'project-assistant',
+    model: 'zai/glm-5.1', status: 'active',
+  });
+  const rows = await loadBindings(db, 'C_UP');
+  assert.equal(rows.length, 1, 'still one row (overwrite, not insert)');
+  assert.equal(rows[0].transportBotId, 'U2_CHANGED', 'DO UPDATE overwrote the bot id');
+  assert.equal(rows[0].model, 'zai/glm-5.1', 'DO UPDATE applied the model pin');
 });
 
 const main = async () => {
