@@ -16,6 +16,12 @@
 
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
 
+// Reserved project holding the shared skill baseline every channel inherits. Double-underscore can't
+// collide with a Slack channel id (e.g. "C0B6VFM…"). Skills here are seeded/operator-written; a
+// channel agent can only ever write its OWN project's skills (save/archive/restore stay channel-scoped),
+// so it can never edit the shared baseline.
+export const GLOBAL_PROJECT_ID = '__global__';
+
 // Minimal D1 surface we use (avoids pulling all of @cloudflare/workers-types here).
 export interface D1Like {
   prepare(query: string): {
@@ -50,22 +56,34 @@ export function skillBody(md: string): string {
 }
 
 // L1: the cheap catalog (names + descriptions of ACTIVE skills) injected into the system prompt.
+// Merges the shared __global__ baseline with the channel's own skills; the channel WINS on name.
 export async function loadSkillCatalog(db: D1Like, projectId: string): Promise<{ name: string; description: string }[]> {
   const { results } = await db
-    .prepare("SELECT name, description FROM skills WHERE project_id=? AND state='active' ORDER BY name")
-    .bind(projectId)
-    .all<{ name: string; description: string }>();
-  return results ?? [];
+    .prepare(
+      "SELECT name, description, project_id FROM skills WHERE project_id IN (?, ?) AND state='active'",
+    )
+    .bind(GLOBAL_PROJECT_ID, projectId)
+    .all<{ name: string; description: string; project_id: string }>();
+  const byName = new Map<string, { name: string; description: string }>();
+  // global first, then channel overwrites on name collision.
+  for (const r of results ?? []) if (r.project_id === GLOBAL_PROJECT_ID) byName.set(r.name, { name: r.name, description: r.description });
+  for (const r of results ?? []) if (r.project_id === projectId) byName.set(r.name, { name: r.name, description: r.description });
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// L2 (active-only): full body of an ACTIVE skill. Used by the load_skill tool and to apply the
-// `personality` skill. An archived skill is not loadable — returns null, same as a missing one.
+// L2 (active-only): full body of an ACTIVE skill, channel-first then __global__ fallback. Used by the
+// load_skill tool and to apply the `personality` skill. An archived skill is not loadable → null.
 export async function loadActiveSkillBody(db: D1Like, projectId: string, name: string): Promise<string | null> {
-  const row = await db
-    .prepare("SELECT body_md FROM skills WHERE project_id=? AND name=? AND state='active'")
-    .bind(projectId, name)
-    .first<{ body_md: string }>();
-  return row?.body_md ?? null;
+  const { results } = await db
+    .prepare(
+      "SELECT body_md, project_id FROM skills WHERE name=? AND project_id IN (?, ?) AND state='active'",
+    )
+    .bind(name, GLOBAL_PROJECT_ID, projectId)
+    .all<{ body_md: string; project_id: string }>();
+  const channel = (results ?? []).find((r) => r.project_id === projectId);
+  if (channel) return channel.body_md;
+  const global = (results ?? []).find((r) => r.project_id === GLOBAL_PROJECT_ID);
+  return global?.body_md ?? null;
 }
 
 // What a scheduled fire learns when it resolves a reminder's skill name: the body if active,
@@ -76,16 +94,27 @@ export type RunnableSkill =
   | { status: 'archived' }
   | { status: 'absent' };
 
-// L2 (status-aware): for scheduled fire only. Reads any state so the caller can DISTINGUISH
-// archived from absent and refuse both with a clear reason (see .flue/app.ts).
+// L2 (status-aware): for scheduled fire. Reads global∪channel (channel wins) so a scheduled GLOBAL
+// skill resolves, while still distinguishing archived/absent. Resolution: prefer the channel's row;
+// if the channel actively overrides, use it; if the channel's override is archived, fall back to the
+// global active body (retiring an override re-inherits the baseline rather than refusing the run);
+// if only the channel row exists and it's archived, refuse (archived); absent in both → absent.
 export async function loadRunnableSkillBody(db: D1Like, projectId: string, name: string): Promise<RunnableSkill> {
-  const row = await db
-    .prepare('SELECT body_md, state FROM skills WHERE project_id=? AND name=?')
-    .bind(projectId, name)
-    .first<{ body_md: string; state: string }>();
-  if (!row) return { status: 'absent' };
-  if (row.state === 'archived') return { status: 'archived' };
-  return { status: 'active', body: row.body_md };
+  const { results } = await db
+    .prepare('SELECT body_md, state, project_id FROM skills WHERE name=? AND project_id IN (?, ?)')
+    .bind(name, GLOBAL_PROJECT_ID, projectId)
+    .all<{ body_md: string; state: string; project_id: string }>();
+  const rows = results ?? [];
+  const channel = rows.find((r) => r.project_id === projectId);
+  const global = rows.find((r) => r.project_id === GLOBAL_PROJECT_ID);
+  // channel active override wins
+  if (channel && channel.state === 'active') return { status: 'active', body: channel.body_md };
+  // channel archived but a global active exists → run global (re-inherit baseline)
+  if (global && global.state === 'active') return { status: 'active', body: global.body_md };
+  // no active anywhere: if the channel row exists (archived) report archived; else check global
+  if (channel && channel.state === 'archived') return { status: 'archived' };
+  if (global && global.state === 'archived') return { status: 'archived' };
+  return { status: 'absent' };
 }
 
 export function skillTools(db: D1Like, projectId: string): ToolDefinition[] {

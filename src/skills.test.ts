@@ -55,8 +55,35 @@ class FakeD1 implements D1Like {
   }
 
   private select(q: string, v: unknown[]): Record<string, unknown>[] {
+    // Global-merge catalog (faithful — returns ALL matching active rows; production does the dedup):
+    // SELECT name, description, project_id WHERE project_id IN (?, ?) AND state='active'
+    if (q.includes('SELECT name, description') && q.includes('IN (')) {
+      const [pGlobal, pChannel] = v as [string, string];
+      return this.rows
+        .filter((x) => (x.project_id === pGlobal || x.project_id === pChannel) && x.state === 'active')
+        .map((r) => ({ name: r.name, description: r.description, project_id: r.project_id }));
+    }
+    // loadRunnableSkillBody (global∪channel, any state): WHERE name=? AND project_id IN (?, ?)
+    // MUST come before the active-merge body branch — discriminated by 'body_md, state' substring.
+    if (q.includes('body_md, state') && q.includes('IN (')) {
+      const [name, pGlobal, pChannel] = v as [string, string, string];
+      const out: Record<string, unknown>[] = [];
+      for (const r of this.rows.filter((x) => x.name === name && (x.project_id === pGlobal || x.project_id === pChannel))) {
+        out.push({ body_md: r.body_md, state: r.state, project_id: r.project_id });
+      }
+      return out;
+    }
+    // Global-merge body (active-only): SELECT body_md, project_id WHERE name=? AND project_id IN (?, ?) AND state='active'
+    if (q.includes('SELECT body_md') && q.includes('IN (')) {
+      const [name, pGlobal, pChannel] = v as [string, string, string];
+      const out: Record<string, unknown>[] = [];
+      for (const r of this.rows.filter((x) => x.name === name && (x.project_id === pGlobal || x.project_id === pChannel) && x.state === 'active')) {
+        out.push({ body_md: r.body_md, project_id: r.project_id });
+      }
+      return out;
+    }
     if (q.includes('body_md, state')) {
-      // loadRunnableSkillBody: any state
+      // legacy single-project shape (kept for safety): WHERE project_id=? AND name=?
       const row = this.find(v[0] as string, v[1] as string);
       return row ? [{ body_md: row.body_md, state: row.state }] : [];
     }
@@ -220,6 +247,79 @@ test('toolset has no hard-delete', async () => {
   const names = skillTools(new FakeD1(), 'P').map((t) => t.name).sort();
   assert.deepEqual(names, ['archive_skill', 'load_skill', 'restore_skill', 'save_skill']);
   assert.ok(!names.includes('delete_skill'), 'delete_skill must not exist — archive is the destructive ceiling');
+});
+
+test('catalog merges __global__ with the channel; channel wins on name', async () => {
+  const db = new FakeD1();
+  const base = { description: 'd', body_md: 'b', state: 'active', created_by: 'seed', updated_by: 'seed', created_at: 1, updated_at: 1, archived_at: null };
+  db.rows.push({ project_id: '__global__', name: 'using-connections', ...base });
+  db.rows.push({ project_id: '__global__', name: 'personality', description: 'global-personality', body_md: 'GLOBAL', state: 'active', created_by: 'seed', updated_by: 'seed', created_at: 1, updated_at: 1, archived_at: null });
+  db.rows.push({ project_id: 'C_X', name: 'personality', description: 'channel-personality', body_md: 'CHANNEL', state: 'active', created_by: 'agent', updated_by: 'agent', created_at: 1, updated_at: 1, archived_at: null });
+  db.rows.push({ project_id: 'C_X', name: 'channel-only', ...base });
+
+  const cat = await loadSkillCatalog(db, 'C_X');
+  const names = cat.map((c) => c.name);
+  assert.deepEqual(names, ['channel-only', 'personality', 'using-connections'], 'global ∪ channel, sorted, deduped');
+  assert.equal(cat.find((c) => c.name === 'personality')!.description, 'channel-personality', 'channel wins on name');
+});
+
+test('loadActiveSkillBody: channel body wins over global; falls back to global', async () => {
+  const db = new FakeD1();
+  db.rows.push({ project_id: '__global__', name: 'using-connections', description: 'd', body_md: 'GLOBAL-BODY', state: 'active', created_by: 'seed', updated_by: 'seed', created_at: 1, updated_at: 1, archived_at: null });
+  db.rows.push({ project_id: '__global__', name: 'personality', description: 'd', body_md: 'GLOBAL-P', state: 'active', created_by: 'seed', updated_by: 'seed', created_at: 1, updated_at: 1, archived_at: null });
+  db.rows.push({ project_id: 'C_X', name: 'personality', description: 'd', body_md: 'CHANNEL-P', state: 'active', created_by: 'agent', updated_by: 'agent', created_at: 1, updated_at: 1, archived_at: null });
+
+  assert.equal(await loadActiveSkillBody(db, 'C_X', 'using-connections'), 'GLOBAL-BODY', 'inherits global');
+  assert.equal(await loadActiveSkillBody(db, 'C_X', 'personality'), 'CHANNEL-P', 'channel overrides global');
+  assert.equal(await loadActiveSkillBody(db, 'C_X', 'nope'), null, 'absent in both → null');
+});
+
+test('a channel write does NOT touch __global__ (global catalog stays empty)', async () => {
+  const db = new FakeD1();
+  db.rows.push({ project_id: 'C_X', name: 'mine', description: 'd', body_md: 'b', state: 'active', created_by: 'agent', updated_by: 'agent', created_at: 1, updated_at: 1, archived_at: null });
+  const globalCat = await loadSkillCatalog(db, '__global__');
+  // loadSkillCatalog('__global__') binds (GLOBAL, '__global__') → both args identical → only global rows (none)
+  assert.equal(globalCat.length, 0, '__global__ unaffected by a channel write');
+});
+
+test('loadRunnableSkillBody: resolves a GLOBAL skill scheduled by a channel (active)', async () => {
+  const db = new FakeD1();
+  db.rows.push({ project_id: '__global__', name: 'using-connections', description: 'd', body_md: 'GLOBAL-BODY', state: 'active', created_by: 'seed', updated_by: 'seed', created_at: 1, updated_at: 1, archived_at: null });
+  const r = await loadRunnableSkillBody(db, 'C_X', 'using-connections');
+  assert.equal(r.status, 'active');
+  if (r.status === 'active') assert.equal(r.body, 'GLOBAL-BODY');
+});
+
+test('loadRunnableSkillBody: channel override wins over global', async () => {
+  const db = new FakeD1();
+  db.rows.push({ project_id: '__global__', name: 'personality', description: 'd', body_md: 'GLOBAL-P', state: 'active', created_by: 'seed', updated_by: 'seed', created_at: 1, updated_at: 1, archived_at: null });
+  db.rows.push({ project_id: 'C_X', name: 'personality', description: 'd', body_md: 'CHANNEL-P', state: 'active', created_by: 'agent', updated_by: 'agent', created_at: 1, updated_at: 1, archived_at: null });
+  const r = await loadRunnableSkillBody(db, 'C_X', 'personality');
+  assert.equal(r.status, 'active');
+  if (r.status === 'active') assert.equal(r.body, 'CHANNEL-P', 'channel wins');
+});
+
+test('loadRunnableSkillBody: a channel-archived override falls back to the global active body', async () => {
+  // If the channel archived its override, scheduled fire should run the GLOBAL skill (not refuse).
+  const db = new FakeD1();
+  db.rows.push({ project_id: '__global__', name: 'personality', description: 'd', body_md: 'GLOBAL-P', state: 'active', created_by: 'seed', updated_by: 'seed', created_at: 1, updated_at: 1, archived_at: null });
+  db.rows.push({ project_id: 'C_X', name: 'personality', description: 'd', body_md: 'CH', state: 'archived', created_by: 'agent', updated_by: 'agent', created_at: 1, updated_at: 1, archived_at: 2 });
+  const r = await loadRunnableSkillBody(db, 'C_X', 'personality');
+  assert.equal(r.status, 'active', 'archived channel override → falls back to global active');
+  if (r.status === 'active') assert.equal(r.body, 'GLOBAL-P');
+});
+
+test('loadRunnableSkillBody: channel-archived with NO global → archived (refused)', async () => {
+  const db = new FakeD1();
+  db.rows.push({ project_id: 'C_X', name: 'mine', description: 'd', body_md: 'b', state: 'archived', created_by: 'agent', updated_by: 'agent', created_at: 1, updated_at: 1, archived_at: 2 });
+  const r = await loadRunnableSkillBody(db, 'C_X', 'mine');
+  assert.equal(r.status, 'archived');
+});
+
+test('loadRunnableSkillBody: absent in both → absent', async () => {
+  const db = new FakeD1();
+  const r = await loadRunnableSkillBody(db, 'C_X', 'nope');
+  assert.equal(r.status, 'absent');
 });
 
 const main = async () => {

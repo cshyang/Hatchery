@@ -5,6 +5,7 @@ import { skillTools, loadSkillCatalog, loadActiveSkillBody, skillBody, type D1Li
 import { reminderTools } from '../../src/reminders';
 import { buildInstructions } from '../../src/prompt';
 import { loadProjectMemory, memoryTools, renderMemory } from '../../src/memory';
+import { userTools } from '../../src/users';
 import { logMessage } from '../../src/reflection';
 import {
   connectionState,
@@ -29,7 +30,9 @@ import {
 
 export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   const { projectId, slug } = parseAgentInstanceId(ctx.id);
-  const binding = bindingByProject(projectId);
+  const env = ctx.env as Record<string, unknown>;
+  const db = env.DB as D1Like | undefined;
+  const binding = await bindingByProject(projectId, db);
 
   // No active binding → an inert agent with no posting capability.
   if (!binding) {
@@ -39,10 +42,8 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     };
   }
 
-  const env = ctx.env as Record<string, unknown>;
   const ticker = env.TICKER as { fetch(request: Request): Promise<Response> } | undefined;
   const heartbeatToken = (env.HEARTBEAT_TOKEN as string | undefined) ?? '';
-  const db = env.DB as D1Like | undefined;
 
   // L1 catalog query — cheap, every turn. .catch keeps a D1 hiccup from breaking the agent.
   const skills = db ? await loadSkillCatalog(db, projectId).catch(() => []) : [];
@@ -112,11 +113,15 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     },
   });
 
+  // Bot token (for resolving Slack user names via users.info). Same ref the reply path uses.
+  const botToken = env[binding.transportTokenRef] as string | undefined;
+
   const tools: ToolDefinition[] = [
     replyToConversation,
     ...(db ? skillTools(db, projectId) : []),
     ...reminderTools(ticker, heartbeatToken, projectId),
     ...(db ? memoryTools(db, projectId) : []),
+    ...userTools(db, botToken),
     ...connectionTools(connState, connSecrets),
   ];
 

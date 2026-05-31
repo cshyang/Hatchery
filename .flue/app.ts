@@ -4,7 +4,7 @@ import { dispatch } from '@flue/runtime';
 import { verifySlackSignature } from '../src/slack/verify';
 import { botInThread } from '../src/slack/threads';
 import { mentionsBot, stripMention } from '../src/slack/mentions';
-import { bindings, bindingBySlack, bindingByProject, agentInstanceId } from '../src/bindings';
+import { bindings, bindingBySlack, bindingByProject, agentInstanceId, autoCreateBinding, isKnownTeam } from '../src/bindings';
 import { normalizeSlackMessage } from '../src/canonical';
 import { upsertConversationTarget } from '../src/conversations';
 import { claimEvent, type KVLike } from '../src/idempotency';
@@ -26,6 +26,10 @@ interface Env {
   [binding: string]: unknown;
 }
 
+// Workspace-level transport identity for gateway auto-provisioning (same-workspace Milestone 1:
+// one bot install, reused across all channels of the known team). These mirror the demo seed row.
+const BOT_ID_FOR_AUTOCREATE = 'U0B6UB2E5HT';
+const DEFAULT_TRANSPORT_TOKEN_REF = 'SLACK_BOT_TOKEN_DEFAULT';
 
 // Liveness backstop. The 6h cron poke (and any manual /__heartbeat) wakes each active
 // project with NO specific work — the agent stays silent unless it has a self-scheduled
@@ -88,7 +92,7 @@ app.post('/__internal/scheduled', async (c) => {
     return c.json({ deduped: true }); // alarm retry / double-fire — already dispatched
   }
 
-  const binding = bindingByProject(body.projectId);
+  const binding = await bindingByProject(body.projectId, c.env.DB);
   if (!binding || binding.status !== 'active') return c.json({ skipped: 'no active binding' });
 
   // Reference, not copy: a reminder holds a skill NAME; resolve it FRESH here so edits to the
@@ -248,8 +252,24 @@ app.post('/slack/events', async (c) => {
     return c.body(null, 200);
   }
 
-  const binding = bindingBySlack(body.team_id ?? '', ev.channel);
-  if (!binding) return c.body(null, 200); // unbound channel: acknowledge, never dispatch
+  const teamId = body.team_id ?? '';
+  let binding = await bindingBySlack(teamId, ev.channel, c.env.DB);
+  if (!binding) {
+    // No binding yet. If this is a channel of a KNOWN team and the bot is being addressed, the
+    // gateway provisions a per-channel project (HARD LINE: gateway-created on a verified Slack
+    // signature for an allowlisted team — NOT the agent). Otherwise acknowledge and stay silent.
+    const addressed = mentionsBot(ev.text ?? '', BOT_ID_FOR_AUTOCREATE);
+    if (c.env.DB && isKnownTeam(teamId) && addressed) {
+      await autoCreateBinding(c.env.DB, {
+        teamId,
+        channelId: ev.channel,
+        transportBotId: BOT_ID_FOR_AUTOCREATE,
+        transportTokenRef: DEFAULT_TRANSPORT_TOKEN_REF,
+      });
+      binding = await bindingBySlack(teamId, ev.channel, c.env.DB);
+    }
+    if (!binding) return c.body(null, 200); // unknown team, not addressed, or create failed → silent
+  }
 
   // Engage policy:
   //  - @mention anywhere                         -> engage
