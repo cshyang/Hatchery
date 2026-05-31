@@ -86,6 +86,10 @@ export function resolveConnection(
     const secretKey = nangoKey;
     const connectionId = spec.connectionRef;
     const providerConfigKey = provider; // convention: Nango integration id == catalog slug
+    // `??=` caches the PROMISE on first call. A REJECTED promise stays cached too — so a failed token
+    // fetch is NOT retried within this turn (every later secret() call this turn gets the same
+    // rejection). Intentional: one Nango hiccup shouldn't trigger a retry storm across a multi-call
+    // turn. The credential is rebuilt fresh by the DO initializer every turn, so the next turn retries.
     let cached: Promise<string> | undefined;
     const secret = () => (cached ??= fetchTok({ secretKey, connectionId, providerConfigKey }));
     return { secret, config: spec.config ?? {} };
