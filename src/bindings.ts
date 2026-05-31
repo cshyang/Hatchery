@@ -6,6 +6,8 @@
 // config: the agent's allowed channel and credential reference come from HERE,
 // never from prompt text or model-supplied arguments.
 
+import type { D1Like } from './skills';
+
 export type SandboxMode = 'virtual' | 'cloudflare-sandbox' | 'daytona' | 'e2b';
 
 /** Default model when a binding doesn't pin one. */
@@ -13,6 +15,15 @@ export const DEFAULT_MODEL = 'zai/glm-5.1';
 
 /** The persona slug used until a project hosts more than one agent. */
 export const DEFAULT_AGENT_SLUG = 'default';
+
+// Teams whose channels may be AUTO-PROVISIONED by the gateway on first @mention. This is the wall
+// that keeps "any channel" from becoming "any workspace": a stray @mention from an unlisted team is
+// never auto-bound. Same-workspace scope (Milestone 1) — multi-workspace OAuth install is deferred.
+export const KNOWN_TEAM_IDS: readonly string[] = ['T0B6VB415TQ']; // Ecodark
+
+export function isKnownTeam(teamId: string): boolean {
+  return !!teamId && KNOWN_TEAM_IDS.includes(teamId);
+}
 
 // Flue DO instance id for a project's agent persona: `project:<projectId>:agent:<slug>`.
 // The slug is 'default' today — baked in now because DO instance ids are sticky (renaming
@@ -109,4 +120,127 @@ export function bindingBySlack(accountId: string, spaceId: string): Binding | un
 /** Resolve a project's binding from an agent instance id. */
 export function bindingByProject(projectId: string): Binding | undefined {
   return bindings.find((b) => b.projectId === projectId && b.status === 'active');
+}
+
+// ── D1 binding layer (per-channel, auto-provisioned) ─────────────────────────────────────────────
+// Mirrors the connections D1+seed cascade (src/connections.ts): the bindings.ts `bindings` array is
+// a CODE SEED; D1 rows are the live source, merged OVER the seed by project_id. The bot token lives
+// as a Worker secret referenced by transport_token_ref — never stored in this table.
+
+export interface BindingRecord {
+  projectId: string;
+  provider: 'slack';
+  externalAccountId: string;
+  externalSpaceId: string;
+  transportBotId: string;
+  transportTokenRef: string;
+  defaultProfile: string;
+  model?: string;
+  status: 'active' | 'disabled';
+}
+
+/** Map a D1 binding record to the full Binding the app consumes (defaults for fields not stored). */
+export function bindingRecordToBinding(r: BindingRecord): Binding {
+  return {
+    provider: r.provider,
+    externalAccountId: r.externalAccountId,
+    externalSpaceId: r.externalSpaceId,
+    transportBotId: r.transportBotId,
+    projectId: r.projectId,
+    defaultProfile: r.defaultProfile,
+    model: r.model,
+    sandboxMode: 'virtual',
+    transportTokenRef: r.transportTokenRef,
+    // connections come from the D1 connections table (loadConnectionSpecs merges over this seed);
+    // an auto-created channel starts with none until an operator/self-serve flow adds them.
+    connections: undefined,
+    status: r.status,
+  };
+}
+
+/** Live binding rows. Pass a projectId to filter to one; omit for all. Metadata only — never a token. */
+export async function loadBindings(db: D1Like, projectId?: string): Promise<BindingRecord[]> {
+  const stmt = projectId
+    ? db.prepare(
+        'SELECT project_id, provider, external_account_id, external_space_id, transport_bot_id, transport_token_ref, default_profile, model, status FROM bindings WHERE project_id=?',
+      ).bind(projectId)
+    : db.prepare(
+        'SELECT project_id, provider, external_account_id, external_space_id, transport_bot_id, transport_token_ref, default_profile, model, status FROM bindings',
+      ).bind();
+  const { results } = await stmt.all<{
+    project_id: string; provider: string; external_account_id: string; external_space_id: string;
+    transport_bot_id: string; transport_token_ref: string; default_profile: string; model: string | null; status: string;
+  }>();
+  return (results ?? []).map((r) => ({
+    projectId: r.project_id,
+    provider: 'slack',
+    externalAccountId: r.external_account_id,
+    externalSpaceId: r.external_space_id,
+    transportBotId: r.transport_bot_id,
+    transportTokenRef: r.transport_token_ref,
+    defaultProfile: r.default_profile,
+    model: r.model ?? undefined,
+    status: r.status === 'disabled' ? 'disabled' : 'active',
+  }));
+}
+
+export interface AutoCreateBindingInput {
+  teamId: string;
+  channelId: string;
+  transportBotId: string;
+  transportTokenRef: string;
+  model?: string;
+  createdBy?: string;
+}
+
+/** Upsert a binding row. INSERT ... ON CONFLICT(project_id) DO NOTHING — race-safe: two near-simultaneous
+ *  @mentions in a new channel create exactly one row. The bot token is referenced by name, never stored. */
+export async function autoCreateBinding(db: D1Like, input: AutoCreateBindingInput): Promise<void> {
+  const now = Date.now();
+  await db
+    .prepare(
+      `INSERT INTO bindings(project_id, provider, external_account_id, external_space_id, transport_bot_id, transport_token_ref, default_profile, model, status, created_by, created_at, updated_at)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(project_id) DO NOTHING`,
+    )
+    .bind(
+      input.channelId, // project_id = channel id
+      'slack',
+      input.teamId,
+      input.channelId, // external_space_id = channel id
+      input.transportBotId,
+      input.transportTokenRef,
+      'project-assistant',
+      input.model ?? null,
+      'active',
+      input.createdBy ?? 'gateway-autocreate',
+      now,
+      now,
+    )
+    .run();
+}
+
+/** Operator/admin upsert (full update). Distinct from autoCreateBinding (which never overwrites): this
+ *  one updates an existing row. Reserved for an admin path; not used by the gateway. */
+export async function upsertBinding(db: D1Like, rec: BindingRecord): Promise<void> {
+  const now = Date.now();
+  await db
+    .prepare(
+      `INSERT INTO bindings(project_id, provider, external_account_id, external_space_id, transport_bot_id, transport_token_ref, default_profile, model, status, created_by, created_at, updated_at)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(project_id) DO UPDATE SET
+         external_account_id=excluded.external_account_id,
+         external_space_id=excluded.external_space_id,
+         transport_bot_id=excluded.transport_bot_id,
+         transport_token_ref=excluded.transport_token_ref,
+         default_profile=excluded.default_profile,
+         model=excluded.model,
+         status=excluded.status,
+         updated_at=excluded.updated_at`,
+    )
+    .bind(
+      rec.projectId, 'slack', rec.externalAccountId, rec.externalSpaceId, rec.transportBotId, rec.transportTokenRef,
+      rec.defaultProfile, rec.model ?? null, rec.status, 'admin', now, now,
+    )
+    .run();
 }
