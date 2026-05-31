@@ -15,6 +15,7 @@ import {
   loadConnectionSpecs,
   upsertConnection,
   PROVIDER_CATALOG,
+  requestConnectionTool,
 } from './connections';
 import { GITHUB_READ_TOOL_NAMES } from './github';
 import type { D1Like } from './skills';
@@ -263,6 +264,37 @@ test('a Nango-backed notion connection builds notion_call_api whose execute reso
     }
   });
   assert.ok(fetchCount >= 1, 'execute resolved the lazy token at least once');
+});
+
+test('request_connection: schema has provider but NO secret/token parameter (the structural wall)', async () => {
+  const tool = requestConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123' });
+  assert.equal(tool.name, 'request_connection');
+  const props = (tool.parameters as { properties?: Record<string, unknown> }).properties ?? {};
+  const keys = Object.keys(props);
+  assert.deepEqual(keys, ['provider'], 'exactly one param: provider — no secret/token field exists');
+  for (const k of keys) assert.ok(!/secret|token|key|credential/i.test(k), `no credential-shaped param (${k})`);
+});
+
+test('request_connection: starts a session bound to the channel (end_user_id = projectId) and returns the link', async () => {
+  const calls: { secretKey: string; endUserId: string; integrationId: string }[] = [];
+  const fakeStart = async (a: { secretKey: string; endUserId: string; integrationId: string }) => {
+    calls.push(a);
+    return { connectLink: 'https://connect.nango.dev/xyz', token: 't', expiresAt: 'e' };
+  };
+  const tool = requestConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123' }, { startConnectSession: fakeStart });
+  const out = (await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'notion' }));
+  assert.match(out, /https:\/\/connect\.nango\.dev\/xyz/);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], { secretKey: 'nk', endUserId: 'C123', integrationId: 'notion' });
+});
+
+test('request_connection: refuses a provider not in the catalog (no session started)', async () => {
+  let started = 0;
+  const fakeStart = async () => { started++; return { connectLink: 'x', token: 't', expiresAt: 'e' }; };
+  const tool = requestConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123' }, { startConnectSession: fakeStart });
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'salesforce' });
+  assert.match(out, /not a supported provider/i);
+  assert.equal(started, 0, 'no Nango session for an unsupported provider');
 });
 
 const main = async () => {
