@@ -14,6 +14,7 @@ import {
   connectionTools,
   connectionsBlock,
   loadConnectionSpecs,
+  requestConnectionTool,
   PROVIDER_CATALOG,
   type ConnectionState,
   type ResolvedConnection,
@@ -82,7 +83,15 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     const resolved = resolveConnection(connSpecs, env, s.provider);
     if (resolved) connSecrets[s.provider] = resolved;
   }
-  const connBlock = connState.length ? connectionsBlock(connState, PROVIDER_CATALOG) : null;
+  // request_connection is a REQUEST (not a connected-provider tool), so it's always available when we
+  // can actually start a session: DB present (to eventually store the row via the webhook) AND the
+  // platform key present (no broken tool when Nango isn't configured). Mirrors how skill tools are
+  // always-on when a DB exists.
+  const nangoSecretKey = typeof env.NANGO_SECRET_KEY === 'string' ? env.NANGO_SECRET_KEY : '';
+  const canRequestConnect = !!db && !!nangoSecretKey;
+  const requestConnect = canRequestConnect ? [requestConnectionTool({ nangoSecretKey, projectId })] : [];
+
+  const connBlock = connState.length || canRequestConnect ? connectionsBlock(connState, PROVIDER_CATALOG, canRequestConnect) : null;
 
   const replyToConversation = defineTool({
     name: 'reply_to_conversation',
@@ -149,6 +158,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     ...reminderTools(ticker, heartbeatToken, projectId),
     ...(db ? memoryTools(db, projectId) : []),
     ...userTools(db, botToken),
+    ...requestConnect,
     ...connectionTools(connState, connSecrets),
   ];
 
