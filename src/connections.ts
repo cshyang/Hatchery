@@ -20,6 +20,7 @@ import type { Binding, ConnectionSpec } from './bindings';
 import type { D1Like } from './skills';
 import { githubReadTools } from './github';
 import { genericApiTool, PROVIDER_API_PROFILES } from './api';
+import { fetchToken } from './nango';
 
 export interface ConnectionState {
   provider: string;
@@ -48,19 +49,49 @@ export function connectionState(specs: ConnectionSpec[], env: Record<string, unk
   });
 }
 
-/** Resolve a provider's secret + config from specs, or null if not declared / secret missing.
- *  The ONE resolution path (the swappable seam). Today it reads a Worker secret by ref; a future
- *  managed-OAuth backend slots in here behind the same signature (read connectionRef → vendor). */
+/** A resolved credential for one provider. `secret` is EITHER a literal Worker-secret string
+ *  (operator/static backend) OR a lazy, per-turn-memoized token fetch (managed-OAuth/Nango). The
+ *  generic call tool resolves it at the network boundary, so a Nango token is fetched only when a
+ *  tool actually runs — never in the DO initializer. */
+export interface ResolvedConnection {
+  secret: string | (() => Promise<string>);
+  config: Record<string, unknown>;
+}
+
+/** Resolve a provider's credential from specs, or null if not declared / unusable. The ONE
+ *  resolution path (the swappable seam). Worker-secret backend → a literal string; managed-OAuth
+ *  (Nango) backend → a lazy thunk that fetches a live token on first call and memoizes it for the
+ *  rest of the turn. `deps.fetchToken` is injectable for tests. */
 export function resolveConnection(
   specs: ConnectionSpec[],
   env: Record<string, unknown>,
   provider: string,
-): { secret: string; config: Record<string, unknown> } | null {
+  deps: { fetchToken?: typeof fetchToken } = {},
+): ResolvedConnection | null {
   const spec = specs.find((s) => s.provider === provider);
-  if (!spec || !spec.tokenRef) return null;
-  const token = env[spec.tokenRef];
-  if (typeof token !== 'string' || !token) return null;
-  return { secret: token, config: spec.config ?? {} };
+  if (!spec) return null;
+
+  // Worker-secret backend (operator/static): a literal secret present in env.
+  if (spec.tokenRef) {
+    const token = env[spec.tokenRef];
+    if (typeof token === 'string' && token) return { secret: token, config: spec.config ?? {} };
+  }
+
+  // Managed-OAuth backend (Nango): connection_ref + platform key → a lazy, per-turn-memoized token
+  // fetch. Memoizing the PROMISE dedupes concurrent tool calls AND caps a multi-call turn at ONE
+  // Nango round-trip (keeps us off the ~30s DO-turn wall). The token is never stored at rest.
+  const nangoKey = env.NANGO_SECRET_KEY;
+  if (spec.connectionRef && typeof nangoKey === 'string' && nangoKey) {
+    const fetchTok = deps.fetchToken ?? fetchToken;
+    const secretKey = nangoKey;
+    const connectionId = spec.connectionRef;
+    const providerConfigKey = provider; // convention: Nango integration id == catalog slug
+    let cached: Promise<string> | undefined;
+    const secret = () => (cached ??= fetchTok({ secretKey, connectionId, providerConfigKey }));
+    return { secret, config: spec.config ?? {} };
+  }
+
+  return null;
 }
 
 // ── D1 metadata layer (operator-provisioned, no redeploy) ───────────────────────────────────────
@@ -193,7 +224,7 @@ export function connectionsBlock(state: ConnectionState[], catalog: { provider: 
  *  {secret, config}. */
 export function connectionTools(
   state: ConnectionState[],
-  secrets: Record<string, { secret: string; config: Record<string, unknown> }>,
+  secrets: Record<string, ResolvedConnection>,
 ): ToolDefinition[] {
   const tools: ToolDefinition[] = [];
 
@@ -205,15 +236,22 @@ export function connectionTools(
     // Generic path (default unless a provider has typed tools and isn't opted into generic): one
     // <provider>_call_api tool driven by the provider's API profile. The model composes the call.
     const profile = PROVIDER_API_PROFILES[s.provider];
-    if (useGenericApi(s.provider, creds.config) && profile) {
+    // A Nango-backed credential is a lazy thunk; the typed tools (githubReadTools) take a string PAT
+    // and cannot consume it. Route any thunk secret through the generic call_api path (genericApiTool
+    // resolves the thunk at call time). A provider with a thunk secret but NO api profile would be
+    // toolless — that can't happen today (catalog ⊆ providers-with-a-profile), but the guard degrades
+    // to "no tool" rather than a crash.
+    const isLazy = typeof creds.secret === 'function';
+    if ((useGenericApi(s.provider, creds.config) || isLazy) && profile) {
       tools.push(genericApiTool(profile, creds.secret, creds.config));
       continue;
     }
 
-    // Typed fallback (github, apiMode !== 'generic'): the proven v2a read tools, untouched.
+    // Typed fallback (github, apiMode !== 'generic'): the proven v2a read tools, untouched. Only a
+    // string-secret connection reaches here (thunks took the generic path above), so the cast is safe.
     if (s.provider === 'github') {
       const repo = typeof creds.config.repo === 'string' ? creds.config.repo : undefined;
-      tools.push(...githubReadTools(creds.secret, repo));
+      tools.push(...githubReadTools(creds.secret as string, repo));
       // v2b plugs the github_create_issue propose-tool in here.
     }
   }
