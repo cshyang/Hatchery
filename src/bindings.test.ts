@@ -11,6 +11,8 @@ import {
   autoCreateBinding,
   isKnownTeam,
   bindingRecordToBinding,
+  bindingBySlack,
+  bindingByProject,
   type BindingRecord,
 } from './bindings';
 import type { D1Like } from './skills';
@@ -102,6 +104,40 @@ test('bindingRecordToBinding maps a D1 row to the Binding shape the app consumes
   assert.equal(b.externalSpaceId, 'C_X');
   assert.equal(b.sandboxMode, 'virtual', 'defaults filled for fields not stored in D1');
   assert.equal(b.status, 'active');
+});
+
+test('bindingBySlack: seed wins first; falls back to D1 for an auto-created channel', async () => {
+  const db = new FakeD1();
+  // the demo seed row resolves with NO db touch
+  const seedHit = await bindingBySlack('T0B6VB415TQ', 'C0B6VFMVCUW', db);
+  assert.equal(seedHit?.projectId, 'demo', 'seed row resolves');
+
+  // an unknown channel is not in the seed → undefined until a D1 row exists
+  assert.equal(await bindingBySlack('T0B6VB415TQ', 'C_NEW', db), undefined);
+
+  // after auto-create, the same lookup resolves from D1
+  await autoCreateBinding(db, { teamId: 'T0B6VB415TQ', channelId: 'C_NEW', transportBotId: 'U0B6UB2E5HT', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT' });
+  const d1Hit = await bindingBySlack('T0B6VB415TQ', 'C_NEW', db);
+  assert.equal(d1Hit?.projectId, 'C_NEW', 'D1 row resolves after auto-create');
+  assert.equal(d1Hit?.transportTokenRef, 'SLACK_BOT_TOKEN_DEFAULT');
+});
+
+test('bindingByProject: resolves a D1-only channel project', async () => {
+  const db = new FakeD1();
+  assert.equal((await bindingByProject('demo', db))?.projectId, 'demo', 'seed');
+  await autoCreateBinding(db, { teamId: 'T0B6VB415TQ', channelId: 'C_P', transportBotId: 'U', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT' });
+  assert.equal((await bindingByProject('C_P', db))?.projectId, 'C_P', 'D1');
+});
+
+test('disabled D1 binding does not resolve', async () => {
+  const db = new FakeD1();
+  await upsertBinding(db, {
+    projectId: 'C_OFF', provider: 'slack', externalAccountId: 'T0B6VB415TQ', externalSpaceId: 'C_OFF',
+    transportBotId: 'U', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT', defaultProfile: 'project-assistant',
+    status: 'disabled',
+  });
+  assert.equal(await bindingBySlack('T0B6VB415TQ', 'C_OFF', db), undefined, 'disabled is not active');
+  assert.equal(await bindingByProject('C_OFF', db), undefined);
 });
 
 const main = async () => {

@@ -110,16 +110,28 @@ export const bindings: readonly Binding[] = [
   },
 ];
 
-/** Route an inbound message to its project by provider account + space. Only active bindings match. */
-export function bindingBySlack(accountId: string, spaceId: string): Binding | undefined {
-  return bindings.find(
+/** Route an inbound message to its project by provider account + space. Seed (bindings.ts) is checked
+ *  FIRST so the demo row resolves with no DB; then live D1 rows (auto-created per channel). Only active
+ *  bindings match. `db` is optional so non-DB call sites/tests still resolve the seed. */
+export async function bindingBySlack(accountId: string, spaceId: string, db?: D1Like): Promise<Binding | undefined> {
+  const seed = bindings.find(
     (b) => b.externalAccountId === accountId && b.externalSpaceId === spaceId && b.status === 'active',
   );
+  if (seed) return seed;
+  if (!db) return undefined;
+  const rows = await loadBindings(db).catch(() => [] as BindingRecord[]);
+  const rec = rows.find((r) => r.externalAccountId === accountId && r.externalSpaceId === spaceId && r.status === 'active');
+  return rec ? bindingRecordToBinding(rec) : undefined;
 }
 
-/** Resolve a project's binding from an agent instance id. */
-export function bindingByProject(projectId: string): Binding | undefined {
-  return bindings.find((b) => b.projectId === projectId && b.status === 'active');
+/** Resolve a project's binding by projectId. Seed first, then live D1. Only active bindings match. */
+export async function bindingByProject(projectId: string, db?: D1Like): Promise<Binding | undefined> {
+  const seed = bindings.find((b) => b.projectId === projectId && b.status === 'active');
+  if (seed) return seed;
+  if (!db) return undefined;
+  const rows = await loadBindings(db, projectId).catch(() => [] as BindingRecord[]);
+  const rec = rows.find((r) => r.status === 'active');
+  return rec ? bindingRecordToBinding(rec) : undefined;
 }
 
 // ── D1 binding layer (per-channel, auto-provisioned) ─────────────────────────────────────────────
