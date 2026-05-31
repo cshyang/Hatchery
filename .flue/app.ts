@@ -10,7 +10,8 @@ import { upsertConversationTarget } from '../src/conversations';
 import { claimEvent, type KVLike } from '../src/idempotency';
 import { loadRunnableSkillBody, type D1Like } from '../src/skills';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/reflection';
-import { upsertConnection, loadConnections } from '../src/connections';
+import { upsertConnection, loadConnections, PROVIDER_CATALOG } from '../src/connections';
+import { verifyNangoWebhook, parseNangoAuthWebhook } from '../src/nango';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -22,6 +23,8 @@ interface Env {
   SLACK_EVENTS?: KVLike; // KV namespace for event_id idempotency
   HEARTBEAT_TOKEN?: string; // shared secret guarding the /__heartbeat trigger
   ADMIN_CONNECTIONS_TOKEN?: string; // OWN secret guarding /__admin/connections (ADR D11 — NOT the heartbeat token)
+  NANGO_SECRET_KEY?: string; // platform Bearer for the Nango API (create session / fetch token)
+  NANGO_WEBHOOK_SECRET?: string; // HMAC signing key to verify inbound Nango auth webhooks
   DB?: D1Like; // D1 skill catalog, transcript, memory, and conversation targets
   [binding: string]: unknown;
 }
@@ -210,6 +213,47 @@ app.get('/__admin/connections', async (c) => {
   if (!projectId) return c.json({ error: 'projectId query param required' }, 400);
   const connections = await loadConnections(db, projectId); // metadata only — no secret is ever stored or returned
   return c.json({ projectId, connections });
+});
+
+// Nango auth webhook (Component 3). Nango POSTs here when a Connect flow completes. HMAC-verified
+// against the RAW body with NANGO_WEBHOOK_SECRET (a DEDICATED webhook secret, NOT the API key).
+// Inert (404) until that secret is set. On a verified auth/creation/success event we store the
+// connection_ref under the channel project (tags.end_user_id) — the row makes that provider's tools
+// appear next turn. HARD LINE: this writes only a non-secret connection_ref; no token touches D1.
+app.post('/nango/webhook', async (c) => {
+  const signingKey = c.env.NANGO_WEBHOOK_SECRET;
+  if (!signingKey) return c.body(null, 404); // inert/invisible until configured
+
+  const raw = await c.req.text();
+  const ok = await verifyNangoWebhook(signingKey, raw, c.req.header('x-nango-hmac-sha256'));
+  if (!ok) return c.text('unauthorized', 401);
+
+  const event = parseNangoAuthWebhook(raw);
+  if (!event) {
+    // non-auth, non-creation, or success:false (failed/abandoned consent) — acknowledge, write nothing.
+    console.log('[nango] webhook ignored (not an auth-creation-success event)');
+    return c.json({ ignored: true });
+  }
+
+  const db = c.env.DB;
+  if (!db) return c.json({ error: 'no DB binding' }, 500);
+
+  // Convention guard: the Nango integration id MUST equal a catalog provider slug, else the row would
+  // be connected-but-toolless (no API profile / typed tools). Log loudly and skip rather than store a
+  // dead row. (See the runbook: operators name the Nango integration exactly the catalog slug.)
+  if (!PROVIDER_CATALOG.some((p) => p.provider === event.provider)) {
+    console.log(`[nango] webhook for unknown provider "${event.provider}" (cfg "${event.providerConfigKey}") — skipping upsert; name the Nango integration to match a catalog slug`);
+    return c.json({ ignored: 'unknown provider' });
+  }
+
+  await upsertConnection(db, {
+    projectId: event.projectId,
+    provider: event.provider,
+    connectionRef: event.connectionId,
+    createdBy: 'nango-webhook',
+  });
+  console.log(`[nango] connected provider "${event.provider}" for project ${event.projectId} (connection ${event.connectionId})`);
+  return c.json({ ok: true, projectId: event.projectId, provider: event.provider });
 });
 
 app.post('/slack/events', async (c) => {
