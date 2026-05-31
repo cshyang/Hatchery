@@ -1,6 +1,21 @@
 # M2 Handoff — Nango self-serve connect (resume here)
 
-**Date:** 2026-06-01 · **Status:** Research + decisions DONE. **Plan doc WRITTEN** → `docs/superpowers/plans/2026-06-01-m2-self-serve-connect.md` (12 tasks, TDD, advisor-reviewed). No code touched — execute the plan next.
+**Date:** 2026-06-01 · **Status:** **CODE COMPLETE (Tasks 1–9) on branch `m2-self-serve-connect`.** tsc clean, 74 tests green (8 files), whole-branch review APPROVED. Remaining = Tasks 10–12 (live Nango account + deploy + live-probe + end-to-end), which need the operator (Nango account + one read-only provider integration). Plan: `docs/superpowers/plans/2026-06-01-m2-self-serve-connect.md`.
+
+## Resume point (what's left — Tasks 10–12, all need the live Nango account)
+
+1. **Operator setup (Task 10):** in Nango, register ONE integration whose **id == catalog slug** (`notion`), with **READ-ONLY OAuth scopes** (the write wall — notion is `methodPolicy:'all'`, so a write scope would be a silent write path until v2b). Then `wrangler secret put NANGO_SECRET_KEY` + `NANGO_WEBHOOK_SECRET` (both `--name hatchery`), `npx flue build --target cloudflare && npx wrangler deploy --name hatchery`, and register the webhook URL `https://hatchery.<sub>.workers.dev/nango/webhook` in Nango (copy its Signing key into `NANGO_WEBHOOK_SECRET`).
+2. **Live-probe + reconcile (Task 11):** docs 404 a lot — probe the real wire format (`/connect/sessions` response fields; `/connection/{id}` vs `/connections/{id}`; the webhook payload field names + `x-nango-hmac-sha256`) and fix `src/nango.ts` constants if reality differs, re-run `npm test`.
+3. **End-to-end (Task 12):** `@bot connect notion` → click link → authorize → watch `wrangler tail` for `[nango] connected provider "notion"` → confirm the row via `/__admin/connections` → `@bot what notion pages can you see?` → confirm a DIFFERENT channel does NOT see it (isolation) and no token leaked (only `connection_ref`).
+
+**Local config done:** `.dev.vars` renamed `NONGO_AAPI_KEY` → `NANGO_SECRET_KEY` (carried the old value — CONFIRM in Nango UI it's actually the DEV *secret* key, not a public key) + added empty `NANGO_WEBHOOK_SECRET`. `.dev.vars` is gitignored (local-only, no commit).
+
+## Known gaps / decisions logged during build
+
+- **No proactive "✅ connected" Slack message** after the webhook lands — the user discovers tools on the next turn (connectionsBlock reflects the new connection). The webhook has no conversation target without extra plumbing. Reviewer flagged as a UX gap, NOT a defect. Follow-up if the silent confirm bites in the live test.
+- **Plan Tasks 3+4 were MERGED into one commit** — the credential-type widening (`ResolvedConnection.secret: string | thunk`) spans connections.ts + api.ts + project.ts and can't be tsc-green if split. Recorded in the plan doc.
+- **Branch history has a couple of cosmetic warts** (a duplicate-message commit + the project.ts annotation fix bundled into a docs commit) from an amend dance after a subagent crash. Functionally clean; squash at PR time.
+- **Memoized-rejection in the lazy token thunk is intentional** (no in-turn retry; next turn rebuilds) — documented in `resolveConnection`.
 
 **Repo state:** clean, on `main`, M1 merged (`c53c51e`), 57 tests green.
 
