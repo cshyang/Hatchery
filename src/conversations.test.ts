@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import type { Binding } from './bindings';
 import {
   loadConversationTarget,
+  resolveTarget,
   sendToConversationTarget,
   topLevelTargetFromBinding,
   upsertConversationTarget,
@@ -215,6 +216,31 @@ test('top-level project posts omit provider-native thread id', async () => {
   assert.equal(target.conversationId, '');
   assert.equal(target.externalConversationId, null);
   assert.equal(target.externalSpaceId, 'C1');
+});
+
+test('resolveTarget: top-level for empty conversationId, stored target otherwise, null without db', async () => {
+  const db = new FakeD1();
+  await upsertConversationTarget(db, {
+    projectId: 'demo',
+    conversationId: 'slack:T1:C1:100.000',
+    provider: 'slack',
+    externalAccountId: 'T1',
+    externalSpaceId: 'C1',
+    externalConversationId: '100.000',
+    transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
+  });
+
+  // No conversationId → top-level project target (new post / heartbeat).
+  const top = await resolveTarget(db, binding, 'demo', 'default', '');
+  assert.equal(top?.conversationId, '');
+  assert.equal(top?.externalConversationId, null);
+
+  // conversationId relayed → the stored per-conversation target (lands in-thread).
+  const stored = await resolveTarget(db, binding, 'demo', 'default', 'slack:T1:C1:100.000');
+  assert.equal(stored?.externalConversationId, '100.000');
+
+  // conversationId given but no db → null (can't resolve a stored target).
+  assert.equal(await resolveTarget(undefined, binding, 'demo', 'default', 'slack:T1:C1:100.000'), null);
 });
 
 const main = async () => {

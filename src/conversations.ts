@@ -115,6 +115,21 @@ export function topLevelTargetFromBinding(
   };
 }
 
+// Resolve the destination the model is addressing: a stored per-conversation target when it
+// relays a conversationId, or the project's top-level target for heartbeat/new posts. Shared by
+// the reply and status tools so the two never drift in how they pick a destination.
+export async function resolveTarget(
+  db: D1Like | undefined,
+  binding: Binding,
+  projectId: string,
+  agentSlug: string,
+  conversationId?: string,
+): Promise<ConversationTarget | null> {
+  const conv = conversationId ? String(conversationId) : '';
+  if (!conv) return topLevelTargetFromBinding(binding, agentSlug);
+  return db ? loadConversationTarget(db, projectId, agentSlug, conv) : null;
+}
+
 export async function sendToConversationTarget(
   env: Record<string, unknown>,
   target: ConversationTarget,

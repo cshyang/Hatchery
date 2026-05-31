@@ -1,6 +1,7 @@
 import { createAgent, defineTool, Type, type AgentRuntimeConfig, type ToolDefinition } from '@flue/runtime';
 import { bindingByProject, parseAgentInstanceId, DEFAULT_MODEL } from '../../src/bindings';
-import { loadConversationTarget, sendToConversationTarget, topLevelTargetFromBinding } from '../../src/conversations';
+import { resolveTarget, sendToConversationTarget } from '../../src/conversations';
+import { withToolLogging, withReplyReminder } from '../../src/observability';
 import { skillTools, loadSkillCatalog, loadActiveSkillBody, skillBody, type D1Like } from '../../src/skills';
 import { reminderTools } from '../../src/reminders';
 import { buildInstructions } from '../../src/prompt';
@@ -97,11 +98,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     }),
     async execute({ text, conversationId }) {
       const conv = conversationId ? String(conversationId) : '';
-      const target = conv
-        ? db
-          ? await loadConversationTarget(db, projectId, slug, conv)
-          : null
-        : topLevelTargetFromBinding(binding, slug);
+      const target = await resolveTarget(db, binding, projectId, slug, conv);
       if (!target) {
         throw new Error(`No reply target found for conversationId "${conv}".`);
       }
@@ -113,11 +110,40 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     },
   });
 
+  // Ephemeral progress note for slow, multi-step turns. Reuses the reply path's target resolution,
+  // but NEVER logs to the transcript (it's chrome, not conversation) and NEVER throws — a failed
+  // status must not derail the real answer. Model-driven; the prompt says when to call it.
+  const updateStatus = defineTool({
+    name: 'update_status',
+    description:
+      "Post a one-line progress note BEFORE slow, multi-step work (several searches/API calls before " +
+      "you can answer), so the person isn't left waiting in silence. Call it ONCE, up front, and only " +
+      "when you expect a wait — skip it for quick answers and for heartbeat/scheduled runs. Lead with " +
+      "an emoji. This is NOT your reply: always send the actual answer via reply_to_conversation.",
+    parameters: Type.Object({
+      text: Type.String({ description: "Short friendly note, e.g. '🔍 Checking the GitHub repo…'" }),
+      conversationId: Type.Optional(
+        Type.String({ description: 'Copy from the [Dispatch Input] block, same as your reply.' }),
+      ),
+    }),
+    async execute({ text, conversationId }) {
+      const target = await resolveTarget(db, binding, projectId, slug, conversationId ? String(conversationId) : '');
+      if (!target) return 'no target — status skipped';
+      try {
+        await sendToConversationTarget(env, target, String(text));
+        return 'posted';
+      } catch (e) {
+        return `status not posted: ${e instanceof Error ? e.message : 'error'}`;
+      }
+    },
+  });
+
   // Bot token (for resolving Slack user names via users.info). Same ref the reply path uses.
   const botToken = env[binding.transportTokenRef] as string | undefined;
 
   const tools: ToolDefinition[] = [
     replyToConversation,
+    updateStatus,
     ...(db ? skillTools(db, projectId) : []),
     ...reminderTools(ticker, heartbeatToken, projectId),
     ...(db ? memoryTools(db, projectId) : []),
@@ -134,6 +160,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       memoryBlock,
       connectionsBlock: connBlock,
     }),
-    tools,
+    // withReplyReminder is OUTER (logs capture the original result; the model gets result+reminder).
+    tools: tools.map(withToolLogging).map(withReplyReminder),
   };
 });
