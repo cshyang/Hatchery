@@ -15,12 +15,12 @@
 //   - static-key SELF-SERVICE (a client pastes a key at runtime) → encrypted D1 or a managed
 //     vault — built only when that pain is real (the crypto.ts version lives in git history).
 
-import type { ToolDefinition } from '@flue/runtime';
+import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
 import type { Binding, ConnectionSpec } from './bindings';
 import type { D1Like } from './skills';
 import { githubReadTools } from './github';
 import { genericApiTool, PROVIDER_API_PROFILES } from './api';
-import { fetchToken } from './nango';
+import { fetchToken, startConnectSession } from './nango';
 
 export interface ConnectionState {
   provider: string;
@@ -257,4 +257,42 @@ export function connectionTools(
   }
 
   return tools;
+}
+
+/** The agent's connect request (Component 3). Returns a tool that starts a Nango Connect session for
+ *  THIS channel and hands back the magic link for the agent to share. THE STRUCTURAL WALL: there is
+ *  no parameter that accepts a secret — a prompt-injected agent has no tool to receive or store a
+ *  token. Gated to the provider catalog (the agent can't request an arbitrary provider).
+ *  `deps.startConnectSession` is injectable for tests. */
+export function requestConnectionTool(
+  args: { nangoSecretKey: string; projectId: string; catalog?: { provider: string; summary: string }[] },
+  deps: { startConnectSession?: typeof startConnectSession } = {},
+): ToolDefinition {
+  const catalog = args.catalog ?? PROVIDER_CATALOG;
+  const allowed = catalog.map((c) => c.provider);
+  const start = deps.startConnectSession ?? startConnectSession;
+  return defineTool({
+    name: 'request_connection',
+    description:
+      'Start connecting an external service for THIS channel. Pass the provider name; you get back a ' +
+      'secure authorization link to share with the person. They click it and authorize off-Slack — you ' +
+      "NEVER receive or handle the credential. Once they finish, that provider's tools appear " +
+      `automatically. Connectable providers: ${allowed.join(', ')}.`,
+    parameters: Type.Object({
+      provider: Type.String({ description: `The provider to connect. One of: ${allowed.join(', ')}.` }),
+    }),
+    async execute({ provider }) {
+      const p = String(provider).toLowerCase();
+      if (!allowed.includes(p)) {
+        return `Cannot connect "${provider}" — not a supported provider. Supported: ${allowed.join(', ')}.`;
+      }
+      // integrationId == provider slug, by convention (the operator names the Nango integration to match).
+      const { connectLink } = await start({ secretKey: args.nangoSecretKey, endUserId: args.projectId, integrationId: p });
+      return (
+        `Share this link with the user to connect ${p} (it opens ${p}'s secure authorization page off-Slack — ` +
+        `you never see the credential):\n${connectLink}\n` +
+        `Once they authorize, ${p} tools will appear automatically and you can use them.`
+      );
+    },
+  });
 }
