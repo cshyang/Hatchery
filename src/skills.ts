@@ -94,16 +94,27 @@ export type RunnableSkill =
   | { status: 'archived' }
   | { status: 'absent' };
 
-// L2 (status-aware): for scheduled fire only. Reads any state so the caller can DISTINGUISH
-// archived from absent and refuse both with a clear reason (see .flue/app.ts).
+// L2 (status-aware): for scheduled fire. Reads global∪channel (channel wins) so a scheduled GLOBAL
+// skill resolves, while still distinguishing archived/absent. Resolution: prefer the channel's row;
+// if the channel actively overrides, use it; if the channel's override is archived, fall back to the
+// global active body (retiring an override re-inherits the baseline rather than refusing the run);
+// if only the channel row exists and it's archived, refuse (archived); absent in both → absent.
 export async function loadRunnableSkillBody(db: D1Like, projectId: string, name: string): Promise<RunnableSkill> {
-  const row = await db
-    .prepare('SELECT body_md, state FROM skills WHERE project_id=? AND name=?')
-    .bind(projectId, name)
-    .first<{ body_md: string; state: string }>();
-  if (!row) return { status: 'absent' };
-  if (row.state === 'archived') return { status: 'archived' };
-  return { status: 'active', body: row.body_md };
+  const { results } = await db
+    .prepare('SELECT body_md, state, project_id FROM skills WHERE name=? AND project_id IN (?, ?)')
+    .bind(name, GLOBAL_PROJECT_ID, projectId)
+    .all<{ body_md: string; state: string; project_id: string }>();
+  const rows = results ?? [];
+  const channel = rows.find((r) => r.project_id === projectId);
+  const global = rows.find((r) => r.project_id === GLOBAL_PROJECT_ID);
+  // channel active override wins
+  if (channel && channel.state === 'active') return { status: 'active', body: channel.body_md };
+  // channel archived but a global active exists → run global (re-inherit baseline)
+  if (global && global.state === 'active') return { status: 'active', body: global.body_md };
+  // no active anywhere: if the channel row exists (archived) report archived; else check global
+  if (channel && channel.state === 'archived') return { status: 'archived' };
+  if (global && global.state === 'archived') return { status: 'archived' };
+  return { status: 'absent' };
 }
 
 export function skillTools(db: D1Like, projectId: string): ToolDefinition[] {
