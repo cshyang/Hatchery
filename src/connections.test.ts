@@ -1,7 +1,9 @@
 // Connection broker invariants (ADR 0003) — run: npx tsx src/connections.test.ts
-// v2a backend = Worker-secret refs (like the Slack token). State + resolution come from the
-// binding + env; no D1, no crypto. Gating (tools appear only when connected, never the write)
-// and not-leaking-the-secret-name-as-the-value are the load-bearing invariants.
+// Backend = Worker-secret refs (like the Slack token). The pure functions (state/resolve/tools)
+// operate on ConnectionSpec[]; the initializer resolves those from D1 (live) merged over the
+// binding seed via loadConnectionSpecs. Load-bearing invariants: gating (tools appear only when
+// connected, never the write), the secret-name is never the value, generic-vs-typed selection,
+// per-provider method policy, and the D1 metadata layer (operator add without redeploy).
 
 import assert from 'node:assert/strict';
 import {
@@ -9,16 +11,20 @@ import {
   resolveConnection,
   connectionTools,
   connectionsBlock,
+  loadConnections,
+  loadConnectionSpecs,
+  upsertConnection,
   PROVIDER_CATALOG,
 } from './connections';
 import { GITHUB_READ_TOOL_NAMES } from './github';
-import type { Binding } from './bindings';
+import type { D1Like } from './skills';
+import type { Binding, ConnectionSpec } from './bindings';
 
 const GITHUB_CALL_API_TOOL_NAME = 'github_call_api';
 const NOTION_CALL_API_TOOL_NAME = 'notion_call_api';
 
-// A minimal binding with a GitHub connection declared (secret provided via env, not here).
-function binding(connections?: Binding['connections']): Binding {
+// A minimal binding carrying a connections seed (used by the loadConnectionSpecs tests).
+function binding(connections?: ConnectionSpec[]): Binding {
   return {
     provider: 'slack',
     externalAccountId: 'T',
@@ -33,65 +39,102 @@ function binding(connections?: Binding['connections']): Binding {
   };
 }
 
-const GH = [{ provider: 'github', tokenRef: 'GITHUB_PAT_DEMO', config: { repo: 'o/r' } }];
+const GH: ConnectionSpec[] = [{ provider: 'github', tokenRef: 'GITHUB_PAT_DEMO', config: { repo: 'o/r' } }];
+
+// In-memory D1 fake — only the two statements connections.ts issues (coupled on purpose).
+interface Row {
+  [k: string]: unknown;
+}
+class FakeD1 implements D1Like {
+  rows: Row[] = [];
+  prepare(sql: string) {
+    const t = sql.trim();
+    return {
+      bind: (...args: unknown[]) => ({
+        run: async (): Promise<unknown> => {
+          this.#mutate(t, args);
+          return {};
+        },
+        all: async <T = Record<string, unknown>>(): Promise<{ results: T[] }> => ({ results: this.#query(t, args) as T[] }),
+        first: async <T = Record<string, unknown>>(): Promise<T | null> => (this.#query(t, args)[0] ?? null) as T | null,
+      }),
+    };
+  }
+  #mutate(sql: string, args: unknown[]) {
+    if (sql.startsWith('INSERT INTO connections')) {
+      const [projectId, provider, tokenRef, connectionRef, configJson, status, createdBy, createdAt, updatedAt] = args;
+      const existing = this.rows.find((r) => r.project_id === projectId && r.provider === provider);
+      const next = {
+        project_id: projectId,
+        provider,
+        token_ref: tokenRef,
+        connection_ref: connectionRef,
+        config_json: configJson,
+        status,
+        created_by: createdBy,
+        created_at: createdAt,
+        updated_at: updatedAt,
+      };
+      if (existing) Object.assign(existing, { token_ref: tokenRef, connection_ref: connectionRef, config_json: configJson, status, updated_at: updatedAt });
+      else this.rows.push(next);
+    }
+  }
+  #query(sql: string, args: unknown[]): Row[] {
+    if (sql.startsWith('SELECT provider, token_ref')) {
+      const [projectId] = args;
+      return this.rows.filter((r) => r.project_id === projectId);
+    }
+    return [];
+  }
+}
 
 const tests: [string, () => Promise<void>][] = [];
 const test = (name: string, fn: () => Promise<void>) => tests.push([name, fn]);
 
-test('not connected: a declared connection with no secret present reads as not_connected', async () => {
-  const state = connectionState(binding(GH), {}); // env has no GITHUB_PAT_DEMO
+test('not connected: a declared spec with no secret present reads as not_connected', async () => {
+  const state = connectionState(GH, {});
   assert.equal(state.length, 1);
   assert.equal(state[0].status, 'not_connected');
-  assert.equal(resolveConnection(binding(GH), {}, 'github'), null);
+  assert.equal(resolveConnection(GH, {}, 'github'), null);
 });
 
 test('connected: state flips when the Worker secret is present; resolve returns the token + config', async () => {
   const env = { GITHUB_PAT_DEMO: 'ghp_realtoken' };
-  const state = connectionState(binding(GH), env);
+  const state = connectionState(GH, env);
   assert.equal(state[0].status, 'connected');
-  const resolved = resolveConnection(binding(GH), env, 'github');
+  const resolved = resolveConnection(GH, env, 'github');
   assert.equal(resolved?.secret, 'ghp_realtoken');
   assert.equal(resolved?.config.repo, 'o/r');
 });
 
 test('no declared connection → nothing, even if a stray secret exists in env', async () => {
-  const state = connectionState(binding(undefined), { GITHUB_PAT_DEMO: 'ghp_x' });
-  assert.equal(state.length, 0);
-  assert.equal(resolveConnection(binding(undefined), { GITHUB_PAT_DEMO: 'ghp_x' }, 'github'), null);
+  assert.equal(connectionState([], { GITHUB_PAT_DEMO: 'ghp_x' }).length, 0);
+  assert.equal(resolveConnection([], { GITHUB_PAT_DEMO: 'ghp_x' }, 'github'), null);
 });
 
-test('gating: GitHub read tools appear only when connected, and the write is NOT exposed (v2a)', async () => {
-  // not connected → no tools
-  const offState = connectionState(binding(GH), {});
-  assert.equal(connectionTools(offState, {}).length, 0, 'no tools before the secret is set');
-
-  // connected → exactly the read tools, never github_create_issue (deferred to v2b)
+test('gating: GitHub typed read tools appear only when connected, and the write is NOT exposed', async () => {
+  assert.equal(connectionTools(connectionState(GH, {}), {}).length, 0, 'no tools before the secret is set');
   const env = { GITHUB_PAT_DEMO: 'ghp_realtoken' };
-  const onState = connectionState(binding(GH), env);
-  const creds = resolveConnection(binding(GH), env, 'github')!;
-  const tools = connectionTools(onState, { github: creds });
-  const names: string[] = tools.map((t) => t.name as string).sort();
-  assert.ok(!names.includes('github_create_issue'), 'write tool must NOT be exposed in v2a');
-  assert.deepEqual(names, [...GITHUB_READ_TOOL_NAMES].sort(), 'exactly the read tools');
+  const creds = resolveConnection(GH, env, 'github')!;
+  const names = connectionTools(connectionState(GH, env), { github: creds }).map((t) => t.name as string).sort();
+  assert.ok(!names.includes('github_create_issue'), 'write tool must NOT be exposed');
+  assert.deepEqual(names, [...GITHUB_READ_TOOL_NAMES].sort(), 'exactly the typed read tools');
 });
 
-test('apiMode "generic" (Test A) exposes ONLY github_call_api, not the typed reads', async () => {
-  const GEN = [{ provider: 'github', tokenRef: 'GITHUB_PAT_DEMO', config: { repo: 'o/r', apiMode: 'generic' } }];
+test('apiMode "generic" exposes ONLY github_call_api, not the typed reads', async () => {
+  const GEN: ConnectionSpec[] = [{ provider: 'github', tokenRef: 'GITHUB_PAT_DEMO', config: { repo: 'o/r', apiMode: 'generic' } }];
   const env = { GITHUB_PAT_DEMO: 'ghp_realtoken' };
-  const state = connectionState(binding(GEN), env);
-  const creds = resolveConnection(binding(GEN), env, 'github')!;
-  const tools = connectionTools(state, { github: creds });
-  const names = tools.map((t) => t.name as string);
+  const creds = resolveConnection(GEN, env, 'github')!;
+  const names = connectionTools(connectionState(GEN, env), { github: creds }).map((t) => t.name as string);
   assert.deepEqual(names, [GITHUB_CALL_API_TOOL_NAME], 'generic mode = exactly the one call tool');
-  // and the typed reads must NOT also be present (else the experiment is muddied)
   for (const typed of GITHUB_READ_TOOL_NAMES) assert.ok(!names.includes(typed), `${typed} must be hidden in generic mode`);
 });
 
 test('github_call_api refuses non-GET (writes go through the approval gate, not a blind call)', async () => {
-  const GEN = [{ provider: 'github', tokenRef: 'GITHUB_PAT_DEMO', config: { repo: 'o/r', apiMode: 'generic' } }];
+  const GEN: ConnectionSpec[] = [{ provider: 'github', tokenRef: 'GITHUB_PAT_DEMO', config: { repo: 'o/r', apiMode: 'generic' } }];
   const env = { GITHUB_PAT_DEMO: 'ghp_realtoken' };
-  const creds = resolveConnection(binding(GEN), env, 'github')!;
-  const [callApi] = connectionTools(connectionState(binding(GEN), env), { github: creds });
+  const creds = resolveConnection(GEN, env, 'github')!;
+  const [callApi] = connectionTools(connectionState(GEN, env), { github: creds });
   await assert.rejects(
     () => (callApi.execute as (a: unknown) => Promise<unknown>)({ method: 'POST', path: '/repos/o/r/issues' }),
     /Only GET is allowed/,
@@ -99,39 +142,72 @@ test('github_call_api refuses non-GET (writes go through the approval gate, not 
 });
 
 test('notion defaults to the generic call_api tool (no typed tools), gated on its secret', async () => {
-  const NO = [{ provider: 'notion', tokenRef: 'NOTION_TOKEN_DEMO', config: {} }];
-  // not connected → no tools
-  assert.equal(connectionTools(connectionState(binding(NO), {}), {}).length, 0, 'no tool before the secret is set');
-  // connected → exactly notion_call_api (no apiMode needed: notion has no typed fallback)
+  const NO: ConnectionSpec[] = [{ provider: 'notion', tokenRef: 'NOTION_TOKEN_DEMO', config: {} }];
+  assert.equal(connectionTools(connectionState(NO, {}), {}).length, 0, 'no tool before the secret is set');
   const env = { NOTION_TOKEN_DEMO: 'secret_ntn' };
-  const creds = resolveConnection(binding(NO), env, 'notion')!;
-  const names = connectionTools(connectionState(binding(NO), env), { notion: creds }).map((t) => t.name as string);
+  const creds = resolveConnection(NO, env, 'notion')!;
+  const names = connectionTools(connectionState(NO, env), { notion: creds }).map((t) => t.name as string);
   assert.deepEqual(names, [NOTION_CALL_API_TOOL_NAME], 'notion = exactly the one generic call tool');
 });
 
 test('notion_call_api allows POST (reads use POST; token is read-only at the provider)', async () => {
-  // Notion search/query are READS via POST — the GET-only rule would wrongly block them. The
-  // profile uses methodPolicy 'all', so POST must NOT be refused on the gate (it will hit the
-  // network and fail on the fake token, but it must get PAST the method check).
-  const NO = [{ provider: 'notion', tokenRef: 'NOTION_TOKEN_DEMO', config: {} }];
+  const NO: ConnectionSpec[] = [{ provider: 'notion', tokenRef: 'NOTION_TOKEN_DEMO', config: {} }];
   const env = { NOTION_TOKEN_DEMO: 'secret_ntn' };
-  const creds = resolveConnection(binding(NO), env, 'notion')!;
-  const [callApi] = connectionTools(connectionState(binding(NO), env), { notion: creds });
+  const creds = resolveConnection(NO, env, 'notion')!;
+  const [callApi] = connectionTools(connectionState(NO, env), { notion: creds });
   await assert.doesNotReject(async () => {
     try {
       await (callApi.execute as (a: unknown) => Promise<unknown>)({ method: 'POST', path: '/v1/search', body: '{}' });
     } catch (e) {
-      // A network/auth error is fine — that means it passed the method gate. A method-gate refusal is NOT.
-      if (/Only GET is allowed/.test((e as Error).message)) throw e;
+      if (/Only GET is allowed/.test((e as Error).message)) throw e; // a network/auth error is fine; a method-gate refusal is not
     }
   });
 });
 
 test('connectionsBlock shows connected vs not-connected from real state', async () => {
-  const connected = connectionsBlock(connectionState(binding(GH), { GITHUB_PAT_DEMO: 'x' }), PROVIDER_CATALOG);
+  const connected = connectionsBlock(connectionState(GH, { GITHUB_PAT_DEMO: 'x' }), PROVIDER_CATALOG);
   assert.match(connected, /✅ github \(connected\)/);
-  const notConnected = connectionsBlock(connectionState(binding(GH), {}), PROVIDER_CATALOG);
+  const notConnected = connectionsBlock(connectionState(GH, {}), PROVIDER_CATALOG);
   assert.match(notConnected, /⚪ github \(not connected\)/);
+});
+
+test('D1 layer: loadConnectionSpecs merges live rows over the binding seed (D1 wins, disabled removes)', async () => {
+  const db = new FakeD1();
+  const seeded = binding([
+    { provider: 'github', tokenRef: 'GH_SEED', config: { repo: 'seed/repo' } },
+    { provider: 'notion', tokenRef: 'NOTION_SEED', config: {} },
+  ]);
+
+  // No rows yet → specs == seed (demo keeps working with an empty table).
+  let specs = await loadConnectionSpecs(db, seeded);
+  assert.deepEqual(specs.map((s) => s.provider).sort(), ['github', 'notion']);
+  assert.equal(specs.find((s) => s.provider === 'github')!.tokenRef, 'GH_SEED');
+
+  // Operator overrides github live (new tokenRef + config) and adds linear → no redeploy.
+  await upsertConnection(db, { projectId: 'demo', provider: 'github', tokenRef: 'GH_LIVE', config: { repo: 'live/repo', apiMode: 'generic' } });
+  await upsertConnection(db, { projectId: 'demo', provider: 'linear', tokenRef: 'LINEAR_LIVE', config: {} });
+  specs = await loadConnectionSpecs(db, seeded);
+  const gh = specs.find((s) => s.provider === 'github')!;
+  assert.equal(gh.tokenRef, 'GH_LIVE', 'live D1 row overrides the seed');
+  assert.equal(gh.config!.apiMode, 'generic');
+  assert.ok(specs.some((s) => s.provider === 'linear'), 'a live-only provider appears with no redeploy');
+
+  // Disabling removes a seeded provider.
+  await upsertConnection(db, { projectId: 'demo', provider: 'notion', status: 'disabled' });
+  specs = await loadConnectionSpecs(db, seeded);
+  assert.ok(!specs.some((s) => s.provider === 'notion'), 'disabled removes the seeded connection');
+});
+
+test('D1 layer: loadConnections returns metadata only and never a secret value', async () => {
+  const db = new FakeD1();
+  await upsertConnection(db, { projectId: 'p', provider: 'github', tokenRef: 'GITHUB_PAT_X', config: { repo: 'a/b' } });
+  const rows = await loadConnections(db, 'p');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].tokenRef, 'GITHUB_PAT_X'); // a NAME, not a token value
+  assert.equal(rows[0].config.repo, 'a/b');
+  assert.equal(rows[0].status, 'active');
+  // the record shape carries no secret/value field at all
+  assert.ok(!('secret' in rows[0]) && !('value' in rows[0]));
 });
 
 const main = async () => {

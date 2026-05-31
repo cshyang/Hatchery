@@ -10,6 +10,7 @@ import { upsertConversationTarget } from '../src/conversations';
 import { claimEvent, type KVLike } from '../src/idempotency';
 import { loadRunnableSkillBody, type D1Like } from '../src/skills';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/reflection';
+import { upsertConnection, loadConnections } from '../src/connections';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -20,6 +21,7 @@ interface Env {
   SLACK_SIGNING_SECRET?: string;
   SLACK_EVENTS?: KVLike; // KV namespace for event_id idempotency
   HEARTBEAT_TOKEN?: string; // shared secret guarding the /__heartbeat trigger
+  ADMIN_CONNECTIONS_TOKEN?: string; // OWN secret guarding /__admin/connections (ADR D11 — NOT the heartbeat token)
   DB?: D1Like; // D1 skill catalog, transcript, memory, and conversation targets
   [binding: string]: unknown;
 }
@@ -156,6 +158,54 @@ app.post('/__internal/reflect-sweep', async (c) => {
     swept++;
   }
   return c.json({ swept });
+});
+
+// Operator connection provisioning (ADR 0003 / D11). Lets the operator add or change a connection's
+// METADATA without a code edit + redeploy. Guarded by its OWN token (NOT HEARTBEAT_TOKEN — provisioning
+// connections and poking heartbeats are different privilege levels). The SECRET is set separately via
+// `wrangler secret put` and is only referenced here by name — this route never receives or stores it.
+// HARD LINE: this is OPERATOR-only and out-of-band; the agent (model) can never reach it.
+async function requireAdmin(c: { env: Env; req: { header(n: string): string | undefined } }): Promise<boolean> {
+  const expected = c.env.ADMIN_CONNECTIONS_TOKEN;
+  return !!expected && c.req.header('x-hatchery-admin-token') === expected;
+}
+
+app.post('/__admin/connections', async (c) => {
+  if (!(await requireAdmin(c))) return c.body(null, 404); // inert/invisible unless the admin token matches
+  const db = c.env.DB;
+  if (!db) return c.json({ error: 'no DB binding' }, 500);
+  const body = (await c.req.json().catch(() => null)) as {
+    projectId?: string;
+    provider?: string;
+    tokenRef?: string;
+    connectionRef?: string;
+    config?: Record<string, unknown>;
+    status?: 'active' | 'disabled';
+  } | null;
+  if (!body?.projectId || !body.provider) return c.json({ error: 'projectId and provider are required' }, 400);
+  if (!body.tokenRef && !body.connectionRef && body.status !== 'disabled') {
+    return c.json({ error: 'tokenRef or connectionRef is required (omit only when disabling)' }, 400);
+  }
+  await upsertConnection(db, {
+    projectId: body.projectId,
+    provider: body.provider,
+    tokenRef: body.tokenRef,
+    connectionRef: body.connectionRef,
+    config: body.config,
+    status: body.status,
+    createdBy: 'admin-route',
+  });
+  return c.json({ ok: true, projectId: body.projectId, provider: body.provider, status: body.status ?? 'active' });
+});
+
+app.get('/__admin/connections', async (c) => {
+  if (!(await requireAdmin(c))) return c.body(null, 404);
+  const db = c.env.DB;
+  if (!db) return c.json({ error: 'no DB binding' }, 500);
+  const projectId = c.req.query('projectId');
+  if (!projectId) return c.json({ error: 'projectId query param required' }, 400);
+  const connections = await loadConnections(db, projectId); // metadata only — no secret is ever stored or returned
+  return c.json({ projectId, connections });
 });
 
 app.post('/slack/events', async (c) => {

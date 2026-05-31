@@ -11,6 +11,7 @@ import {
   resolveConnection,
   connectionTools,
   connectionsBlock,
+  loadConnectionSpecs,
   PROVIDER_CATALOG,
   type ConnectionState,
 } from '../../src/connections';
@@ -68,11 +69,14 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   // provider's token, and hands it to connectionTools, which contributes that provider's tools
   // (v2a = reads only). Tool visibility = connection state (gating). No secret missing → that
   // provider is simply "not connected"; never a broken agent.
-  const connState: ConnectionState[] = connectionState(binding, env);
+  // Specs come from D1 (live, operator-provisioned) merged over the binding seed — so a connection
+  // can be added/changed without a redeploy. .catch keeps a D1 hiccup from breaking the agent.
+  const connSpecs = await loadConnectionSpecs(db, binding).catch(() => binding.connections ?? []);
+  const connState: ConnectionState[] = connectionState(connSpecs, env);
   const connSecrets: Record<string, { secret: string; config: Record<string, unknown> }> = {};
   for (const s of connState) {
     if (s.status !== 'connected') continue;
-    const resolved = resolveConnection(binding, env, s.provider);
+    const resolved = resolveConnection(connSpecs, env, s.provider);
     if (resolved) connSecrets[s.provider] = resolved;
   }
   const connBlock = connState.length ? connectionsBlock(connState, PROVIDER_CATALOG) : null;

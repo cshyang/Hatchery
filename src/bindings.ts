@@ -60,8 +60,13 @@ export interface Binding {
 
 export interface ConnectionSpec {
   provider: string;
-  /** Worker-secret name holding this provider's token (e.g. 'GITHUB_PAT_DEMO'). */
-  tokenRef: string;
+  /** Worker-secret name holding this provider's token (e.g. 'GITHUB_PAT_DEMO'). The operator/static
+   *  backend. Optional because a future managed-OAuth row carries connectionRef instead. */
+  tokenRef?: string;
+  /** RESERVED for the managed-OAuth backend (Nango account ref). Unused until that backend lands —
+   *  the forward-compatible hedge so swapping in Nango is a body-swap behind resolveConnection, not
+   *  a schema/spec redesign. */
+  connectionRef?: string;
   config?: Record<string, unknown>;
 }
 

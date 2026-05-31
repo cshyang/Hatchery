@@ -16,7 +16,8 @@
 //     vault — built only when that pain is real (the crypto.ts version lives in git history).
 
 import type { ToolDefinition } from '@flue/runtime';
-import type { Binding } from './bindings';
+import type { Binding, ConnectionSpec } from './bindings';
+import type { D1Like } from './skills';
 import { githubReadTools } from './github';
 import { genericApiTool, PROVIDER_API_PROFILES } from './api';
 
@@ -26,12 +27,13 @@ export interface ConnectionState {
   config: Record<string, unknown>;
 }
 
-/** Derive each declared connection's state from the binding + whether its Worker secret is
- *  present. Drives gating + the prompt block. Never exposes the secret. */
-export function connectionState(binding: Binding, env: Record<string, unknown>): ConnectionState[] {
-  const specs = binding.connections ?? [];
+/** Derive each declared connection's state from its specs + whether its Worker secret is present.
+ *  Drives gating + the prompt block. Pure over specs (the initializer resolves specs first via
+ *  loadConnectionSpecs). Never exposes the secret. A connectionRef-only row (managed-OAuth, no
+ *  tokenRef) reads as not_connected until that backend lands. */
+export function connectionState(specs: ConnectionSpec[], env: Record<string, unknown>): ConnectionState[] {
   return specs.map((s) => {
-    const token = env[s.tokenRef];
+    const token = s.tokenRef ? env[s.tokenRef] : undefined;
     return {
       provider: s.provider,
       status: typeof token === 'string' && token ? 'connected' : 'not_connected',
@@ -40,18 +42,104 @@ export function connectionState(binding: Binding, env: Record<string, unknown>):
   });
 }
 
-/** Resolve a project's token + config for a provider, or null if not declared / secret missing.
- *  The ONE resolution path (the swappable seam). Today it reads a Worker secret by ref. */
+/** Resolve a provider's secret + config from specs, or null if not declared / secret missing.
+ *  The ONE resolution path (the swappable seam). Today it reads a Worker secret by ref; a future
+ *  managed-OAuth backend slots in here behind the same signature (read connectionRef → vendor). */
 export function resolveConnection(
-  binding: Binding,
+  specs: ConnectionSpec[],
   env: Record<string, unknown>,
   provider: string,
 ): { secret: string; config: Record<string, unknown> } | null {
-  const spec = (binding.connections ?? []).find((s) => s.provider === provider);
-  if (!spec) return null;
+  const spec = specs.find((s) => s.provider === provider);
+  if (!spec || !spec.tokenRef) return null;
   const token = env[spec.tokenRef];
   if (typeof token !== 'string' || !token) return null;
   return { secret: token, config: spec.config ?? {} };
+}
+
+// ── D1 metadata layer (operator-provisioned, no redeploy) ───────────────────────────────────────
+
+export interface ConnectionRecord {
+  provider: string;
+  tokenRef?: string;
+  connectionRef?: string;
+  config: Record<string, unknown>;
+  status: 'active' | 'disabled';
+}
+
+/** Live connection rows for a project (metadata only — never a secret). */
+export async function loadConnections(db: D1Like, projectId: string): Promise<ConnectionRecord[]> {
+  const { results } = await db
+    .prepare('SELECT provider, token_ref, connection_ref, config_json, status FROM connections WHERE project_id=?')
+    .bind(projectId)
+    .all<{ provider: string; token_ref: string | null; connection_ref: string | null; config_json: string | null; status: string }>();
+  return (results ?? []).map((r) => ({
+    provider: r.provider,
+    tokenRef: r.token_ref ?? undefined,
+    connectionRef: r.connection_ref ?? undefined,
+    config: r.config_json ? (JSON.parse(r.config_json) as Record<string, unknown>) : {},
+    status: r.status === 'disabled' ? 'disabled' : 'active',
+  }));
+}
+
+/** The effective connection specs for a project: bindings.ts `connections` is a CODE SEED; live D1
+ *  rows are the source of truth — they add/override by provider, and status='disabled' removes a
+ *  seeded one. This is what lets an operator add a connection with no redeploy. A D1 hiccup falls
+ *  back to the seed so a transient DB error can't strip a working connection. */
+export async function loadConnectionSpecs(db: D1Like | undefined, binding: Binding): Promise<ConnectionSpec[]> {
+  const seed = binding.connections ?? [];
+  if (!db) return seed;
+  const rows = await loadConnections(db, binding.projectId).catch(() => null);
+  if (!rows) return seed; // DB hiccup → keep the seed rather than dropping connections
+  const byProvider = new Map<string, ConnectionSpec>();
+  for (const s of seed) byProvider.set(s.provider, s);
+  for (const r of rows) {
+    if (r.status === 'disabled') {
+      byProvider.delete(r.provider);
+      continue;
+    }
+    byProvider.set(r.provider, { provider: r.provider, tokenRef: r.tokenRef, connectionRef: r.connectionRef, config: r.config });
+  }
+  return [...byProvider.values()];
+}
+
+export interface UpsertConnectionInput {
+  projectId: string;
+  provider: string;
+  tokenRef?: string;
+  connectionRef?: string;
+  config?: Record<string, unknown>;
+  status?: 'active' | 'disabled';
+  createdBy?: string;
+}
+
+/** OPERATOR write (route-guarded, never the agent). Upsert a connection's metadata. The secret it
+ *  references must be set separately via `wrangler secret put` — this never receives or stores it. */
+export async function upsertConnection(db: D1Like, input: UpsertConnectionInput): Promise<void> {
+  const now = Date.now();
+  await db
+    .prepare(
+      `INSERT INTO connections(project_id, provider, token_ref, connection_ref, config_json, status, created_by, created_at, updated_at)
+       VALUES(?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(project_id, provider) DO UPDATE SET
+         token_ref=excluded.token_ref,
+         connection_ref=excluded.connection_ref,
+         config_json=excluded.config_json,
+         status=excluded.status,
+         updated_at=excluded.updated_at`,
+    )
+    .bind(
+      input.projectId,
+      input.provider,
+      input.tokenRef ?? null,
+      input.connectionRef ?? null,
+      input.config ? JSON.stringify(input.config) : null,
+      input.status ?? 'active',
+      input.createdBy ?? null,
+      now,
+      now,
+    )
+    .run();
 }
 
 // The provider catalog (what Hatchery supports at all). Curated platform-side; the agent picks
