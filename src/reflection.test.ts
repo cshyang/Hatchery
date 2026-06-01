@@ -131,6 +131,11 @@ test('reflection skips ambient rows: only engaged messages are consolidated', as
   const batch = (await takeUnreflectedBatch(db, 'A'))!;
   assert.ok(batch.includes('engaged-msg'), 'engaged message consolidated');
   assert.ok(!batch.includes('ambient-msg'), 'ambient message skipped by REM');
+  // After consuming the engaged row, the trailing ambient row must NOT keep re-surfacing the
+  // project: the watermark advances past it and the gate goes quiet. Guards against a future
+  // regression where ambient rows leak back into REM.
+  assert.deepEqual(await projectsWithUnreflected(db), [], 'ambient tail does not re-trigger REM');
+  assert.equal(await takeUnreflectedBatch(db, 'A'), null, 'nothing new after the engaged row');
 });
 
 test('reflection gate ignores ambient-only projects (no REM turn for pure chatter)', async () => {
