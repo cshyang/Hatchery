@@ -157,3 +157,19 @@ export function parseNangoAuthWebhook(rawBody: string): NangoAuthEvent | null {
   if (!projectId || !connectionId || !provider || !providerConfigKey) return null;
   return { projectId: String(projectId), provider: String(provider), providerConfigKey: String(providerConfigKey), connectionId: String(connectionId) };
 }
+
+/** Parse an inbound auth/deletion webhook → just the connectionId, or null. We target the stored row
+ *  by connection_ref (NOT tags.end_user_id) because `tags`/`endUser` are OPTIONAL on the auth webhook
+ *  type and were NOT confirmed present on deletion — connectionId is the one guaranteed field. NOTE:
+ *  whether Nango even SENDS a deletion webhook is unconfirmed (docs list only creation/override); this
+ *  parser is defensive — harmless if the event never fires, correct if it does. */
+export function parseNangoDeletionWebhook(rawBody: string): { connectionId: string } | null {
+  let body: { type?: string; operation?: string; connectionId?: string };
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    return null;
+  }
+  if (body.type !== 'auth' || body.operation !== 'deletion' || !body.connectionId) return null;
+  return { connectionId: String(body.connectionId) };
+}

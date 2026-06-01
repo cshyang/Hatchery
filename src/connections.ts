@@ -191,6 +191,34 @@ export function connectedNotice(provider: string): string {
   return `✅ ${provider} connected — ask me to use it anytime (it'll be ready on your next message).`;
 }
 
+/** The "🔌 disconnected" line the gateway posts when a Nango connection is removed. Posted only when a
+ *  row was actually disabled (so we don't announce a delete for a connection we never had). */
+export function disconnectedNotice(provider: string): string {
+  return `🔌 ${provider} disconnected — its tools are no longer available. Reconnect anytime by asking me.`;
+}
+
+/** Disable the connection row matching a Nango connection_ref (the deletion path). Targets by
+ *  connection_ref — the only field guaranteed present on a deletion webhook — NOT by project/provider.
+ *  Returns {projectId, provider} of the disabled row (so the gateway can post the notice to the right
+ *  channel), or null if no row matched (already gone / never ours). Flipping status to 'disabled'
+ *  makes loadConnectionSpecs drop it → the provider's tools disappear next turn. We disable rather
+ *  than DELETE so the row stays an audit trail and a re-connect cleanly overwrites it. */
+export async function disableConnectionByRef(
+  db: D1Like,
+  connectionRef: string,
+): Promise<{ projectId: string; provider: string } | null> {
+  const row = await db
+    .prepare('SELECT project_id, provider FROM connections WHERE connection_ref=? AND status=\'active\'')
+    .bind(connectionRef)
+    .first<{ project_id: string; provider: string }>();
+  if (!row) return null;
+  await db
+    .prepare('UPDATE connections SET status=\'disabled\', updated_at=? WHERE connection_ref=?')
+    .bind(Date.now(), connectionRef)
+    .run();
+  return { projectId: row.project_id, provider: row.provider };
+}
+
 // The provider catalog (what Hatchery supports at all). Curated platform-side; the agent picks
 // from it, never adds to it.
 export const PROVIDER_CATALOG: { provider: string; summary: string }[] = [

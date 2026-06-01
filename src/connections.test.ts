@@ -17,6 +17,8 @@ import {
   PROVIDER_CATALOG,
   requestConnectionTool,
   connectedNotice,
+  disconnectedNotice,
+  disableConnectionByRef,
 } from './connections';
 import { GITHUB_READ_TOOL_NAMES } from './github';
 import type { D1Like } from './skills';
@@ -229,6 +231,54 @@ test('connectedNotice: a friendly ✅ confirmation naming the provider (the webh
   const msg = connectedNotice('notion');
   assert.match(msg, /✅/);
   assert.match(msg, /notion/i);
+});
+
+test('disconnectedNotice: a clear 🔌 disconnect message naming the provider', async () => {
+  const msg = disconnectedNotice('notion');
+  assert.match(msg, /🔌|disconnect/i);
+  assert.match(msg, /notion/i);
+});
+
+test('disableConnectionByRef: flips the matching row to disabled and returns {projectId, provider}; null if no row matches', async () => {
+  // A focused fake covering exactly the two statements disableConnectionByRef issues: a SELECT by
+  // connection_ref and an UPDATE status by connection_ref.
+  interface CRow { project_id: string; provider: string; connection_ref: string | null; status: string }
+  class RefD1 implements D1Like {
+    rows: CRow[];
+    constructor(rows: CRow[]) { this.rows = rows; }
+    prepare(sql: string) {
+      const t = sql.trim();
+      return {
+        bind: (...args: unknown[]) => ({
+          run: async () => { this.#mutate(t, args); return {}; },
+          all: async <T = Record<string, unknown>>() => ({ results: this.#query(t, args) as T[] }),
+          first: async <T = Record<string, unknown>>() => (this.#query(t, args)[0] ?? null) as T | null,
+        }),
+      };
+    }
+    #mutate(sql: string, args: unknown[]) {
+      if (sql.startsWith('UPDATE connections SET status=')) {
+        const ref = args[args.length - 1]; // WHERE connection_ref=? is the LAST bound param
+        const row = this.rows.find((r) => r.connection_ref === ref);
+        if (row) row.status = 'disabled';
+      }
+    }
+    #query(sql: string, args: unknown[]): CRow[] {
+      if (sql.startsWith('SELECT project_id, provider FROM connections WHERE connection_ref')) {
+        const [ref] = args;
+        return this.rows.filter((r) => r.connection_ref === ref);
+      }
+      return [];
+    }
+  }
+
+  const db = new RefD1([{ project_id: 'C123', provider: 'notion', connection_ref: 'conn_42', status: 'active' }]);
+  const hit = await disableConnectionByRef(db, 'conn_42');
+  assert.deepEqual(hit, { projectId: 'C123', provider: 'notion' });
+  assert.equal(db.rows[0].status, 'disabled', 'row is now disabled (loadConnectionSpecs will drop it → tool disappears)');
+
+  const miss = await disableConnectionByRef(new RefD1([]), 'nope');
+  assert.equal(miss, null, 'unknown connection_ref → null (nothing to disable)');
 });
 
 test('resolveConnection: tokenRef path still returns a literal string secret', async () => {

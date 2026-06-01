@@ -10,8 +10,8 @@ import { upsertConversationTarget, topLevelTargetFromBinding, sendToConversation
 import { claimEvent, type KVLike } from '../src/idempotency';
 import { loadRunnableSkillBody, type D1Like } from '../src/skills';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/reflection';
-import { upsertConnection, loadConnections, PROVIDER_CATALOG, connectedNotice } from '../src/connections';
-import { verifyNangoWebhook, parseNangoAuthWebhook } from '../src/nango';
+import { upsertConnection, loadConnections, PROVIDER_CATALOG, connectedNotice, disconnectedNotice, disableConnectionByRef } from '../src/connections';
+import { verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook } from '../src/nango';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -228,15 +228,44 @@ app.post('/nango/webhook', async (c) => {
   const ok = await verifyNangoWebhook(signingKey, raw, c.req.header('x-nango-hmac-sha256'));
   if (!ok) return c.text('unauthorized', 401);
 
+  const db = c.env.DB;
+  if (!db) return c.json({ error: 'no DB binding' }, 500);
+
+  // Post a deterministic notice to a channel root from the GATEWAY (not an agent turn — a model might
+  // skip the reply; this must not). Best-effort: a Slack hiccup must never fail the D1 write that
+  // already succeeded. project_id IS the channel id; the bot token comes from the project's binding.
+  const postNotice = async (projectId: string, text: string) => {
+    const binding = await bindingByProject(projectId, db).catch(() => undefined);
+    if (!binding) return;
+    const target = topLevelTargetFromBinding(binding);
+    await sendToConversationTarget(c.env as Record<string, unknown>, target, text).catch((e) =>
+      console.log(`[nango] channel notice failed to post: ${e instanceof Error ? e.message : 'error'}`),
+    );
+  };
+
+  // Deletion FIRST (a deletion event is not a creation). Target the row by connection_ref — the only
+  // field guaranteed on a deletion webhook. Disabling makes loadConnectionSpecs drop it → the
+  // provider's tools disappear next turn, instead of going stale and erroring on use. NOTE: whether
+  // Nango sends this event is unconfirmed (docs list only creation/override) — this is the belt; the
+  // braces is fetchToken self-heal (a dead connection_ref 404s → handled at call time regardless).
+  const deletion = parseNangoDeletionWebhook(raw);
+  if (deletion) {
+    const disabled = await disableConnectionByRef(db, deletion.connectionId);
+    if (disabled) {
+      console.log(`[nango] disconnected provider "${disabled.provider}" for project ${disabled.projectId} (connection ${deletion.connectionId})`);
+      await postNotice(disabled.projectId, disconnectedNotice(disabled.provider));
+      return c.json({ ok: true, disconnected: disabled.provider, projectId: disabled.projectId });
+    }
+    console.log(`[nango] deletion for unknown connection_ref ${deletion.connectionId} — nothing to disable`);
+    return c.json({ ignored: 'no matching connection' });
+  }
+
   const event = parseNangoAuthWebhook(raw);
   if (!event) {
     // non-auth, non-creation, or success:false (failed/abandoned consent) — acknowledge, write nothing.
     console.log('[nango] webhook ignored (not an auth-creation-success event)');
     return c.json({ ignored: true });
   }
-
-  const db = c.env.DB;
-  if (!db) return c.json({ error: 'no DB binding' }, 500);
 
   // Convention guard: the Nango integration id MUST equal a catalog provider slug, else the row would
   // be connected-but-toolless (no API profile / typed tools). Log loudly and skip rather than store a
@@ -253,18 +282,7 @@ app.post('/nango/webhook', async (c) => {
     createdBy: 'nango-webhook',
   });
   console.log(`[nango] connected provider "${event.provider}" for project ${event.projectId} (connection ${event.connectionId})`);
-
-  // Tell the channel it worked. The webhook has no conversation thread, so the GATEWAY posts a
-  // deterministic confirmation to the channel root (project_id IS the channel id) — NOT an agent
-  // turn (a model might skip the reply; this must not). Best-effort: a Slack hiccup must never fail
-  // the connection write that already succeeded. The bot token comes from the project's binding.
-  const binding = await bindingByProject(event.projectId, db).catch(() => undefined);
-  if (binding) {
-    const target = topLevelTargetFromBinding(binding);
-    await sendToConversationTarget(c.env as Record<string, unknown>, target, connectedNotice(event.provider)).catch((e) =>
-      console.log(`[nango] connected, but the channel notice failed to post: ${e instanceof Error ? e.message : 'error'}`),
-    );
-  }
+  await postNotice(event.projectId, connectedNotice(event.provider));
   return c.json({ ok: true, projectId: event.projectId, provider: event.provider });
 });
 

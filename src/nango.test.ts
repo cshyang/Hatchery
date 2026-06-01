@@ -3,7 +3,7 @@
 // reconciled live in the integration task (see the plan's live-probe task) — green here != Nango-correct.
 
 import assert from 'node:assert/strict';
-import { startConnectSession, fetchToken, verifyNangoWebhook, parseNangoAuthWebhook } from './nango';
+import { startConnectSession, fetchToken, verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook } from './nango';
 
 // A fake fetch that records the last call and returns a canned Response.
 function fakeFetch(responder: (url: string, init: RequestInit) => Response) {
@@ -91,6 +91,25 @@ test('parseNangoAuthWebhook: normalizes an auth/creation/success event; null for
   assert.equal(parseNangoAuthWebhook(JSON.stringify({ type: 'sync', operation: 'creation', success: true })), null, 'non-auth → null');
   assert.equal(parseNangoAuthWebhook(JSON.stringify({ type: 'auth', operation: 'creation', success: true, connectionId: 'c', provider: 'notion', providerConfigKey: 'notion' })), null, 'missing end_user_id → null');
   assert.equal(parseNangoAuthWebhook('not json'), null, 'garbage → null');
+  // a deletion event must NOT be mistaken for a creation
+  assert.equal(parseNangoAuthWebhook(JSON.stringify({ type: 'auth', operation: 'deletion', success: true, connectionId: 'c', provider: 'notion', providerConfigKey: 'notion', tags: { end_user_id: 'C1' } })), null, 'deletion → null for the creation parser');
+});
+
+test('parseNangoDeletionWebhook: extracts connectionId on auth/deletion; null otherwise. Targets by connectionId (the only guaranteed field — tags may be absent on deletion).', async () => {
+  // Guaranteed-present fields only: type, operation, connectionId. tags/end_user_id NOT relied on.
+  const del = parseNangoDeletionWebhook(JSON.stringify({ type: 'auth', operation: 'deletion', connectionId: 'conn_42', provider: 'notion', providerConfigKey: 'notion' }));
+  assert.deepEqual(del, { connectionId: 'conn_42' });
+
+  // still works if tags happen to ride along
+  assert.deepEqual(
+    parseNangoDeletionWebhook(JSON.stringify({ type: 'auth', operation: 'deletion', connectionId: 'conn_9', tags: { end_user_id: 'C1' } })),
+    { connectionId: 'conn_9' },
+  );
+
+  assert.equal(parseNangoDeletionWebhook(JSON.stringify({ type: 'auth', operation: 'creation', connectionId: 'c' })), null, 'creation → null for the deletion parser');
+  assert.equal(parseNangoDeletionWebhook(JSON.stringify({ type: 'auth', operation: 'deletion' })), null, 'no connectionId → null');
+  assert.equal(parseNangoDeletionWebhook(JSON.stringify({ type: 'sync', operation: 'deletion', connectionId: 'c' })), null, 'non-auth → null');
+  assert.equal(parseNangoDeletionWebhook('not json'), null, 'garbage → null');
 });
 
 const main = async () => {
