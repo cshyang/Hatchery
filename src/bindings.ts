@@ -13,6 +13,54 @@ export type SandboxMode = 'virtual' | 'cloudflare-sandbox' | 'daytona' | 'e2b';
 /** Default model when a binding doesn't pin one. */
 export const DEFAULT_MODEL = 'zai/glm-5.1';
 
+// Models whose context window we've VALIDATED — either present in pi-ai's catalog (Flue resolves
+// the window from there, e.g. zai/glm-5.1 → 202800) or registered via registerProvider() in app.ts.
+// A model OUTSIDE this set may resolve to an unknown (0) window, which silently disables Flue's
+// THRESHOLD compaction and leaves only reactive overflow-recovery (compaction after the provider
+// rejects for length — late and lossy). This guard turns that silent cliff into a loud log line.
+// Keep it in sync with the models you actually run; when adding an uncatalogued model (e.g. a
+// specific OpenRouter id), also register its window via registerProvider so the window is KNOWN.
+export const VALIDATED_MODELS: ReadonlySet<string> = new Set([
+  'zai/glm-5.1', // catalog contextWindow 202800
+  'zai/glm-4.6', // catalog contextWindow 200000
+]);
+
+// Warn at most once per model id per process — visibility in `wrangler tail` without per-turn spam
+// (the initializer resolves the model on every dispatch). Module-level; resets on a cold start.
+const warnedUnvalidatedModels = new Set<string>();
+
+/** Resolve the model id for a binding, guarding against models with an unknown context window.
+ *  Returns the chosen model — operator intent is RESPECTED, never silently swapped — but an
+ *  unvalidated model is flagged loudly so a model swap can't quietly turn off compaction. */
+export function resolveModel(model?: string): string {
+  const chosen = model ?? DEFAULT_MODEL;
+  if (!VALIDATED_MODELS.has(chosen) && !warnedUnvalidatedModels.has(chosen)) {
+    warnedUnvalidatedModels.add(chosen);
+    console.warn(
+      `[model-guard] "${chosen}" is not in VALIDATED_MODELS — its context window may resolve to ` +
+        `unknown (0), which disables threshold compaction (leaving only reactive overflow recovery). ` +
+        `Add it to VALIDATED_MODELS in bindings.ts, and register its window via registerProvider in ` +
+        `app.ts if pi-ai's catalog doesn't know it.`,
+    );
+  }
+  return chosen;
+}
+
+/** WRITE-boundary guard: reject pinning a model whose window we can't vouch for, so bad config
+ *  never enters D1. Strict (throws) on the way IN; the read path (resolveModel) stays lenient on
+ *  the way OUT so an already-stored binding degrades-but-runs. An unpinned model (null/undefined/
+ *  empty) is always fine — it resolves to DEFAULT_MODEL at read time. */
+export function assertValidModel(model?: string | null): void {
+  if (!model) return; // unpinned → DEFAULT_MODEL at read time
+  if (!VALIDATED_MODELS.has(model)) {
+    throw new Error(
+      `[model-guard] refusing to pin unvalidated model "${model}": its context window may resolve ` +
+        `to unknown (0), disabling threshold compaction. Add it to VALIDATED_MODELS in bindings.ts ` +
+        `(and register its window via registerProvider in app.ts if pi-ai's catalog doesn't know it).`,
+    );
+  }
+}
+
 /** The persona slug used until a project hosts more than one agent. */
 export const DEFAULT_AGENT_SLUG = 'default';
 
@@ -201,6 +249,7 @@ export interface AutoCreateBindingInput {
  *  race-safe: two near-simultaneous @mentions in a new channel create exactly one row. The bot token is
  *  referenced by name, never stored. */
 export async function autoCreateBinding(db: D1Like, input: AutoCreateBindingInput): Promise<void> {
+  assertValidModel(input.model); // reject a bad model pin before it enters D1 (gateway passes none today)
   const now = Date.now();
   await db
     .prepare(
@@ -227,6 +276,7 @@ export async function autoCreateBinding(db: D1Like, input: AutoCreateBindingInpu
 /** Operator/admin upsert (full update). Distinct from autoCreateBinding (which never overwrites): this
  *  one updates an existing row. Reserved for an admin path; not used by the gateway. */
 export async function upsertBinding(db: D1Like, rec: BindingRecord): Promise<void> {
+  assertValidModel(rec.model); // reject a bad model pin before it enters D1
   const now = Date.now();
   await db
     .prepare(
