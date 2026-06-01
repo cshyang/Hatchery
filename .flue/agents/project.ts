@@ -14,8 +14,11 @@ import {
   connectionTools,
   connectionsBlock,
   loadConnectionSpecs,
+  requestConnectionTool,
+  disconnectConnectionTool,
   PROVIDER_CATALOG,
   type ConnectionState,
+  type ResolvedConnection,
 } from '../../src/connections';
 
 // The project agent. Addressed at /agents/project/<id>, id = "project:<projectId>:agent:<slug>"
@@ -75,13 +78,27 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   // can be added/changed without a redeploy. .catch keeps a D1 hiccup from breaking the agent.
   const connSpecs = await loadConnectionSpecs(db, binding).catch(() => binding.connections ?? []);
   const connState: ConnectionState[] = connectionState(connSpecs, env);
-  const connSecrets: Record<string, { secret: string; config: Record<string, unknown> }> = {};
+  const connSecrets: Record<string, ResolvedConnection> = {};
   for (const s of connState) {
     if (s.status !== 'connected') continue;
     const resolved = resolveConnection(connSpecs, env, s.provider);
     if (resolved) connSecrets[s.provider] = resolved;
   }
-  const connBlock = connState.length ? connectionsBlock(connState, PROVIDER_CATALOG) : null;
+  // request_connection is a REQUEST (not a connected-provider tool), so it's always available when we
+  // can actually start a session: DB present (to eventually store the row via the webhook) AND the
+  // platform key present (no broken tool when Nango isn't configured). Mirrors how skill tools are
+  // always-on when a DB exists.
+  const nangoSecretKey = typeof env.NANGO_SECRET_KEY === 'string' ? env.NANGO_SECRET_KEY : '';
+  const canRequestConnect = !!db && !!nangoSecretKey;
+  // request_connection (always available when connectable) + disconnect_connection (the in-Slack
+  // revoke — the only disconnect path a non-operator has). Both gated on db + the Nango platform key;
+  // both no-secret-param. `db &&` in the spread narrows db to non-undefined for disconnect's signature.
+  const nangoTools =
+    canRequestConnect && db
+      ? [requestConnectionTool({ nangoSecretKey, projectId }), disconnectConnectionTool({ nangoSecretKey, projectId, db })]
+      : [];
+
+  const connBlock = connState.length || canRequestConnect ? connectionsBlock(connState, PROVIDER_CATALOG, canRequestConnect) : null;
 
   const replyToConversation = defineTool({
     name: 'reply_to_conversation',
@@ -148,6 +165,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     ...reminderTools(ticker, heartbeatToken, projectId),
     ...(db ? memoryTools(db, projectId) : []),
     ...userTools(db, botToken),
+    ...nangoTools,
     ...connectionTools(connState, connSecrets),
   ];
 

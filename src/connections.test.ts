@@ -15,6 +15,11 @@ import {
   loadConnectionSpecs,
   upsertConnection,
   PROVIDER_CATALOG,
+  requestConnectionTool,
+  disconnectConnectionTool,
+  connectedNotice,
+  disconnectedNotice,
+  disableConnectionByRef,
 } from './connections';
 import { GITHUB_READ_TOOL_NAMES } from './github';
 import type { D1Like } from './skills';
@@ -40,6 +45,7 @@ function binding(connections?: ConnectionSpec[]): Binding {
 }
 
 const GH: ConnectionSpec[] = [{ provider: 'github', tokenRef: 'GITHUB_PAT_DEMO', config: { repo: 'o/r' } }];
+const NANGO_REF: ConnectionSpec[] = [{ provider: 'notion', connectionRef: 'conn_42', config: {} }];
 
 // In-memory D1 fake — only the two statements connections.ts issues (coupled on purpose).
 interface Row {
@@ -110,6 +116,18 @@ test('connected: state flips when the Worker secret is present; resolve returns 
 test('no declared connection → nothing, even if a stray secret exists in env', async () => {
   assert.equal(connectionState([], { GITHUB_PAT_DEMO: 'ghp_x' }).length, 0);
   assert.equal(resolveConnection([], { GITHUB_PAT_DEMO: 'ghp_x' }, 'github'), null);
+});
+
+test('connectionRef + NANGO_SECRET_KEY present → connected (managed-OAuth backend)', async () => {
+  assert.equal(connectionState(NANGO_REF, {}).length, 1);
+  assert.equal(connectionState(NANGO_REF, {})[0].status, 'not_connected', 'no platform key → cannot fetch → not connected');
+  assert.equal(connectionState(NANGO_REF, { NANGO_SECRET_KEY: 'nk_secret' })[0].status, 'connected');
+});
+
+test('a Worker-secret connection still drives state independently of NANGO_SECRET_KEY', async () => {
+  // tokenRef path is unaffected by the Nango branch.
+  assert.equal(connectionState(GH, { NANGO_SECRET_KEY: 'nk_secret' })[0].status, 'not_connected');
+  assert.equal(connectionState(GH, { GITHUB_PAT_DEMO: 'ghp_x' })[0].status, 'connected');
 });
 
 test('gating: GitHub typed read tools appear only when connected, and the write is NOT exposed', async () => {
@@ -208,6 +226,205 @@ test('D1 layer: loadConnections returns metadata only and never a secret value',
   assert.equal(rows[0].status, 'active');
   // the record shape carries no secret/value field at all
   assert.ok(!('secret' in rows[0]) && !('value' in rows[0]));
+});
+
+test('connectedNotice: a friendly ✅ confirmation naming the provider (the webhook posts this to the channel)', async () => {
+  const msg = connectedNotice('notion');
+  assert.match(msg, /✅/);
+  assert.match(msg, /notion/i);
+});
+
+test('disconnectedNotice: a clear 🔌 disconnect message naming the provider', async () => {
+  const msg = disconnectedNotice('notion');
+  assert.match(msg, /🔌|disconnect/i);
+  assert.match(msg, /notion/i);
+});
+
+test('disableConnectionByRef: flips the matching row to disabled and returns {projectId, provider}; null if no row matches', async () => {
+  // A focused fake covering exactly the two statements disableConnectionByRef issues: a SELECT by
+  // connection_ref and an UPDATE status by connection_ref.
+  interface CRow { project_id: string; provider: string; connection_ref: string | null; status: string }
+  class RefD1 implements D1Like {
+    rows: CRow[];
+    constructor(rows: CRow[]) { this.rows = rows; }
+    prepare(sql: string) {
+      const t = sql.trim();
+      return {
+        bind: (...args: unknown[]) => ({
+          run: async () => { this.#mutate(t, args); return {}; },
+          all: async <T = Record<string, unknown>>() => ({ results: this.#query(t, args) as T[] }),
+          first: async <T = Record<string, unknown>>() => (this.#query(t, args)[0] ?? null) as T | null,
+        }),
+      };
+    }
+    #mutate(sql: string, args: unknown[]) {
+      if (sql.startsWith('UPDATE connections SET status=')) {
+        const ref = args[args.length - 1]; // WHERE connection_ref=? is the LAST bound param
+        const row = this.rows.find((r) => r.connection_ref === ref);
+        if (row) row.status = 'disabled';
+      }
+    }
+    #query(sql: string, args: unknown[]): CRow[] {
+      if (sql.startsWith('SELECT project_id, provider FROM connections WHERE connection_ref')) {
+        const [ref] = args;
+        return this.rows.filter((r) => r.connection_ref === ref);
+      }
+      return [];
+    }
+  }
+
+  const db = new RefD1([{ project_id: 'C123', provider: 'notion', connection_ref: 'conn_42', status: 'active' }]);
+  const hit = await disableConnectionByRef(db, 'conn_42');
+  assert.deepEqual(hit, { projectId: 'C123', provider: 'notion' });
+  assert.equal(db.rows[0].status, 'disabled', 'row is now disabled (loadConnectionSpecs will drop it → tool disappears)');
+
+  const miss = await disableConnectionByRef(new RefD1([]), 'nope');
+  assert.equal(miss, null, 'unknown connection_ref → null (nothing to disable)');
+});
+
+test('resolveConnection: tokenRef path still returns a literal string secret', async () => {
+  const resolved = resolveConnection(GH, { GITHUB_PAT_DEMO: 'ghp_realtoken' }, 'github');
+  assert.equal(typeof resolved?.secret, 'string');
+  assert.equal(resolved?.secret, 'ghp_realtoken');
+});
+
+test('resolveConnection: connectionRef path returns a LAZY thunk, memoized to ONE fetch per turn', async () => {
+  let fetchCount = 0;
+  const fakeFetchToken = async () => { fetchCount++; return 'live_at_777'; };
+  const resolved = resolveConnection(NANGO_REF, { NANGO_SECRET_KEY: 'nk' }, 'notion', { fetchToken: fakeFetchToken });
+  assert.equal(typeof resolved?.secret, 'function', 'Nango credential is a deferred fetch');
+  assert.equal(fetchCount, 0, 'building the credential must NOT fetch (initializer stays network-light)');
+  const get = resolved!.secret as () => Promise<string>;
+  assert.equal(await get(), 'live_at_777');
+  assert.equal(await get(), 'live_at_777');
+  assert.equal(fetchCount, 1, 'a multi-call turn pays exactly one Nango round-trip (memoized)');
+});
+
+test('resolveConnection: connectionRef but NO platform key → null (no broken tool)', async () => {
+  assert.equal(resolveConnection(NANGO_REF, {}, 'notion'), null);
+});
+
+test('a Nango-backed notion connection builds notion_call_api whose execute resolves the lazy token', async () => {
+  let fetchCount = 0;
+  const fakeFetchToken = async () => { fetchCount++; return 'live_notion_at'; };
+  const specs: ConnectionSpec[] = [{ provider: 'notion', connectionRef: 'conn_42', config: {} }];
+  const env = { NANGO_SECRET_KEY: 'nk' };
+  const creds = resolveConnection(specs, env, 'notion', { fetchToken: fakeFetchToken })!;
+  const tools = connectionTools(connectionState(specs, env), { notion: creds });
+  assert.deepEqual(tools.map((t) => t.name), ['notion_call_api'], 'connected Nango notion exposes the generic call tool');
+  assert.equal(fetchCount, 0, 'building the tool must not fetch a token');
+  // execute resolves the lazy token (a network error after that is fine; a method-gate refusal is not).
+  await assert.doesNotReject(async () => {
+    try {
+      await (tools[0].execute as (a: unknown) => Promise<unknown>)({ method: 'POST', path: '/v1/search', body: '{}' });
+    } catch (e) {
+      if (/Only GET is allowed/.test((e as Error).message)) throw e;
+    }
+  });
+  assert.ok(fetchCount >= 1, 'execute resolved the lazy token at least once');
+});
+
+test('request_connection: schema has provider but NO secret/token parameter (the structural wall)', async () => {
+  const tool = requestConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123' });
+  assert.equal(tool.name, 'request_connection');
+  const props = (tool.parameters as { properties?: Record<string, unknown> }).properties ?? {};
+  const keys = Object.keys(props);
+  assert.deepEqual(keys, ['provider'], 'exactly one param: provider — no secret/token field exists');
+  for (const k of keys) assert.ok(!/secret|token|key|credential/i.test(k), `no credential-shaped param (${k})`);
+});
+
+test('request_connection: starts a session bound to the channel (end_user_id = projectId) and returns the link', async () => {
+  const calls: { secretKey: string; endUserId: string; integrationId: string }[] = [];
+  const fakeStart = async (a: { secretKey: string; endUserId: string; integrationId: string }) => {
+    calls.push(a);
+    return { connectLink: 'https://connect.nango.dev/xyz', token: 't', expiresAt: 'e' };
+  };
+  const tool = requestConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123' }, { startConnectSession: fakeStart });
+  const out = (await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'notion' }));
+  assert.match(out, /https:\/\/connect\.nango\.dev\/xyz/);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], { secretKey: 'nk', endUserId: 'C123', integrationId: 'notion' });
+});
+
+test('request_connection: refuses a provider not in the catalog (no session started)', async () => {
+  let started = 0;
+  const fakeStart = async () => { started++; return { connectLink: 'x', token: 't', expiresAt: 'e' }; };
+  const tool = requestConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123' }, { startConnectSession: fakeStart });
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'salesforce' });
+  assert.match(out, /not a supported provider/i);
+  assert.equal(started, 0, 'no Nango session for an unsupported provider');
+});
+
+// A fake DB for the disconnect tool: supports loadConnections (SELECT provider, token_ref…) and
+// disableConnectionByRef (SELECT project_id, provider WHERE connection_ref + UPDATE status).
+function disconnectFakeD1(rows: { project_id: string; provider: string; connection_ref: string | null; status: string }[]): D1Like {
+  return {
+    prepare(sql: string) {
+      const t = sql.trim();
+      return {
+        bind: (...args: unknown[]) => ({
+          run: async () => {
+            if (t.startsWith('UPDATE connections SET status=')) {
+              const ref = args[args.length - 1];
+              const row = rows.find((r) => r.connection_ref === ref);
+              if (row) row.status = 'disabled';
+            }
+            return {};
+          },
+          all: async <T = Record<string, unknown>>() => {
+            if (t.startsWith('SELECT provider, token_ref')) {
+              const [pid] = args;
+              return { results: rows.filter((r) => r.project_id === pid).map((r) => ({ provider: r.provider, token_ref: null, connection_ref: r.connection_ref, config_json: null, status: r.status })) as T[] };
+            }
+            return { results: [] as T[] };
+          },
+          first: async <T = Record<string, unknown>>() => {
+            if (t.startsWith('SELECT project_id, provider FROM connections WHERE connection_ref')) {
+              const [ref] = args;
+              const row = rows.find((r) => r.connection_ref === ref && r.status === 'active');
+              return (row ? { project_id: row.project_id, provider: row.provider } : null) as T | null;
+            }
+            return null as T | null;
+          },
+        }),
+      };
+    },
+  };
+}
+
+test('disconnect_connection: schema has provider but NO secret param; deletes at Nango + disables the local row', async () => {
+  const rows = [{ project_id: 'C123', provider: 'notion', connection_ref: 'conn_42', status: 'active' }];
+  const db = disconnectFakeD1(rows);
+  const deleted: { secretKey: string; connectionId: string; providerConfigKey: string }[] = [];
+  const fakeDelete = async (a: { secretKey: string; connectionId: string; providerConfigKey: string }) => { deleted.push(a); };
+  const tool = disconnectConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123', db }, { deleteConnection: fakeDelete });
+
+  assert.equal(tool.name, 'disconnect_connection');
+  const props = (tool.parameters as { properties?: Record<string, unknown> }).properties ?? {};
+  assert.deepEqual(Object.keys(props), ['provider'], 'only a provider param — no secret');
+
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'notion' });
+  assert.match(out, /🔌|disconnect/i);
+  assert.deepEqual(deleted, [{ secretKey: 'nk', connectionId: 'conn_42', providerConfigKey: 'notion' }], 'revoked at Nango by connection_ref');
+  assert.equal(rows[0].status, 'disabled', 'local row disabled → tool disappears next turn');
+});
+
+test('disconnect_connection: not-connected provider → friendly message, no Nango call', async () => {
+  const db = disconnectFakeD1([]); // no rows for this channel
+  let deletes = 0;
+  const fakeDelete = async () => { deletes++; };
+  const tool = disconnectConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123', db }, { deleteConnection: fakeDelete });
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'notion' });
+  assert.match(out, /not connected|nothing to disconnect/i);
+  assert.equal(deletes, 0, 'no Nango call when there is no connection to remove');
+});
+
+test('connectionsBlock: canRequest=true tells the agent to use request_connection; default does not', async () => {
+  const withReq = connectionsBlock(connectionState(GH, {}), PROVIDER_CATALOG, true);
+  assert.match(withReq, /request_connection/);
+  const without = connectionsBlock(connectionState(GH, {}), PROVIDER_CATALOG);
+  assert.doesNotMatch(without, /request_connection/);
+  assert.match(without, /wired by an operator first/);
 });
 
 const main = async () => {

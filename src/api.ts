@@ -77,7 +77,7 @@ const FETCH_TIMEOUT_MS = 12_000;
 
 /** The generic call tool for one connected provider. `secret` is the resolved credential; `config`
  *  is the connection's non-secret config (e.g. {repo}). Returns ONE tool named `<provider>_call_api`. */
-export function genericApiTool(profile: ProviderApiProfile, secret: string, config: Record<string, unknown>): ToolDefinition {
+export function genericApiTool(profile: ProviderApiProfile, secret: string | (() => Promise<string>), config: Record<string, unknown>): ToolDefinition {
   const getOnly = profile.methodPolicy === 'get-only';
   const methodNote = getOnly
     ? 'Read-only for now: only method "GET" is allowed (writes need human approval and are not wired yet). '
@@ -102,9 +102,12 @@ export function genericApiTool(profile: ProviderApiProfile, secret: string, conf
       if (getOnly && m !== 'GET') {
         throw new Error(`Only GET is allowed for ${profile.provider} via ${profile.provider}_call_api; "${m}" is a write and needs approval (not wired yet).`);
       }
+      // Resolve the credential at the network boundary: a literal Worker secret, or a lazy Nango
+      // token fetched (and per-turn-memoized) only now that a call is actually being made.
+      const resolvedSecret = typeof secret === 'function' ? await secret() : secret;
       const p = String(path).startsWith('/') ? String(path) : `/${String(path)}`;
       const headers: Record<string, string> = {
-        ...profile.auth(secret),
+        ...profile.auth(resolvedSecret),
         ...(profile.staticHeaders ?? {}),
         'user-agent': UA,
       };
