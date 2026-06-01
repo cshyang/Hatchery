@@ -38,12 +38,27 @@ test('startConnectSession: throws on non-2xx', async () => {
   await assert.rejects(() => startConnectSession({ secretKey: 'x', endUserId: 'C1', integrationId: 'notion' }, { fetchImpl: fn }), /401/);
 });
 
+test('startConnectSession: unwraps the live { data: {...} } envelope (confirmed via live probe 2026-06-01)', async () => {
+  // Nango's real POST /connect/sessions wraps the result under `data`; flat-reading it returned undefined.
+  const { fn } = fakeFetch(() =>
+    new Response(JSON.stringify({ data: { token: 'tok', expires_at: 'e', connect_link: 'https://connect.nango.dev/wrapped' } }), { status: 201 }),
+  );
+  const out = await startConnectSession({ secretKey: 'nk', endUserId: 'C1', integrationId: 'notion' }, { fetchImpl: fn });
+  assert.equal(out.connectLink, 'https://connect.nango.dev/wrapped');
+});
+
 test('fetchToken: GETs /connection/{id}?provider_config_key=… with Bearer, returns credentials.access_token', async () => {
   const { fn, calls } = fakeFetch(() => new Response(JSON.stringify({ credentials: { access_token: 'live_at_999' } }), { status: 200 }));
   const token = await fetchToken({ secretKey: 'nk_secret', connectionId: 'conn_42', providerConfigKey: 'notion' }, { fetchImpl: fn });
   assert.equal(token, 'live_at_999');
   assert.match(calls[0].url, /\/connection\/conn_42\?provider_config_key=notion$/);
   assert.equal((calls[0].init.headers as Record<string, string>).authorization, 'Bearer nk_secret');
+});
+
+test('fetchToken: unwraps the { data: {...} } envelope too (Nango wraps inconsistently across endpoints)', async () => {
+  const { fn } = fakeFetch(() => new Response(JSON.stringify({ data: { credentials: { access_token: 'live_wrapped' } } }), { status: 200 }));
+  const token = await fetchToken({ secretKey: 'nk', connectionId: 'c', providerConfigKey: 'notion' }, { fetchImpl: fn });
+  assert.equal(token, 'live_wrapped');
 });
 
 test('fetchToken: throws when no access_token present', async () => {

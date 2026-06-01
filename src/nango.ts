@@ -20,6 +20,17 @@ export interface FetchDeps {
   fetchImpl?: typeof fetch;
 }
 
+/** Nango enveloping is inconsistent across endpoints: POST /connect/sessions wraps its result as
+ *  `{ data: {...} }` (confirmed live 2026-06-01), while other endpoints return the object flat.
+ *  Unwrap defensively — use `.data` when present, else the object itself — so a parse works either
+ *  way and a future envelope change on one endpoint can't silently break us. */
+function nangoBody<T>(json: unknown): T {
+  if (json && typeof json === 'object' && 'data' in (json as Record<string, unknown>)) {
+    return (json as { data: T }).data;
+  }
+  return json as T;
+}
+
 async function nangoFetch(url: string, init: RequestInit, fetchImpl: typeof fetch): Promise<Response> {
   try {
     return await fetchImpl(url, { ...init, signal: AbortSignal.timeout(NANGO_FETCH_TIMEOUT_MS) });
@@ -59,7 +70,7 @@ export async function startConnectSession(
   );
   const text = await res.text();
   if (!res.ok) throw new Error(`Nango connect session failed (${res.status}): ${text.slice(0, 200)}`);
-  const json = JSON.parse(text) as { token?: string; expires_at?: string; connect_link?: string };
+  const json = nangoBody<{ token?: string; expires_at?: string; connect_link?: string }>(JSON.parse(text));
   if (!json.connect_link) throw new Error('Nango connect session returned no connect_link');
   return { connectLink: json.connect_link, token: json.token ?? '', expiresAt: json.expires_at ?? '' };
 }
@@ -80,7 +91,7 @@ export async function fetchToken(args: FetchTokenArgs, deps: FetchDeps = {}): Pr
   const res = await nangoFetch(url, { method: 'GET', headers: { authorization: `Bearer ${args.secretKey}` } }, fetchImpl);
   const text = await res.text();
   if (!res.ok) throw new Error(`Nango token fetch failed (${res.status}): ${text.slice(0, 200)}`);
-  const json = JSON.parse(text) as { credentials?: { access_token?: string } };
+  const json = nangoBody<{ credentials?: { access_token?: string } }>(JSON.parse(text));
   const token = json.credentials?.access_token;
   if (!token) throw new Error('Nango connection has no access_token in credentials');
   return token;
