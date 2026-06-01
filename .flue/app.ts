@@ -4,6 +4,7 @@ import { dispatch } from '@flue/runtime';
 import { verifySlackSignature } from '../src/slack/verify';
 import { botInThread } from '../src/slack/threads';
 import { mentionsBot, stripMention } from '../src/slack/mentions';
+import { postMessage } from '../src/slack/post';
 import { bindings, bindingBySlack, bindingByProject, agentInstanceId, autoCreateBinding, isKnownTeam } from '../src/bindings';
 import { normalizeSlackMessage } from '../src/canonical';
 import { upsertConversationTarget, topLevelTargetFromBinding, sendToConversationTarget } from '../src/conversations';
@@ -33,6 +34,12 @@ interface Env {
 // one bot install, reused across all channels of the known team). These mirror the demo seed row.
 const BOT_ID_FOR_AUTOCREATE = 'U0B6UB2E5HT';
 const DEFAULT_TRANSPORT_TOKEN_REF = 'SLACK_BOT_TOKEN_DEFAULT';
+
+// The instant, deterministic "working" acknowledgement. Posted from the gateway into the reply's
+// thread the moment we engage, so a person never stares at silence while the agent turn spins up.
+// Naming the SPECIFIC step ("🔍 Checking the GitHub repo…") is the model's job via update_status;
+// this is just the guaranteed "I'm on it" the agent layer structurally can't post itself.
+const WORKING_ACK = '👀 On it…';
 
 // Liveness backstop. The 6h cron poke (and any manual /__heartbeat) wakes each active
 // project with NO specific work — the agent stays silent unless it has a self-scheduled
@@ -386,6 +393,25 @@ app.post('/slack/events', async (c) => {
   const eventId = body.event_id ?? `${ev.channel}:${ev.ts}`;
   if (!(await claimEvent(c.env.SLACK_EVENTS, eventId))) {
     return c.body(null, 200); // duplicate delivery — already handled
+  }
+
+  // Instant in-thread acknowledgement — the deterministic "I'm on it", posted from the GATEWAY
+  // because this is the only place that both knows the thread and fires at t=0. Flue's dispatch
+  // leaves the agent's initializer + tool layer blind to the conversation (ctx has no payload/
+  // session; a tool's execute() gets only its args), so the agent can't post this itself. It lands
+  // in the same thread the reply will use (externalConversationId), so the answer follows right
+  // under it. Posted AFTER the idempotency claim so a Slack retry can't double-post it, and
+  // best-effort: a Slack hiccup must never block the dispatch below.
+  const ackToken = (c.env as Record<string, string | undefined>)[binding.transportTokenRef];
+  if (ackToken) {
+    // waitUntil, not await: the ACK is best-effort chrome — it must not spend the 3s Slack-ack budget,
+    // and postMessage has no fetch timeout, so awaiting a hung Slack call would block the 200 until the
+    // Worker times out and Slack retries. Fire it after the response; it still lands before the reply.
+    c.executionCtx.waitUntil(
+      postMessage(ackToken, msg.externalSpaceId, WORKING_ACK, msg.externalConversationId).catch((e) =>
+        console.log(`[ack] working-ack failed to post: ${e instanceof Error ? e.message : 'error'}`),
+      ),
+    );
   }
 
   // Log to the transcript so nightly reflection has something to consolidate (best-effort —
