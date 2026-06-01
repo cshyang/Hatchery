@@ -1,8 +1,28 @@
 # M2 Handoff — Nango self-serve connect (resume here)
 
-**Date:** 2026-06-01 · **Status:** **CODE COMPLETE (Tasks 1–9) on branch `m2-self-serve-connect`.** tsc clean, 74 tests green (8 files), whole-branch review APPROVED. Remaining = Tasks 10–12 (live Nango account + deploy + live-probe + end-to-end), which need the operator (Nango account + one read-only provider integration). Plan: `docs/superpowers/plans/2026-06-01-m2-self-serve-connect.md`.
+**Date:** 2026-06-01 · **Status:** ✅ **M2 LIVE-PROVEN END TO END on `m2-self-serve-connect` (deployed version 60f8682b).** All 12 tasks done. tsc clean, 76 tests green (8 files). Real Slack→Nango→Notion loop confirmed in channel C0B7B03441X (connection f557e57b…): `@bot connect notion` → magic link → consent → HMAC-verified webhook → connection_ref in D1 → `notion_call_api GET /v1/users/me` returned live data. Plan: `docs/superpowers/plans/2026-06-01-m2-self-serve-connect.md`.
 
-## Resume point (what's left — Tasks 10–12, all need the live Nango account)
+## Live-probe finding (Task 11 earned its keep)
+
+Nango wraps `POST /connect/sessions` AND `/connection/{id}` as `{ data: {...} }`, NOT the flat `{ token, connect_link, … }` the code first assumed. Flat-reading returned undefined → would've thrown on the first real connect. Fixed with a tolerant `nangoBody()` unwrap (use `.data` if present, else flat) + 2 envelope tests (commit faacc59). LESSON: fake-fetch tests prove code shape, never wire shape — the live probe is mandatory for any external API, esp. one whose docs 404.
+
+## BEFORE REAL TESTERS — the one hard gate (production blocker)
+
+The live test ran on **Nango's SHARED Notion app** (client id/secret = "NANGO PROVIDED"; the API returned identity `NangoDeveloperApp`). That shared app carries WRITE scopes (`update_content`, `insert_content`) you cannot change. Combined with notion's `methodPolicy:'all'` (Notion reads use POST, so we can't gate writes by HTTP method), **the read-only write-wall does NOT hold on the shared app.** For a dev smoke test in a throwaway workspace = fine. Before any real Tester:
+- Create your OWN Notion public OAuth integration at notion.so/my-integrations, **capabilities = Read content ONLY**, redirect URI = `https://api.nango.dev/oauth/callback`.
+- Paste its client id/secret into the Nango `notion` integration (replaces NANGO PROVIDED).
+- That read-only capability is the ONLY thing stopping a prompt-injected agent from writing until the v2b approval gate ships. Do NOT onboard a Tester before this.
+
+## Remaining polish (NOT blockers)
+
+- **No proactive "✅ connected" message:** confirmed behaving as designed — after consent the webhook lands silently (no conversation target), the user discovers tools on their NEXT @mention. If it bites: thread channel id into the connect-session tags, post from the webhook. Small follow-up.
+- **Bot mis-narrates workspace identity** ("Chau Shyang Ch'ng's workspace" vs actual NangoDeveloperApp) — cosmetic, goes away with your own app.
+- **Branch history warts** (duplicate-message commit + an annotation fix bundled into a docs commit) from a subagent-crash amend dance — squash at PR time.
+- **M3 follow-up — "any provider without code":** make PROVIDER_CATALOG dynamic via `GET /integrations` (Phase A, cheap — kills the per-provider catalog edit); optionally route calls via Nango Proxy (Phase B — kills per-provider api.ts profile, but costs a network hop + loses our methodPolicy write-gate; YAGNI until needed). Both inherit the read-only-scope gate above.
+
+---
+
+## Original resume point (Tasks 10–12 — now DONE, kept for reference)
 
 1. **Operator setup (Task 10):** in Nango, register ONE integration whose **id == catalog slug** (`notion`), with **READ-ONLY OAuth scopes** (the write wall — notion is `methodPolicy:'all'`, so a write scope would be a silent write path until v2b). Then `wrangler secret put NANGO_SECRET_KEY` + `NANGO_WEBHOOK_SECRET` (both `--name hatchery`), `npx flue build --target cloudflare && npx wrangler deploy --name hatchery`, and register the webhook URL `https://hatchery.<sub>.workers.dev/nango/webhook` in Nango (copy its Signing key into `NANGO_WEBHOOK_SECRET`).
 2. **Live-probe + reconcile (Task 11):** docs 404 a lot — probe the real wire format (`/connect/sessions` response fields; `/connection/{id}` vs `/connections/{id}`; the webhook payload field names + `x-nango-hmac-sha256`) and fix `src/nango.ts` constants if reality differs, re-run `npm test`.
