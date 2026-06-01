@@ -13,6 +13,9 @@ import {
   bindingRecordToBinding,
   bindingBySlack,
   bindingByProject,
+  resolveModel,
+  assertValidModel,
+  DEFAULT_MODEL,
   type BindingRecord,
 } from './bindings';
 import type { D1Like } from './skills';
@@ -162,6 +165,96 @@ test('upsertBinding overwrites an existing row (DO UPDATE), preserving project_i
   assert.equal(rows.length, 1, 'still one row (overwrite, not insert)');
   assert.equal(rows[0].transportBotId, 'U2_CHANGED', 'DO UPDATE overwrote the bot id');
   assert.equal(rows[0].model, 'zai/glm-5.1', 'DO UPDATE applied the model pin');
+});
+
+// Capture console.warn for the duration of a call, then restore it.
+function captureWarn(): { lines: string[]; restore: () => void } {
+  const lines: string[] = [];
+  const orig = console.warn;
+  console.warn = (...a: unknown[]) => { lines.push(a.map(String).join(' ')); };
+  return { lines, restore: () => { console.warn = orig; } };
+}
+
+test('resolveModel: a validated model passes through with no warning', async () => {
+  const w = captureWarn();
+  const out = resolveModel('zai/glm-5.1');
+  w.restore();
+  assert.equal(out, 'zai/glm-5.1');
+  assert.equal(w.lines.length, 0, 'no warning for a catalogued/validated model');
+});
+
+test('resolveModel: undefined falls back to DEFAULT_MODEL, no warning', async () => {
+  const w = captureWarn();
+  const out = resolveModel(undefined);
+  w.restore();
+  assert.equal(out, DEFAULT_MODEL, 'unpinned binding → DEFAULT_MODEL');
+  assert.equal(w.lines.length, 0, 'DEFAULT_MODEL is itself validated');
+});
+
+test('resolveModel: an unvalidated model is respected (not swapped) but flagged loudly', async () => {
+  const w = captureWarn();
+  const out = resolveModel('openrouter/acme/unknown-99b');
+  w.restore();
+  assert.equal(out, 'openrouter/acme/unknown-99b', 'operator intent is respected, never silently swapped');
+  assert.equal(w.lines.length, 1, 'unvalidated model is warned');
+  assert.match(w.lines[0], /model-guard/, 'warning is greppable by tag');
+});
+
+test('resolveModel: warns at most once per model id (no per-turn log spam)', async () => {
+  const w = captureWarn();
+  resolveModel('openrouter/acme/dup-model');
+  resolveModel('openrouter/acme/dup-model');
+  resolveModel('openrouter/acme/dup-model');
+  w.restore();
+  assert.equal(w.lines.length, 1, 'repeat resolves of the same id stay silent');
+});
+
+test('assertValidModel: validated and unpinned (null/undefined/empty) all pass', async () => {
+  assert.doesNotThrow(() => assertValidModel('zai/glm-5.1'));
+  assert.doesNotThrow(() => assertValidModel(undefined));
+  assert.doesNotThrow(() => assertValidModel(null));
+  assert.doesNotThrow(() => assertValidModel(''));
+});
+
+test('assertValidModel: an unvalidated pinned model throws', async () => {
+  assert.throws(() => assertValidModel('openrouter/acme/unknown-77b'), /model-guard/);
+});
+
+test('upsertBinding rejects an unvalidated model pin — bad config never enters D1', async () => {
+  const db = new FakeD1();
+  await assert.rejects(
+    upsertBinding(db, {
+      projectId: 'C_BAD', provider: 'slack', externalAccountId: 'T0B6VB415TQ', externalSpaceId: 'C_BAD',
+      transportBotId: 'U', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT', defaultProfile: 'project-assistant',
+      model: 'openrouter/acme/nope', status: 'active',
+    }),
+    /model-guard/,
+  );
+  assert.equal((await loadBindings(db, 'C_BAD')).length, 0, 'no row written on rejection');
+});
+
+test('upsertBinding accepts a validated model pin', async () => {
+  const db = new FakeD1();
+  await upsertBinding(db, {
+    projectId: 'C_OK', provider: 'slack', externalAccountId: 'T0B6VB415TQ', externalSpaceId: 'C_OK',
+    transportBotId: 'U', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT', defaultProfile: 'project-assistant',
+    model: 'zai/glm-4.6', status: 'active',
+  });
+  const rows = await loadBindings(db, 'C_OK');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].model, 'zai/glm-4.6', 'validated pin is stored');
+});
+
+test('autoCreateBinding rejects an unvalidated model pin', async () => {
+  const db = new FakeD1();
+  await assert.rejects(
+    autoCreateBinding(db, {
+      teamId: 'T0B6VB415TQ', channelId: 'C_ACB', transportBotId: 'U',
+      transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT', model: 'totally/madeup',
+    }),
+    /model-guard/,
+  );
+  assert.equal((await loadBindings(db, 'C_ACB')).length, 0, 'no row written');
 });
 
 const main = async () => {
