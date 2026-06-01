@@ -183,6 +183,14 @@ export async function upsertConnection(db: D1Like, input: UpsertConnectionInput)
     .run();
 }
 
+/** The "✅ connected" line the gateway posts to the channel when a Nango connection lands. The
+ *  webhook has no conversation thread to reply into, so the GATEWAY (not the agent) posts this — a
+ *  deterministic confirmation that doesn't depend on the model choosing to reply. The tools attach on
+ *  the channel's next turn (computed fresh from D1), which is what this message tells the user. */
+export function connectedNotice(provider: string): string {
+  return `✅ ${provider} connected — ask me to use it anytime (it'll be ready on your next message).`;
+}
+
 // The provider catalog (what Hatchery supports at all). Curated platform-side; the agent picks
 // from it, never adds to it.
 export const PROVIDER_CATALOG: { provider: string; summary: string }[] = [

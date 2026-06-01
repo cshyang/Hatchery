@@ -6,11 +6,11 @@ import { botInThread } from '../src/slack/threads';
 import { mentionsBot, stripMention } from '../src/slack/mentions';
 import { bindings, bindingBySlack, bindingByProject, agentInstanceId, autoCreateBinding, isKnownTeam } from '../src/bindings';
 import { normalizeSlackMessage } from '../src/canonical';
-import { upsertConversationTarget } from '../src/conversations';
+import { upsertConversationTarget, topLevelTargetFromBinding, sendToConversationTarget } from '../src/conversations';
 import { claimEvent, type KVLike } from '../src/idempotency';
 import { loadRunnableSkillBody, type D1Like } from '../src/skills';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/reflection';
-import { upsertConnection, loadConnections, PROVIDER_CATALOG } from '../src/connections';
+import { upsertConnection, loadConnections, PROVIDER_CATALOG, connectedNotice } from '../src/connections';
 import { verifyNangoWebhook, parseNangoAuthWebhook } from '../src/nango';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
@@ -253,6 +253,18 @@ app.post('/nango/webhook', async (c) => {
     createdBy: 'nango-webhook',
   });
   console.log(`[nango] connected provider "${event.provider}" for project ${event.projectId} (connection ${event.connectionId})`);
+
+  // Tell the channel it worked. The webhook has no conversation thread, so the GATEWAY posts a
+  // deterministic confirmation to the channel root (project_id IS the channel id) — NOT an agent
+  // turn (a model might skip the reply; this must not). Best-effort: a Slack hiccup must never fail
+  // the connection write that already succeeded. The bot token comes from the project's binding.
+  const binding = await bindingByProject(event.projectId, db).catch(() => undefined);
+  if (binding) {
+    const target = topLevelTargetFromBinding(binding);
+    await sendToConversationTarget(c.env as Record<string, unknown>, target, connectedNotice(event.provider)).catch((e) =>
+      console.log(`[nango] connected, but the channel notice failed to post: ${e instanceof Error ? e.message : 'error'}`),
+    );
+  }
   return c.json({ ok: true, projectId: event.projectId, provider: event.provider });
 });
 
