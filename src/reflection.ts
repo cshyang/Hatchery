@@ -19,6 +19,9 @@ export interface LogMessageInput {
   senderId: string; // 'slack:<team>:<user>' for people, 'agent' for the bot
   role: 'user' | 'agent';
   text: string;
+  /** True for a message the bot overheard but did not engage (Layer 2 ambient ingestion).
+   *  Ambient rows feed the cross-thread index/review but are SKIPPED by nightly REM below. */
+  ambient?: boolean;
 }
 
 // Best-effort transcript logging. Called from app.ts (inbound) and the reply tool (outbound).
@@ -27,9 +30,9 @@ export async function logMessage(db: D1Like, m: LogMessageInput): Promise<void> 
   if (!text) return;
   await db
     .prepare(
-      'INSERT INTO messages(project_id, conversation_id, sender_id, role, text, created_at) VALUES(?,?,?,?,?,?)',
+      'INSERT INTO messages(project_id, conversation_id, sender_id, role, text, ambient, created_at) VALUES(?,?,?,?,?,?,?)',
     )
-    .bind(m.projectId, m.conversationId, m.senderId, m.role, text, Date.now())
+    .bind(m.projectId, m.conversationId, m.senderId, m.role, text, m.ambient ? 1 : 0, Date.now())
     .run();
 }
 
@@ -41,7 +44,7 @@ export async function projectsWithUnreflected(db: D1Like): Promise<string[]> {
       `SELECT m.project_id AS project_id
          FROM messages m
          LEFT JOIN reflection_state r ON r.project_id = m.project_id
-        WHERE m.id > COALESCE(r.last_message_id, 0)
+        WHERE m.id > COALESCE(r.last_message_id, 0) AND m.ambient = 0
         GROUP BY m.project_id`,
     )
     .bind()
@@ -62,7 +65,7 @@ export async function takeUnreflectedBatch(db: D1Like, projectId: string): Promi
   const { results } = await db
     .prepare(
       `SELECT id, conversation_id, sender_id, role, text FROM messages
-        WHERE project_id=? AND id>? ORDER BY id LIMIT ${BATCH_LIMIT}`,
+        WHERE project_id=? AND id>? AND ambient = 0 ORDER BY id LIMIT ${BATCH_LIMIT}`,
     )
     .bind(projectId, since)
     .all<{ id: number; conversation_id: string; sender_id: string; role: string; text: string }>();
