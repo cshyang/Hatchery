@@ -323,3 +323,54 @@ Composio cloud, or Nango/Composio self-host if client trust demands creds stay i
 and the schema gains `connection_id`/`external_account_id` for multi-account. The agent, tools,
 gating, and approval flow don't change. The sandbox egress-broker (deferred) reuses the same
 `resolveConnection` at the network boundary instead of at a tool call.
+
+---
+
+## Update 2026-06-01 — M2 BUILT: Nango self-serve connect (the managed-OAuth backend, live-proven)
+
+The "OAuth providers → a Nango account-ref" hedge above is now BUILT and live-proven end to end
+(Slack → Nango → Notion). Merged via branch `m2-self-serve-connect`. All Nango wire code lives in
+`src/nango.ts` behind the unchanged `resolveConnection` seam; zero schema change (the reserved
+`connection_ref` column from migration 0005 + `ConnectionSpec.connectionRef` carried it).
+
+**Shape (what shipped):**
+- `request_connection(provider)` + `disconnect_connection(provider)` tools — both **no-secret-param**
+  (the structural wall: a prompt-injected agent has no tool that can receive/store a credential).
+  Gated on `db && NANGO_SECRET_KEY`. Connect returns a Nango magic link; disconnect calls Nango
+  `DELETE /connection/{id}` (real revoke) then disables the local row.
+- `resolveConnection` Nango branch returns a **lazy, per-turn-memoized token thunk** (`() =>
+  Promise<string>`) — the DO initializer stays network-light (partyserver ~30s reset), the live
+  token is fetched only inside a tool's `execute()`, once per turn. Never stored at rest; only the
+  non-secret `connection_ref` lives in D1.
+- `/nango/webhook` (gateway): HMAC-verified (`X-Nango-Hmac-Sha256` over RAW body, dedicated
+  `NANGO_WEBHOOK_SECRET`), creation → `upsertConnection(connection_ref)`, deletion → disable row.
+  Gateway posts deterministic "✅ connected" / "🔌 disconnected" to the channel (NOT an agent turn —
+  a model might skip the reply).
+- Two operator secrets: `NANGO_SECRET_KEY` (API) + `NANGO_WEBHOOK_SECRET` (verify inbound).
+- Convention: Nango integration id == catalog provider slug (no mapping table; webhook guards on it).
+
+**Live wire findings (docs 404 constantly — these came from probing the real API):**
+1. Nango wraps `POST /connect/sessions` + `GET /connection/{id}` as `{ data: {...} }`, not flat.
+   `nangoBody()` unwraps tolerantly.
+2. "Already gone" is reported by error CODE, and Nango is **inconsistent across verbs**: DELETE →
+   `400 {code:'unknown_connection'}`, GET → `404 {code:'not_found'}`. `deleteConnection` keys
+   idempotency off the code, never the status.
+3. **Dashboard-delete in the Nango UI fires NO webhook** (tailed, confirmed). So the deletion-webhook
+   handler is defensive for the operator path; the real disconnect is the in-Slack tool calling the
+   DELETE API. The 404-at-use net (`fetchToken` of a dead ref throws) catches a dashboard-delete.
+
+**The write-wall — IMPORTANT, supersedes the GET-only assumption (D-gate refinement):** for a Nango
+OAuth token we CANNOT gate writes by HTTP method (Notion reads use POST; `methodPolicy:'all'`). The
+read-only guarantee therefore comes from **the operator registering each Nango integration with
+read-only OAuth scopes**. A write-scoped integration on a `methodPolicy:'all'` provider is a silent
+write path until the v2b approval gate ships. Disconnect itself is agent-callable WITHOUT approval
+(least-dangerous write — worst case is reconnect).
+
+**PRODUCTION GATE (not yet done):** the live proof ran on Nango's SHARED Notion app (carries
+write scopes you can't change). Before real Testers: register your OWN Notion public OAuth app,
+read-content-only capabilities, paste client id/secret into the Nango `notion` integration.
+
+**Deferred (M3):** dynamic catalog via Nango `GET /integrations` (kills per-provider catalog edits);
+optional Nango Proxy for calls (kills per-provider `api.ts` profiles, costs a hop + the methodPolicy
+gate). In-thread notice placement (decided: keep channel-root; threading needs an unverified
+Nango-tag-roundtrip — spike before building).
