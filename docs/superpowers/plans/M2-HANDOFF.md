@@ -1,6 +1,13 @@
 # M2 Handoff — Nango self-serve connect (resume here)
 
-**Date:** 2026-06-01 · **Status:** ✅ **M2 LIVE-PROVEN END TO END on `m2-self-serve-connect` (deployed version 60f8682b).** All 12 tasks done. tsc clean, 76 tests green (8 files). Real Slack→Nango→Notion loop confirmed in channel C0B7B03441X (connection f557e57b…): `@bot connect notion` → magic link → consent → HMAC-verified webhook → connection_ref in D1 → `notion_call_api GET /v1/users/me` returned live data. Plan: `docs/superpowers/plans/2026-06-01-m2-self-serve-connect.md`.
+**Date:** 2026-06-01 · **Status:** ✅ **M2 LIVE-PROVEN END TO END on `m2-self-serve-connect` (deployed version 9655002c).** 15 commits, tsc clean, 79 tests green (8 files). Real Slack→Nango→Notion loop confirmed in channel C0B7B03441X (connection f557e57b…): `@bot connect notion` → magic link → consent → HMAC-verified webhook → connection_ref in D1 → `notion_call_api GET /v1/users/me` returned live data. Connect posts "✅ connected" (gateway, not agent — deterministic). Plan: `docs/superpowers/plans/2026-06-01-m2-self-serve-connect.md`.
+
+## DISCONNECT — live finding (2026-06-01) + the gap that matters
+
+- **Built:** a deletion-webhook handler (`/nango/webhook` deletion branch → `disableConnectionByRef(connection_ref)` → row 'disabled' → tools vanish next turn + "🔌 disconnected" notice). Targets by connection_ref (only guaranteed field on the auth webhook; tags/endUser are OPTIONAL).
+- **LIVE TEST RESULT: deleting a connection in the Nango DASHBOARD fires NO webhook.** Tailed the worker through a dashboard-delete of f557e57b — zero `/nango/webhook` POST. So the deletion handler is, for the dashboard path, **inert/unproven**. It likely fires on Nango's `DELETE /connections/{id}` API or provider-side revocation, NOT a dashboard click — unconfirmed which.
+- **Safety net that ACTUALLY catches a dashboard-delete:** the next `notion_call_api` → `fetchToken(dead ref)` → Nango 404 → throws `"Nango token fetch failed (404)"`. Agent surfaces an honest error (not silent, not a leak). Belt (webhook, may not fire) + braces (404-at-use, always fires).
+- **THE REAL GAP (next priority): a Tester can't reach the Nango dashboard.** Their ONLY disconnect path is in-Slack. So the missing piece is an agent `disconnect_connection(provider)` tool → calls Nango `DELETE /connections/{id}?provider_config_key=…` (real API, returns `{success:true}`) → then `disableConnectionByRef` locally. That's the user-facing disconnect; the webhook handler only ever served the operator path (which doesn't even fire). Build this BEFORE real Testers if revoke-in-Slack is a requirement.
 
 ## Live-probe finding (Task 11 earned its keep)
 
