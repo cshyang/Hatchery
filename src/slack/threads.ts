@@ -42,6 +42,31 @@ export function renderThreadBackscroll(
   return kept.join('\n');
 }
 
+interface RepliesApiResponse {
+  ok: boolean;
+  error?: string;
+  messages?: Array<{ user?: string; bot_id?: string; text?: string; ts?: string }>;
+}
+
+/** Fetch a thread's messages (one conversations.replies call; needs `channels:history`).
+ *  fetchImpl is injectable for tests. Returns [] on any non-ok response — a missing thread must
+ *  degrade to "no backscroll", never throw into the gateway. */
+export async function fetchThreadReplies(
+  token: string,
+  channel: string,
+  threadTs: string,
+  opts: { fetchImpl?: typeof fetch } = {},
+): Promise<ThreadMessage[]> {
+  const f = opts.fetchImpl ?? fetch;
+  const url =
+    `https://slack.com/api/conversations.replies` +
+    `?channel=${encodeURIComponent(channel)}&ts=${encodeURIComponent(threadTs)}&limit=200`;
+  const res = await f(url, { headers: { authorization: `Bearer ${token}` } });
+  const data = (await res.json()) as RepliesApiResponse;
+  if (!data.ok || !data.messages) return [];
+  return data.messages.map((m) => ({ user: m.user, bot_id: m.bot_id, text: m.text ?? '', ts: m.ts ?? '' }));
+}
+
 interface RepliesResponse {
   ok: boolean;
   error?: string;

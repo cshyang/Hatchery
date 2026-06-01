@@ -1,7 +1,6 @@
 // Thread backscroll: fetch + render for context hydration — run: npx tsx src/slack/threads.test.ts
 import assert from 'node:assert/strict';
-import { renderThreadBackscroll, type ThreadMessage } from './threads';
-// NOTE: fetchThreadReplies is imported in Task 2 (added alongside its tests).
+import { renderThreadBackscroll, fetchThreadReplies, type ThreadMessage } from './threads';
 
 const tests: [string, () => Promise<void>][] = [];
 const test = (name: string, fn: () => Promise<void>) => tests.push([name, fn]);
@@ -34,6 +33,36 @@ test('renderThreadBackscroll: caps to maxChars, dropping oldest first', async ()
   const out = renderThreadBackscroll(msgs, 'Ubot', { maxChars: 30 });
   assert.ok(out.includes('Ujo: what did you find?'), 'most recent kept');
   assert.ok(!out.includes('pricing'), 'oldest dropped to fit budget');
+});
+
+// A fake fetch that records calls and returns a canned Response (mirrors nango.test.ts).
+function fakeFetch(responder: (url: string, init: RequestInit) => Response) {
+  const calls: { url: string; init: RequestInit }[] = [];
+  const fn = (async (url: unknown, init: unknown) => {
+    calls.push({ url: String(url), init: (init ?? {}) as RequestInit });
+    return responder(String(url), (init ?? {}) as RequestInit);
+  }) as unknown as typeof fetch;
+  return { fn, calls };
+}
+
+test('fetchThreadReplies: GETs conversations.replies with Bearer, parses messages', async () => {
+  const { fn, calls } = fakeFetch(() =>
+    new Response(JSON.stringify({ ok: true, messages: [
+      { user: 'Ualex', text: 'hi', ts: '1.0' },
+      { bot_id: 'B1', user: 'Ubot', text: 'hello', ts: '2.0' },
+    ] }), { status: 200 }),
+  );
+  const out = await fetchThreadReplies('xoxb-tok', 'C1', '1.0', { fetchImpl: fn });
+  assert.equal(out.length, 2);
+  assert.equal(out[0].text, 'hi');
+  assert.equal(out[1].bot_id, 'B1');
+  assert.match(calls[0].url, /conversations\.replies\?channel=C1&ts=1\.0&limit=200/);
+  assert.equal((calls[0].init.headers as Record<string, string>).authorization, 'Bearer xoxb-tok');
+});
+
+test('fetchThreadReplies: ok:false → empty array', async () => {
+  const { fn } = fakeFetch(() => new Response(JSON.stringify({ ok: false, error: 'thread_not_found' }), { status: 200 }));
+  assert.deepEqual(await fetchThreadReplies('t', 'C1', '1.0', { fetchImpl: fn }), []);
 });
 
 const main = async () => {
