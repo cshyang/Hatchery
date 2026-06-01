@@ -97,16 +97,29 @@ export async function fetchToken(args: FetchTokenArgs, deps: FetchDeps = {}): Pr
   return token;
 }
 
+// "Connection doesn't exist" is reported by error CODE, and Nango is inconsistent about the HTTP
+// status: DELETE of a gone connection → 400 {code:'unknown_connection'} (verified live 2026-06-01),
+// while GET → 404 {code:'not_found'}. So we key idempotent-success off the code, NOT the status.
+const NANGO_GONE_CODES = new Set(['unknown_connection', 'not_found']);
+
 /** Revoke + delete a connection at Nango (the real teardown — Nango revokes the token at the
- *  provider). Idempotent: a 404 means it's already gone, which is success for our purposes (we still
- *  want to disable the local row). Any other non-2xx throws so the caller can tell the user teardown
- *  failed rather than falsely reporting "disconnected". Same connectionId-as-path shape as fetchToken. */
+ *  provider). Idempotent: "already gone" (error code unknown_connection / not_found, whatever the
+ *  status) resolves quietly so the caller can still disable the local row. A GENUINE failure (500,
+ *  auth, a different 4xx) throws so the caller never falsely reports "disconnected" while the token
+ *  may still live at the vendor. Same connectionId-as-path shape as fetchToken. */
 export async function deleteConnection(args: FetchTokenArgs, deps: FetchDeps = {}): Promise<void> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const url = `${NANGO_API}/connection/${encodeURIComponent(args.connectionId)}?provider_config_key=${encodeURIComponent(args.providerConfigKey)}`;
   const res = await nangoFetch(url, { method: 'DELETE', headers: { authorization: `Bearer ${args.secretKey}` } }, fetchImpl);
-  if (res.ok || res.status === 404) return; // 404 = already gone = idempotent success
+  if (res.ok) return;
   const text = await res.text();
+  let code: string | undefined;
+  try {
+    code = (JSON.parse(text) as { error?: { code?: string } }).error?.code;
+  } catch {
+    /* non-JSON body → fall through to throw */
+  }
+  if (code && NANGO_GONE_CODES.has(code)) return; // already gone = idempotent success
   throw new Error(`Nango connection delete failed (${res.status}): ${text.slice(0, 200)}`);
 }
 

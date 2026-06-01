@@ -74,14 +74,24 @@ test('deleteConnection: DELETEs /connection/{id}?provider_config_key=… with Be
   assert.equal((calls[0].init.headers as Record<string, string>).authorization, 'Bearer nk_secret');
 });
 
-test('deleteConnection: a 404 (already gone) resolves quietly — idempotent teardown, not an error', async () => {
-  const { fn } = fakeFetch(() => new Response('not found', { status: 404 }));
-  await assert.doesNotReject(() => deleteConnection({ secretKey: 'nk', connectionId: 'gone', providerConfigKey: 'notion' }, { fetchImpl: fn }));
+test('deleteConnection: already-gone is idempotent success — Nango returns 400 {unknown_connection} on DELETE (verified live), 404 {not_found} elsewhere', async () => {
+  // The real wire (live-probed 2026-06-01): DELETE of a gone connection → 400 unknown_connection,
+  // NOT 404. We must treat "already gone" by the error CODE, not the HTTP status.
+  const del400 = fakeFetch(() => new Response(JSON.stringify({ error: { code: 'unknown_connection' } }), { status: 400 }));
+  await assert.doesNotReject(() => deleteConnection({ secretKey: 'nk', connectionId: 'gone', providerConfigKey: 'notion' }, { fetchImpl: del400.fn }));
+
+  const del404 = fakeFetch(() => new Response(JSON.stringify({ error: { code: 'not_found' } }), { status: 404 }));
+  await assert.doesNotReject(() => deleteConnection({ secretKey: 'nk', connectionId: 'gone', providerConfigKey: 'notion' }, { fetchImpl: del404.fn }));
 });
 
-test('deleteConnection: throws on a non-404 error (e.g. 500) so the caller knows teardown failed', async () => {
+test('deleteConnection: a GENUINE failure (500) still throws — never falsely report teardown success', async () => {
   const { fn } = fakeFetch(() => new Response('boom', { status: 500 }));
   await assert.rejects(() => deleteConnection({ secretKey: 'nk', connectionId: 'c', providerConfigKey: 'notion' }, { fetchImpl: fn }), /500/);
+});
+
+test('deleteConnection: a 400 that is NOT unknown_connection still throws (a real bad request, not idempotent)', async () => {
+  const { fn } = fakeFetch(() => new Response(JSON.stringify({ error: { code: 'invalid_request' } }), { status: 400 }));
+  await assert.rejects(() => deleteConnection({ secretKey: 'nk', connectionId: 'c', providerConfigKey: 'notion' }, { fetchImpl: fn }), /400/);
 });
 
 test('verifyNangoWebhook: accepts a correct hex HMAC-SHA256 over the RAW body, rejects a wrong one', async () => {
