@@ -36,7 +36,6 @@ function binding(connections?: ConnectionSpec[]): Binding {
     externalSpaceId: 'C',
     transportBotId: 'U',
     projectId: 'demo',
-    defaultProfile: 'p',
     sandboxMode: 'virtual',
     transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
     connections,

@@ -38,22 +38,22 @@ class FakeD1 implements D1Like {
   }
   #mutate(sql: string, a: unknown[]) {
     if (!sql.startsWith('INSERT INTO bindings')) return;
-    // Both inserts share the same 12-bind column order:
-    // [project_id, 'slack', account, space, bot, tokenRef, profile, model, status, created_by, created_at, updated_at]
-    const [projectId, , accountId, spaceId, botId, tokenRef, profile, model, status, createdBy, createdAt, updatedAt] = a;
+    // Both inserts share the same 11-bind column order:
+    // [project_id, 'slack', account, space, bot, tokenRef, model, status, created_by, created_at, updated_at]
+    const [projectId, , accountId, spaceId, botId, tokenRef, model, status, createdBy, createdAt, updatedAt] = a;
     const existing = this.rows.find((r) => r.project_id === projectId);
     if (existing) {
       if (sql.includes('DO NOTHING')) return; // autoCreateBinding: ignore on conflict
       // upsertBinding: DO UPDATE — overwrite mutable fields, preserve created_at.
       Object.assign(existing, {
         external_account_id: accountId, external_space_id: spaceId, transport_bot_id: botId,
-        transport_token_ref: tokenRef, default_profile: profile, model, status, updated_at: updatedAt,
+        transport_token_ref: tokenRef, model, status, updated_at: updatedAt,
       });
       return;
     }
     this.rows.push({
       project_id: projectId, provider: 'slack', external_account_id: accountId, external_space_id: spaceId,
-      transport_bot_id: botId, transport_token_ref: tokenRef, default_profile: profile, model,
+      transport_bot_id: botId, transport_token_ref: tokenRef, model,
       status, created_by: createdBy, created_at: createdAt, updated_at: updatedAt,
     });
   }
@@ -104,7 +104,7 @@ test('autoCreateBinding is race-safe: a second call for the same channel is a no
 test('bindingRecordToBinding maps a D1 row to the Binding shape the app consumes', async () => {
   const rec: BindingRecord = {
     projectId: 'C_X', provider: 'slack', externalAccountId: 'T0B6VB415TQ', externalSpaceId: 'C_X',
-    transportBotId: 'U', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT', defaultProfile: 'project-assistant',
+    transportBotId: 'U', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
     model: undefined, status: 'active',
   };
   const b = bindingRecordToBinding(rec);
@@ -142,7 +142,7 @@ test('disabled D1 binding does not resolve', async () => {
   const db = new FakeD1();
   await upsertBinding(db, {
     projectId: 'C_OFF', provider: 'slack', externalAccountId: 'T0B6VB415TQ', externalSpaceId: 'C_OFF',
-    transportBotId: 'U', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT', defaultProfile: 'project-assistant',
+    transportBotId: 'U', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
     status: 'disabled',
   });
   assert.equal(await bindingBySlack('T0B6VB415TQ', 'C_OFF', db), undefined, 'disabled is not active');
@@ -155,7 +155,7 @@ test('upsertBinding overwrites an existing row (DO UPDATE), preserving project_i
   // operator overwrites the bot id + pins a model on the SAME project
   await upsertBinding(db, {
     projectId: 'C_UP', provider: 'slack', externalAccountId: 'T0B6VB415TQ', externalSpaceId: 'C_UP',
-    transportBotId: 'U2_CHANGED', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT', defaultProfile: 'project-assistant',
+    transportBotId: 'U2_CHANGED', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
     model: 'zai/glm-5.1', status: 'active',
   });
   const rows = await loadBindings(db, 'C_UP');

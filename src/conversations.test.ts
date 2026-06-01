@@ -126,7 +126,6 @@ const binding: Binding = {
   externalSpaceId: 'C1',
   transportBotId: 'Ubot',
   projectId: 'demo',
-  defaultProfile: 'project-assistant',
   sandboxMode: 'virtual',
   transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
   status: 'active',

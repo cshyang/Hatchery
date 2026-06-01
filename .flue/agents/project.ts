@@ -134,9 +134,10 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     name: 'update_status',
     description:
       "Post a one-line progress note BEFORE slow, multi-step work (several searches/API calls before " +
-      "you can answer), so the person isn't left waiting in silence. Call it ONCE, up front, and only " +
-      "when you expect a wait — skip it for quick answers and for heartbeat/scheduled runs. Lead with " +
-      "an emoji. This is NOT your reply: always send the actual answer via reply_to_conversation.",
+      "you can answer) to show the person the SPECIFIC step you're on — a generic 'on it' is already posted " +
+      "automatically, so name the actual action. Call it ONCE, up front, and only when you expect a wait — " +
+      "skip it for quick answers and for heartbeat/scheduled runs. Lead with an emoji. This is NOT your " +
+      "reply: always send the actual answer via reply_to_conversation.",
     parameters: Type.Object({
       text: Type.String({ description: "Short friendly note, e.g. '🔍 Checking the GitHub repo…'" }),
       conversationId: Type.Optional(

@@ -112,10 +112,10 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
       `complete answer you compose after tool calls — is silently DISCARDED; the user sees nothing. So your turn's FINAL ` +
       `action is ALWAYS a reply_to_conversation call carrying your full answer. Gathering data with tools and then stopping ` +
       `= the user gets silence and the turn has FAILED. Don't mention tools or the dispatch envelope.\n` +
-      `• update_status — when you expect a SLOW, multi-step turn (several searches/API calls before you can answer), post ONE ` +
-      `brief progress note up front with update_status (lead with an emoji, e.g. "🔍 Checking the GitHub repo…"), passing the ` +
-      `same conversationId, so the person isn't left waiting in silence. Use it sparingly — skip it for quick answers and ` +
-      `heartbeat runs. It is NOT your reply; still send the answer with reply_to_conversation.`,
+      `• update_status — the moment a person messages, the system already posts a quick "on it" for you, so don't bother with a ` +
+      `generic acknowledgement. Reach for update_status only on a SLOW, multi-step turn to name the SPECIFIC thing you're doing ` +
+      `(lead with an emoji, e.g. "🔍 Checking the GitHub repo…"), passing the same conversationId. Post it once, up front; skip it ` +
+      `for quick answers and heartbeat runs. It is NOT your reply; still send the answer with reply_to_conversation.`,
   );
 
   // 4–6. Behavioral guidance + platform — stable, model-agnostic, always on.
