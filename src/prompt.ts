@@ -55,6 +55,19 @@ const SLACK_FORMATTING =
   `for code blocks, and <https://example.com|label> for links. Standard Markdown — **double-asterisk ` +
   `bold**, # headings, and [label](url) links — does NOT render in Slack; avoid it.`;
 
+// Connect: use the channel's history before answering as if a topic is brand-new. The restraint
+// half is load-bearing — a blunt keyword search almost always returns SOMETHING, so the rule is
+// "cite only a genuine match, never a forced one." This fights the over-connect failure mode. The
+// no-query mode lets the agent answer "catch me up on the channel" instead of confabulating it.
+const CONNECTING_THE_DOTS =
+  `CONNECTING THE DOTS\n` +
+  `You can see the channel's earlier conversations with search_channel (pass your current conversationId ` +
+  `as excludeConversationId so it skips this thread). When someone raises a topic that may have come up ` +
+  `before, call it with a few keywords FIRST; if a result is clearly about the same thing, briefly point ` +
+  `to it ("we touched on this earlier — …"). If nothing is clearly relevant, say nothing about it and just ` +
+  `answer — never invent or force a cross-reference; a wrong "this relates to X" is worse than none. When ` +
+  `asked to catch up on recent channel activity, call search_channel with NO query to list the latest threads.`;
+
 // Guidance on AUTHORING skills — kept consistent whether or not the catalog is empty, because
 // the failure mode of a self-improving agent is skill SPRAWL (many narrow one-off skills nobody
 // finds), not too few skills. So: write broad/class-level, extend before adding, archive (never
@@ -122,7 +135,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
   );
 
   // 4–6. Behavioral guidance + platform — stable, model-agnostic, always on.
-  blocks.push(FINISHING_THE_JOB, USING_YOUR_TOOLS, SLACK_FORMATTING);
+  blocks.push(FINISHING_THE_JOB, USING_YOUR_TOOLS, SLACK_FORMATTING, CONNECTING_THE_DOTS);
 
   // 7. Schedule (stable mechanics).
   blocks.push(
