@@ -53,7 +53,6 @@ export interface Binding {
    *  Consumed by provider-specific engagement logic (e.g. Slack @mention parsing). From auth.test. */
   transportBotId: string;
   projectId: string;
-  defaultProfile: string;
   /** Model id passed to Flue (e.g. "zai/glm-5.1"). Optional → DEFAULT_MODEL. Per-project so a
    *  project can run a different model; the prompt itself is model-agnostic. NOTE: a non-default
    *  model also needs Flue provider routing + creds to actually run — this field is just the seam. */
@@ -88,7 +87,6 @@ export const bindings: readonly Binding[] = [
     externalSpaceId: 'C0B6VFMVCUW', // the bound channel id
     transportBotId: 'U0B6UB2E5HT', // hatch_agent's bot user id (auth.test)
     projectId: 'demo',
-    defaultProfile: 'project-assistant',
     model: 'zai/glm-5.1',
     sandboxMode: 'virtual',
     transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
@@ -146,7 +144,6 @@ export interface BindingRecord {
   externalSpaceId: string;
   transportBotId: string;
   transportTokenRef: string;
-  defaultProfile: string;
   model?: string;
   status: 'active' | 'disabled';
 }
@@ -159,7 +156,6 @@ export function bindingRecordToBinding(r: BindingRecord): Binding {
     externalSpaceId: r.externalSpaceId,
     transportBotId: r.transportBotId,
     projectId: r.projectId,
-    defaultProfile: r.defaultProfile,
     model: r.model,
     sandboxMode: 'virtual',
     transportTokenRef: r.transportTokenRef,
@@ -173,12 +169,12 @@ export function bindingRecordToBinding(r: BindingRecord): Binding {
 /** Live binding rows. Pass a projectId to filter to one; omit for all. Metadata only — never a token. */
 export async function loadBindings(db: D1Like, projectId?: string): Promise<BindingRecord[]> {
   const cols =
-    'SELECT project_id, external_account_id, external_space_id, transport_bot_id, transport_token_ref, default_profile, model, status FROM bindings';
+    'SELECT project_id, external_account_id, external_space_id, transport_bot_id, transport_token_ref, model, status FROM bindings';
   const sql = projectId ? `${cols} WHERE project_id=?` : cols;
   const stmt = projectId ? db.prepare(sql).bind(projectId) : db.prepare(sql).bind();
   const { results } = await stmt.all<{
     project_id: string; external_account_id: string; external_space_id: string;
-    transport_bot_id: string; transport_token_ref: string; default_profile: string; model: string | null; status: string;
+    transport_bot_id: string; transport_token_ref: string; model: string | null; status: string;
   }>();
   return (results ?? []).map((r) => ({
     projectId: r.project_id,
@@ -187,7 +183,6 @@ export async function loadBindings(db: D1Like, projectId?: string): Promise<Bind
     externalSpaceId: r.external_space_id,
     transportBotId: r.transport_bot_id,
     transportTokenRef: r.transport_token_ref,
-    defaultProfile: r.default_profile,
     model: r.model ?? undefined,
     status: r.status === 'disabled' ? 'disabled' : 'active',
   }));
@@ -209,8 +204,8 @@ export async function autoCreateBinding(db: D1Like, input: AutoCreateBindingInpu
   const now = Date.now();
   await db
     .prepare(
-      `INSERT INTO bindings(project_id, provider, external_account_id, external_space_id, transport_bot_id, transport_token_ref, default_profile, model, status, created_by, created_at, updated_at)
-       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO bindings(project_id, provider, external_account_id, external_space_id, transport_bot_id, transport_token_ref, model, status, created_by, created_at, updated_at)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(project_id) DO NOTHING`,
     )
     .bind(
@@ -220,7 +215,6 @@ export async function autoCreateBinding(db: D1Like, input: AutoCreateBindingInpu
       input.channelId, // external_space_id = channel id
       input.transportBotId,
       input.transportTokenRef,
-      'project-assistant',
       input.model ?? null,
       'active',
       input.createdBy ?? 'gateway-autocreate',
@@ -236,21 +230,20 @@ export async function upsertBinding(db: D1Like, rec: BindingRecord): Promise<voi
   const now = Date.now();
   await db
     .prepare(
-      `INSERT INTO bindings(project_id, provider, external_account_id, external_space_id, transport_bot_id, transport_token_ref, default_profile, model, status, created_by, created_at, updated_at)
-       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO bindings(project_id, provider, external_account_id, external_space_id, transport_bot_id, transport_token_ref, model, status, created_by, created_at, updated_at)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(project_id) DO UPDATE SET
          external_account_id=excluded.external_account_id,
          external_space_id=excluded.external_space_id,
          transport_bot_id=excluded.transport_bot_id,
          transport_token_ref=excluded.transport_token_ref,
-         default_profile=excluded.default_profile,
          model=excluded.model,
          status=excluded.status,
          updated_at=excluded.updated_at`,
     )
     .bind(
       rec.projectId, 'slack', rec.externalAccountId, rec.externalSpaceId, rec.transportBotId, rec.transportTokenRef,
-      rec.defaultProfile, rec.model ?? null, rec.status, 'admin', now, now,
+      rec.model ?? null, rec.status, 'admin', now, now,
     )
     .run();
 }
