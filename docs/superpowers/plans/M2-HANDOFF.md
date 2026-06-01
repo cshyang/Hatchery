@@ -1,13 +1,23 @@
 # M2 Handoff — Nango self-serve connect (resume here)
 
-**Date:** 2026-06-01 · **Status:** ✅ **M2 LIVE-PROVEN END TO END on `m2-self-serve-connect` (deployed version 9655002c).** 15 commits, tsc clean, 79 tests green (8 files). Real Slack→Nango→Notion loop confirmed in channel C0B7B03441X (connection f557e57b…): `@bot connect notion` → magic link → consent → HMAC-verified webhook → connection_ref in D1 → `notion_call_api GET /v1/users/me` returned live data. Connect posts "✅ connected" (gateway, not agent — deterministic). Plan: `docs/superpowers/plans/2026-06-01-m2-self-serve-connect.md`.
+**Date:** 2026-06-01 · **Status:** ✅✅ **M2 COMPLETE + LIVE-PROVEN (full round-trip) on `m2-self-serve-connect` (deployed version b5229fd build).** tsc clean, 81 tests green (8 files). Every path confirmed live in channel C0B7B03441X:
+- **connect:** `@bot connect notion` → magic link → consent → HMAC webhook → connection_ref in D1 → `notion_call_api` returns live data → "✅ connected" posts to channel root (gateway, deterministic).
+- **disconnect:** `@bot disconnect notion` → `disconnect_connection` tool → Nango `DELETE /connection/{id}` → disable local row → "🔌 disconnected" + agent confirms. WORKS.
+- **reconnect:** re-`connect` overwrites the row (upsert ON CONFLICT) → tools back. WORKS.
 
-## DISCONNECT — live finding (2026-06-01) + the gap that matters
+Plan: `docs/superpowers/plans/2026-06-01-m2-self-serve-connect.md`.
 
-- **Built:** a deletion-webhook handler (`/nango/webhook` deletion branch → `disableConnectionByRef(connection_ref)` → row 'disabled' → tools vanish next turn + "🔌 disconnected" notice). Targets by connection_ref (only guaranteed field on the auth webhook; tags/endUser are OPTIONAL).
-- **LIVE TEST RESULT: deleting a connection in the Nango DASHBOARD fires NO webhook.** Tailed the worker through a dashboard-delete of f557e57b — zero `/nango/webhook` POST. So the deletion handler is, for the dashboard path, **inert/unproven**. It likely fires on Nango's `DELETE /connections/{id}` API or provider-side revocation, NOT a dashboard click — unconfirmed which.
-- **Safety net that ACTUALLY catches a dashboard-delete:** the next `notion_call_api` → `fetchToken(dead ref)` → Nango 404 → throws `"Nango token fetch failed (404)"`. Agent surfaces an honest error (not silent, not a leak). Belt (webhook, may not fire) + braces (404-at-use, always fires).
-- **THE REAL GAP (next priority): a Tester can't reach the Nango dashboard.** Their ONLY disconnect path is in-Slack. So the missing piece is an agent `disconnect_connection(provider)` tool → calls Nango `DELETE /connections/{id}?provider_config_key=…` (real API, returns `{success:true}`) → then `disableConnectionByRef` locally. That's the user-facing disconnect; the webhook handler only ever served the operator path (which doesn't even fire). Build this BEFORE real Testers if revoke-in-Slack is a requirement.
+## Live findings that shaped the final code (probe + test earned their keep)
+
+1. **`{data}` envelope:** Nango wraps `POST /connect/sessions` + `/connection/{id}` as `{data:{...}}`, not flat. Tolerant `nangoBody()` unwrap. (Live-probe, Task 11.)
+2. **DELETE idempotency code:** an already-gone connection returns **400 `{code:'unknown_connection'}`** on DELETE (NOT 404 — `GET` returns 404 `not_found`). `deleteConnection` keys idempotent-success off the error CODE, not HTTP status. (Found in the live disconnect test — first attempt threw + the agent then falsely claimed success; fixed.)
+3. **Dashboard-delete fires NO webhook.** Deleting in the Nango UI sends nothing to `/nango/webhook` (tailed, confirmed). So the deletion-webhook handler is defensive/unproven for the dashboard path — the real disconnect path is the in-Slack `disconnect_connection` tool (which calls the DELETE API directly). The 404-at-use net catches a dashboard-delete regardless.
+4. **"✅ connected" posts to channel ROOT, not the connect thread.** Looked "missing" when reading inside the thread; it's at root, channel-visible. DECISION: keep root (see deferred polish).
+
+## Disconnect/connect surface (final)
+
+- `request_connection(provider)` + `disconnect_connection(provider)` — both no-secret-param, both gated on `db && NANGO_SECRET_KEY`, wired in `project.ts` as `nangoTools`. Disconnect is agent-callable WITHOUT an approval gate (least-dangerous write — worst case is reconnect; the structural wall is for credential exfil / irreversible writes, neither of which applies).
+- Notices post from the GATEWAY via `postNotice` (bindingByProject → topLevelTargetFromBinding → sendToConversationTarget), best-effort, never block the D1 write.
 
 ## Live-probe finding (Task 11 earned its keep)
 
@@ -22,9 +32,9 @@ The live test ran on **Nango's SHARED Notion app** (client id/secret = "NANGO PR
 
 ## Remaining polish (NOT blockers)
 
-- **No proactive "✅ connected" message:** confirmed behaving as designed — after consent the webhook lands silently (no conversation target), the user discovers tools on their NEXT @mention. If it bites: thread channel id into the connect-session tags, post from the webhook. Small follow-up.
+- **✅/🔌 notices post to channel ROOT, not the connect thread.** DECIDED 2026-06-01: keep root (channel-visible today, zero cost). DEFERRED option if in-thread placement is ever wanted: thread the triggering message `ts` through (request_connection captures `ts` → Nango session `tags.thread_ts` → webhook echoes it → `postMessage` with `thread_ts` + `reply_broadcast:true` = one message in-thread AND broadcast to channel). ⚠️ RIDES ON AN UNVERIFIED ASSUMPTION: that Nango round-trips a custom `tags.thread_ts` back in the webhook (only `end_user_id` confirmed). Spike that (add a 2nd tag, complete a connect, check the webhook payload) BEFORE building — if Nango drops it, need a different carrier (e.g. a pending-session D1 row). ~1 task either way.
 - **Bot mis-narrates workspace identity** ("Chau Shyang Ch'ng's workspace" vs actual NangoDeveloperApp) — cosmetic, goes away with your own app.
-- **Branch history warts** (duplicate-message commit + an annotation fix bundled into a docs commit) from a subagent-crash amend dance — squash at PR time.
+- **Branch history warts** (duplicate-message commit + an annotation fix bundled into a docs commit + temp debug-instrument commit b1a... then strip) from amend dances — squash at PR time.
 - **M3 follow-up — "any provider without code":** make PROVIDER_CATALOG dynamic via `GET /integrations` (Phase A, cheap — kills the per-provider catalog edit); optionally route calls via Nango Proxy (Phase B — kills per-provider api.ts profile, but costs a network hop + loses our methodPolicy write-gate; YAGNI until needed). Both inherit the read-only-scope gate above.
 
 ---
