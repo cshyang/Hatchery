@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch } from './reflection';
 import type { D1Like } from './skills';
 
-interface MsgRow { id: number; project_id: string; conversation_id: string; sender_id: string; role: string; text: string; created_at: number; }
+interface MsgRow { id: number; project_id: string; conversation_id: string; sender_id: string; role: string; text: string; ambient: number; created_at: number; }
 
 // Minimal D1 fake covering the fixed queries in reflection.ts (messages + reflection_state).
 class FakeD1 implements D1Like {
@@ -39,7 +39,7 @@ class FakeD1 implements D1Like {
       const seen = new Set<string>();
       const out: { project_id: string }[] = [];
       for (const m of this.msgs) {
-        if (m.id > (this.state.get(m.project_id) ?? 0) && !seen.has(m.project_id)) {
+        if (!m.ambient && m.id > (this.state.get(m.project_id) ?? 0) && !seen.has(m.project_id)) {
           seen.add(m.project_id);
           out.push({ project_id: m.project_id });
         }
@@ -54,7 +54,7 @@ class FakeD1 implements D1Like {
       const [pid, since] = v as [string, number];
       const limit = Number((q.match(/LIMIT (\d+)/) ?? [])[1] ?? 1e9);
       return this.msgs
-        .filter((m) => m.project_id === pid && m.id > since)
+        .filter((m) => m.project_id === pid && m.id > since && !m.ambient)
         .sort((a, b) => a.id - b.id)
         .slice(0, limit)
         .map((m) => ({ id: m.id, conversation_id: m.conversation_id, sender_id: m.sender_id, role: m.role, text: m.text }));
@@ -64,8 +64,8 @@ class FakeD1 implements D1Like {
 
   private exec(q: string, v: unknown[]): void {
     if (q.startsWith('INSERT INTO messages')) {
-      const [project_id, conversation_id, sender_id, role, text, created_at] = v as [string, string, string, string, string, number];
-      this.msgs.push({ id: this.nextId++, project_id, conversation_id, sender_id, role, text, created_at });
+      const [project_id, conversation_id, sender_id, role, text, ambient, created_at] = v as [string, string, string, string, string, number, number];
+      this.msgs.push({ id: this.nextId++, project_id, conversation_id, sender_id, role, text, ambient, created_at });
     } else if (q.includes('INSERT INTO reflection_state')) {
       const [project_id, last_message_id] = v as [string, number];
       this.state.set(project_id, last_message_id);
@@ -121,6 +121,23 @@ test('attribution: agent posts render as "you", people by sender id', async () =
   const t = (await takeUnreflectedBatch(db, 'A'))!;
   assert.match(t, /slack:T:U9: hello/);
   assert.match(t, /you: hi back/);
+});
+
+test('reflection skips ambient rows: only engaged messages are consolidated', async () => {
+  const db = new FakeD1();
+  await logMessage(db, { projectId: 'A', conversationId: 'c1', senderId: 'slack:T:U1', role: 'user', text: 'engaged-msg' });
+  await logMessage(db, { projectId: 'A', conversationId: 'c1', senderId: 'slack:T:U2', role: 'user', text: 'ambient-msg', ambient: true });
+  assert.deepEqual(await projectsWithUnreflected(db), ['A']);
+  const batch = (await takeUnreflectedBatch(db, 'A'))!;
+  assert.ok(batch.includes('engaged-msg'), 'engaged message consolidated');
+  assert.ok(!batch.includes('ambient-msg'), 'ambient message skipped by REM');
+});
+
+test('reflection gate ignores ambient-only projects (no REM turn for pure chatter)', async () => {
+  const db = new FakeD1();
+  await logMessage(db, { projectId: 'B', conversationId: 'c1', senderId: 'slack:T:U1', role: 'user', text: 'just chatter', ambient: true });
+  assert.deepEqual(await projectsWithUnreflected(db), [], 'ambient-only project does not trigger REM');
+  assert.equal(await takeUnreflectedBatch(db, 'B'), null, 'nothing to consolidate');
 });
 
 const main = async () => {
