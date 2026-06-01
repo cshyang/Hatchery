@@ -355,7 +355,7 @@ app.post('/slack/events', async (c) => {
   // Engage policy:
   //  - @mention anywhere                         -> engage
   //  - reply in a thread the bot already posted in -> continue (no re-mention)
-  //  - everything else                            -> stay silent
+  //  - everything else                            -> log ambient (Layer 2), stay silent
   const text = ev.text ?? '';
   const token = (c.env as Record<string, string | undefined>)[binding.transportTokenRef];
   // Fetch the thread ONCE (if any) and reuse it for BOTH the participation check and the backscroll
@@ -364,18 +364,40 @@ app.post('/slack/events', async (c) => {
     ev.thread_ts && token
       ? await fetchThreadReplies(token, ev.channel, ev.thread_ts).catch(() => [])
       : [];
-  if (!mentionsBot(text, binding.transportBotId)) {
-    // Engage an un-@mentioned reply only if the bot is already participating in this thread.
-    const participating = threadReplies.some((m) => m.user === binding.transportBotId);
-    if (!participating) return c.body(null, 200);
-  }
 
+  const eventId = body.event_id ?? `${ev.channel}:${ev.ts}`;
+  // Normalize once — both the ambient-log branch and the engaged path below use this.
   const msg = normalizeSlackMessage(
-    body.event_id ?? `${ev.channel}:${ev.ts}`,
+    eventId,
     body.team_id ?? '',
     { channel: ev.channel, ts: ev.ts, thread_ts: ev.thread_ts, user: ev.user, text: stripMention(text, binding.transportBotId) },
     binding,
   );
+
+  // Engage when @mentioned anywhere, or when replying in a thread the bot already posted in.
+  const engaged =
+    mentionsBot(text, binding.transportBotId) ||
+    threadReplies.some((m) => m.user === binding.transportBotId);
+
+  if (!engaged) {
+    // Ambient ingestion (Layer 2): remember every message in a bound channel even when we won't
+    // answer it, so the cross-thread index (Layer 3) and proactive review (Layer 4) can see the
+    // whole room — not just threads the bot was pulled into. NO dispatch, NO LLM turn; the agent
+    // stays silent. Flagged ambient:true so nightly REM keeps consolidating ONLY bot conversations.
+    // Deduped against Slack's at-least-once retries with the same KV claim the engaged path uses
+    // (an event is ambient XOR engaged, so the two claim sites never fire on the same event_id).
+    if (c.env.DB && (await claimEvent(c.env.SLACK_EVENTS, eventId))) {
+      await logMessage(c.env.DB, {
+        projectId: msg.projectId,
+        conversationId: msg.conversationId,
+        senderId: msg.senderId,
+        role: 'user',
+        text: msg.text,
+        ambient: true,
+      }).catch(() => {});
+    }
+    return c.body(null, 200);
+  }
 
   // Store the exact reply target before the idempotency claim. If this D1 write fails,
   // Slack can retry and repair the target instead of us suppressing a turn that can no
@@ -392,10 +414,9 @@ app.post('/slack/events', async (c) => {
     });
   }
 
-  // Idempotency: Slack redelivers the same event_id on retry (at-least-once).
-  // Claim it before dispatch so a retry can't fire a second reply. Only reached
-  // for dispatch-bound events (mention/continue) — chatter we ignore costs no KV.
-  const eventId = body.event_id ?? `${ev.channel}:${ev.ts}`;
+  // Idempotency: Slack redelivers the same event_id on retry (at-least-once). Claim it before
+  // dispatch so a retry can't fire a second reply. (Ambient messages claim it too, above — every
+  // persisted message is deduped now, not just dispatch-bound ones.)
   if (!(await claimEvent(c.env.SLACK_EVENTS, eventId))) {
     return c.body(null, 200); // duplicate delivery — already handled
   }
@@ -418,8 +439,8 @@ app.post('/slack/events', async (c) => {
     );
   }
 
-  // Log to the transcript so nightly reflection has something to consolidate (best-effort —
-  // a logging hiccup must never block the reply). We only log conversations the bot is part of.
+  // Log the engaged turn to the transcript (ambient defaults to 0, so nightly REM consolidates it).
+  // Best-effort — a logging hiccup must never block the reply.
   if (c.env.DB) {
     await logMessage(c.env.DB, {
       projectId: msg.projectId,
