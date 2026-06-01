@@ -16,6 +16,7 @@ import {
   upsertConnection,
   PROVIDER_CATALOG,
   requestConnectionTool,
+  disconnectConnectionTool,
   connectedNotice,
   disconnectedNotice,
   disableConnectionByRef,
@@ -352,6 +353,70 @@ test('request_connection: refuses a provider not in the catalog (no session star
   const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'salesforce' });
   assert.match(out, /not a supported provider/i);
   assert.equal(started, 0, 'no Nango session for an unsupported provider');
+});
+
+// A fake DB for the disconnect tool: supports loadConnections (SELECT provider, token_ref…) and
+// disableConnectionByRef (SELECT project_id, provider WHERE connection_ref + UPDATE status).
+function disconnectFakeD1(rows: { project_id: string; provider: string; connection_ref: string | null; status: string }[]): D1Like {
+  return {
+    prepare(sql: string) {
+      const t = sql.trim();
+      return {
+        bind: (...args: unknown[]) => ({
+          run: async () => {
+            if (t.startsWith('UPDATE connections SET status=')) {
+              const ref = args[args.length - 1];
+              const row = rows.find((r) => r.connection_ref === ref);
+              if (row) row.status = 'disabled';
+            }
+            return {};
+          },
+          all: async <T = Record<string, unknown>>() => {
+            if (t.startsWith('SELECT provider, token_ref')) {
+              const [pid] = args;
+              return { results: rows.filter((r) => r.project_id === pid).map((r) => ({ provider: r.provider, token_ref: null, connection_ref: r.connection_ref, config_json: null, status: r.status })) as T[] };
+            }
+            return { results: [] as T[] };
+          },
+          first: async <T = Record<string, unknown>>() => {
+            if (t.startsWith('SELECT project_id, provider FROM connections WHERE connection_ref')) {
+              const [ref] = args;
+              const row = rows.find((r) => r.connection_ref === ref && r.status === 'active');
+              return (row ? { project_id: row.project_id, provider: row.provider } : null) as T | null;
+            }
+            return null as T | null;
+          },
+        }),
+      };
+    },
+  };
+}
+
+test('disconnect_connection: schema has provider but NO secret param; deletes at Nango + disables the local row', async () => {
+  const rows = [{ project_id: 'C123', provider: 'notion', connection_ref: 'conn_42', status: 'active' }];
+  const db = disconnectFakeD1(rows);
+  const deleted: { secretKey: string; connectionId: string; providerConfigKey: string }[] = [];
+  const fakeDelete = async (a: { secretKey: string; connectionId: string; providerConfigKey: string }) => { deleted.push(a); };
+  const tool = disconnectConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123', db }, { deleteConnection: fakeDelete });
+
+  assert.equal(tool.name, 'disconnect_connection');
+  const props = (tool.parameters as { properties?: Record<string, unknown> }).properties ?? {};
+  assert.deepEqual(Object.keys(props), ['provider'], 'only a provider param — no secret');
+
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'notion' });
+  assert.match(out, /🔌|disconnect/i);
+  assert.deepEqual(deleted, [{ secretKey: 'nk', connectionId: 'conn_42', providerConfigKey: 'notion' }], 'revoked at Nango by connection_ref');
+  assert.equal(rows[0].status, 'disabled', 'local row disabled → tool disappears next turn');
+});
+
+test('disconnect_connection: not-connected provider → friendly message, no Nango call', async () => {
+  const db = disconnectFakeD1([]); // no rows for this channel
+  let deletes = 0;
+  const fakeDelete = async () => { deletes++; };
+  const tool = disconnectConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123', db }, { deleteConnection: fakeDelete });
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'notion' });
+  assert.match(out, /not connected|nothing to disconnect/i);
+  assert.equal(deletes, 0, 'no Nango call when there is no connection to remove');
 });
 
 test('connectionsBlock: canRequest=true tells the agent to use request_connection; default does not', async () => {

@@ -20,7 +20,7 @@ import type { Binding, ConnectionSpec } from './bindings';
 import type { D1Like } from './skills';
 import { githubReadTools } from './github';
 import { genericApiTool, PROVIDER_API_PROFILES } from './api';
-import { fetchToken, startConnectSession } from './nango';
+import { fetchToken, startConnectSession, deleteConnection } from './nango';
 
 export interface ConnectionState {
   provider: string;
@@ -344,6 +344,51 @@ export function requestConnectionTool(
         `you never see the credential):\n${connectLink}\n` +
         `Once they authorize, ${p} tools will appear automatically and you can use them.`
       );
+    },
+  });
+}
+
+/** The agent's disconnect tool (Component 3, in-Slack revoke — the only disconnect path a non-operator
+ *  Tester has; the Nango dashboard is operator-only and dashboard-delete fires no webhook). Looks up
+ *  THIS channel's connection_ref, revokes it at Nango (DELETE — real teardown, token revoked at the
+ *  provider), then disables the local row so the provider's tools vanish next turn. No secret param —
+ *  same structural wall as request_connection. Disconnect is the least-dangerous write (worst case:
+ *  reconnect), so it's agent-callable without an approval gate (unlike a future github_create_issue).
+ *  `deps.deleteConnection` is injectable for tests. */
+export function disconnectConnectionTool(
+  args: { nangoSecretKey: string; projectId: string; db: D1Like; catalog?: { provider: string; summary: string }[] },
+  deps: { deleteConnection?: typeof deleteConnection } = {},
+): ToolDefinition {
+  const catalog = args.catalog ?? PROVIDER_CATALOG;
+  const allowed = catalog.map((c) => c.provider);
+  const del = deps.deleteConnection ?? deleteConnection;
+  return defineTool({
+    name: 'disconnect_connection',
+    description:
+      'Disconnect an external service from THIS channel — revokes access and removes its tools. Pass ' +
+      'the provider name. Use when the user asks to disconnect, remove, revoke, or unlink a connection. ' +
+      `Connectable/disconnectable providers: ${allowed.join(', ')}.`,
+    parameters: Type.Object({
+      provider: Type.String({ description: `The provider to disconnect. One of: ${allowed.join(', ')}.` }),
+    }),
+    async execute({ provider }) {
+      const p = String(provider).toLowerCase();
+      // Find this channel's live connection_ref for the provider (managed-OAuth rows carry it).
+      const rows = await loadConnections(args.db, args.projectId).catch(() => []);
+      const row = rows.find((r) => r.provider === p && r.status === 'active' && r.connectionRef);
+      if (!row || !row.connectionRef) {
+        return `${p} isn't connected to this channel — nothing to disconnect.`;
+      }
+      // Revoke at Nango first (real teardown; 404 = already gone = fine), then disable locally so the
+      // tools disappear next turn. If the Nango call hard-fails (non-404), surface it rather than
+      // claim success while the token still lives at the vendor.
+      try {
+        await del({ secretKey: args.nangoSecretKey, connectionId: row.connectionRef, providerConfigKey: p });
+      } catch (e) {
+        return `Couldn't fully disconnect ${p}: ${e instanceof Error ? e.message : 'error'}. Nothing was changed — try again.`;
+      }
+      await disableConnectionByRef(args.db, row.connectionRef);
+      return disconnectedNotice(p);
     },
   });
 }
