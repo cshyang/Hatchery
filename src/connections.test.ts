@@ -16,6 +16,7 @@ import {
   upsertConnection,
   PROVIDER_CATALOG,
   requestConnectionTool,
+  connectedNotice,
 } from './connections';
 import { GITHUB_READ_TOOL_NAMES } from './github';
 import type { D1Like } from './skills';
@@ -222,6 +223,12 @@ test('D1 layer: loadConnections returns metadata only and never a secret value',
   assert.equal(rows[0].status, 'active');
   // the record shape carries no secret/value field at all
   assert.ok(!('secret' in rows[0]) && !('value' in rows[0]));
+});
+
+test('connectedNotice: a friendly ✅ confirmation naming the provider (the webhook posts this to the channel)', async () => {
+  const msg = connectedNotice('notion');
+  assert.match(msg, /✅/);
+  assert.match(msg, /notion/i);
 });
 
 test('resolveConnection: tokenRef path still returns a literal string secret', async () => {
