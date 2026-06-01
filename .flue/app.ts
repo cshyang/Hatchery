@@ -235,24 +235,12 @@ app.post('/nango/webhook', async (c) => {
   // skip the reply; this must not). Best-effort: a Slack hiccup must never fail the D1 write that
   // already succeeded. project_id IS the channel id; the bot token comes from the project's binding.
   const postNotice = async (projectId: string, text: string) => {
-    const binding = await bindingByProject(projectId, db).catch((e) => {
-      console.log(`[nango] postNotice: bindingByProject threw for ${projectId}: ${e instanceof Error ? e.message : 'error'}`);
-      return undefined;
-    });
-    if (!binding) {
-      console.log(`[nango] postNotice: NO binding for project ${projectId} — notice not posted`);
-      return;
-    }
-    const tokenRef = binding.transportTokenRef;
-    const haveToken = typeof (c.env as Record<string, unknown>)[tokenRef] === 'string';
-    console.log(`[nango] postNotice: posting to ${binding.externalSpaceId} via ${tokenRef} (token present=${haveToken})`);
-    try {
-      const target = topLevelTargetFromBinding(binding);
-      await sendToConversationTarget(c.env as Record<string, unknown>, target, text);
-      console.log(`[nango] postNotice: posted OK to ${binding.externalSpaceId}`);
-    } catch (e) {
-      console.log(`[nango] postNotice: send FAILED to ${binding.externalSpaceId}: ${e instanceof Error ? e.message : 'error'}`);
-    }
+    const binding = await bindingByProject(projectId, db).catch(() => undefined);
+    if (!binding) return;
+    const target = topLevelTargetFromBinding(binding);
+    await sendToConversationTarget(c.env as Record<string, unknown>, target, text).catch((e) =>
+      console.log(`[nango] channel notice failed to post: ${e instanceof Error ? e.message : 'error'}`),
+    );
   };
 
   // Deletion FIRST (a deletion event is not a creation). Target the row by connection_ref — the only
