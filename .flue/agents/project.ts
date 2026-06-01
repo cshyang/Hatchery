@@ -7,6 +7,7 @@ import { reminderTools } from '../../src/reminders';
 import { buildInstructions } from '../../src/prompt';
 import { loadProjectMemory, memoryTools, renderMemory } from '../../src/memory';
 import { userTools } from '../../src/users';
+import { searchTools } from '../../src/search';
 import { logMessage } from '../../src/reflection';
 import {
   connectionState,
@@ -166,6 +167,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     ...reminderTools(ticker, heartbeatToken, projectId),
     ...(db ? memoryTools(db, projectId) : []),
     ...userTools(db, botToken),
+    ...(db ? searchTools(db, projectId) : []),
     ...nangoTools,
     ...connectionTools(connState, connSecrets),
   ];
