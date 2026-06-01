@@ -97,6 +97,19 @@ export async function fetchToken(args: FetchTokenArgs, deps: FetchDeps = {}): Pr
   return token;
 }
 
+/** Revoke + delete a connection at Nango (the real teardown — Nango revokes the token at the
+ *  provider). Idempotent: a 404 means it's already gone, which is success for our purposes (we still
+ *  want to disable the local row). Any other non-2xx throws so the caller can tell the user teardown
+ *  failed rather than falsely reporting "disconnected". Same connectionId-as-path shape as fetchToken. */
+export async function deleteConnection(args: FetchTokenArgs, deps: FetchDeps = {}): Promise<void> {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const url = `${NANGO_API}/connection/${encodeURIComponent(args.connectionId)}?provider_config_key=${encodeURIComponent(args.providerConfigKey)}`;
+  const res = await nangoFetch(url, { method: 'DELETE', headers: { authorization: `Bearer ${args.secretKey}` } }, fetchImpl);
+  if (res.ok || res.status === 404) return; // 404 = already gone = idempotent success
+  const text = await res.text();
+  throw new Error(`Nango connection delete failed (${res.status}): ${text.slice(0, 200)}`);
+}
+
 // ── Webhook verify + parse ──────────────────────────────────────────────────────────────────────
 // constantTimeEqual + toHex mirror src/slack/verify.ts (kept private there); duplicated here (8 lines)
 // rather than refactoring a slack-named module — lower risk than reshaping verify.ts.

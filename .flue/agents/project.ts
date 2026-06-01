@@ -15,6 +15,7 @@ import {
   connectionsBlock,
   loadConnectionSpecs,
   requestConnectionTool,
+  disconnectConnectionTool,
   PROVIDER_CATALOG,
   type ConnectionState,
   type ResolvedConnection,
@@ -89,7 +90,13 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   // always-on when a DB exists.
   const nangoSecretKey = typeof env.NANGO_SECRET_KEY === 'string' ? env.NANGO_SECRET_KEY : '';
   const canRequestConnect = !!db && !!nangoSecretKey;
-  const requestConnect = canRequestConnect ? [requestConnectionTool({ nangoSecretKey, projectId })] : [];
+  // request_connection (always available when connectable) + disconnect_connection (the in-Slack
+  // revoke — the only disconnect path a non-operator has). Both gated on db + the Nango platform key;
+  // both no-secret-param. `db &&` in the spread narrows db to non-undefined for disconnect's signature.
+  const nangoTools =
+    canRequestConnect && db
+      ? [requestConnectionTool({ nangoSecretKey, projectId }), disconnectConnectionTool({ nangoSecretKey, projectId, db })]
+      : [];
 
   const connBlock = connState.length || canRequestConnect ? connectionsBlock(connState, PROVIDER_CATALOG, canRequestConnect) : null;
 
@@ -158,7 +165,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     ...reminderTools(ticker, heartbeatToken, projectId),
     ...(db ? memoryTools(db, projectId) : []),
     ...userTools(db, botToken),
-    ...requestConnect,
+    ...nangoTools,
     ...connectionTools(connState, connSecrets),
   ];
 

@@ -3,7 +3,7 @@
 // reconciled live in the integration task (see the plan's live-probe task) — green here != Nango-correct.
 
 import assert from 'node:assert/strict';
-import { startConnectSession, fetchToken, verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook } from './nango';
+import { startConnectSession, fetchToken, deleteConnection, verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook } from './nango';
 
 // A fake fetch that records the last call and returns a canned Response.
 function fakeFetch(responder: (url: string, init: RequestInit) => Response) {
@@ -64,6 +64,24 @@ test('fetchToken: unwraps the { data: {...} } envelope too (Nango wraps inconsis
 test('fetchToken: throws when no access_token present', async () => {
   const { fn } = fakeFetch(() => new Response(JSON.stringify({ credentials: {} }), { status: 200 }));
   await assert.rejects(() => fetchToken({ secretKey: 'x', connectionId: 'c', providerConfigKey: 'notion' }, { fetchImpl: fn }), /access_token/);
+});
+
+test('deleteConnection: DELETEs /connection/{id}?provider_config_key=… with Bearer; resolves on 2xx', async () => {
+  const { fn, calls } = fakeFetch(() => new Response(JSON.stringify({ success: true }), { status: 200 }));
+  await deleteConnection({ secretKey: 'nk_secret', connectionId: 'conn_42', providerConfigKey: 'notion' }, { fetchImpl: fn });
+  assert.equal((calls[0].init.method ?? 'GET'), 'DELETE');
+  assert.match(calls[0].url, /\/connection\/conn_42\?provider_config_key=notion$/);
+  assert.equal((calls[0].init.headers as Record<string, string>).authorization, 'Bearer nk_secret');
+});
+
+test('deleteConnection: a 404 (already gone) resolves quietly — idempotent teardown, not an error', async () => {
+  const { fn } = fakeFetch(() => new Response('not found', { status: 404 }));
+  await assert.doesNotReject(() => deleteConnection({ secretKey: 'nk', connectionId: 'gone', providerConfigKey: 'notion' }, { fetchImpl: fn }));
+});
+
+test('deleteConnection: throws on a non-404 error (e.g. 500) so the caller knows teardown failed', async () => {
+  const { fn } = fakeFetch(() => new Response('boom', { status: 500 }));
+  await assert.rejects(() => deleteConnection({ secretKey: 'nk', connectionId: 'c', providerConfigKey: 'notion' }, { fetchImpl: fn }), /500/);
 });
 
 test('verifyNangoWebhook: accepts a correct hex HMAC-SHA256 over the RAW body, rejects a wrong one', async () => {
