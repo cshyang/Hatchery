@@ -1,5 +1,5 @@
 import { createAgent, defineTool, Type, type AgentRuntimeConfig, type ToolDefinition } from '@flue/runtime';
-import { bindingByProject, parseAgentInstanceId, DEFAULT_MODEL } from '../../src/bindings';
+import { bindingByProject, parseAgentInstanceId, DEFAULT_MODEL, resolveModel } from '../../src/bindings';
 import { resolveTarget, sendToConversationTarget } from '../../src/conversations';
 import { withToolLogging, withReplyReminder } from '../../src/observability';
 import { skillTools, loadSkillCatalog, loadActiveSkillBody, skillBody, type D1Like } from '../../src/skills';
@@ -170,7 +170,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   ];
 
   return {
-    model: binding.model ?? DEFAULT_MODEL,
+    model: resolveModel(binding.model),
     instructions: buildInstructions({
       projectName: binding.projectId,
       personality: personality ? skillBody(personality) : null,
