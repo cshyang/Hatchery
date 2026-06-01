@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { flue } from '@flue/runtime/app';
 import { dispatch } from '@flue/runtime';
 import { verifySlackSignature } from '../src/slack/verify';
-import { botInThread } from '../src/slack/threads';
+import { fetchThreadReplies, renderThreadBackscroll } from '../src/slack/threads';
 import { mentionsBot, stripMention } from '../src/slack/mentions';
 import { postMessage } from '../src/slack/post';
 import { bindings, bindingBySlack, bindingByProject, agentInstanceId, autoCreateBinding, isKnownTeam } from '../src/bindings';
@@ -357,12 +357,17 @@ app.post('/slack/events', async (c) => {
   //  - reply in a thread the bot already posted in -> continue (no re-mention)
   //  - everything else                            -> stay silent
   const text = ev.text ?? '';
+  const token = (c.env as Record<string, string | undefined>)[binding.transportTokenRef];
+  // Fetch the thread ONCE (if any) and reuse it for BOTH the participation check and the backscroll
+  // we hand the agent — so a threaded turn is no longer context-blind. One conversations.replies call.
+  const threadReplies =
+    ev.thread_ts && token
+      ? await fetchThreadReplies(token, ev.channel, ev.thread_ts).catch(() => [])
+      : [];
   if (!mentionsBot(text, binding.transportBotId)) {
-    const threadTs = ev.thread_ts;
-    const token = (c.env as Record<string, string | undefined>)[binding.transportTokenRef];
-    const continuing =
-      !!threadTs && !!token && (await botInThread(token, ev.channel, threadTs, binding.transportBotId));
-    if (!continuing) return c.body(null, 200);
+    // Engage an un-@mentioned reply only if the bot is already participating in this thread.
+    const participating = threadReplies.some((m) => m.user === binding.transportBotId);
+    if (!participating) return c.body(null, 200);
   }
 
   const msg = normalizeSlackMessage(
@@ -402,13 +407,12 @@ app.post('/slack/events', async (c) => {
   // in the same thread the reply will use (externalConversationId), so the answer follows right
   // under it. Posted AFTER the idempotency claim so a Slack retry can't double-post it, and
   // best-effort: a Slack hiccup must never block the dispatch below.
-  const ackToken = (c.env as Record<string, string | undefined>)[binding.transportTokenRef];
-  if (ackToken) {
+  if (token) {
     // waitUntil, not await: the ACK is best-effort chrome — it must not spend the 3s Slack-ack budget,
     // and postMessage has no fetch timeout, so awaiting a hung Slack call would block the 200 until the
     // Worker times out and Slack retries. Fire it after the response; it still lands before the reply.
     c.executionCtx.waitUntil(
-      postMessage(ackToken, msg.externalSpaceId, WORKING_ACK, msg.externalConversationId).catch((e) =>
+      postMessage(token, msg.externalSpaceId, WORKING_ACK, msg.externalConversationId).catch((e) =>
         console.log(`[ack] working-ack failed to post: ${e instanceof Error ? e.message : 'error'}`),
       ),
     );
@@ -439,6 +443,9 @@ app.post('/slack/events', async (c) => {
       provider: msg.provider,
       accountId: msg.externalAccountId,
       senderId: msg.senderId,
+      ...(threadReplies.length
+        ? { threadContext: renderThreadBackscroll(threadReplies, binding.transportBotId, { excludeTs: ev.ts }) }
+        : {}),
     },
   });
 
