@@ -1,5 +1,5 @@
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
-import type { D1Like } from './skills';
+import type { D1Like } from '../skills';
 import {
   MODEL_WORK_ITEM_STATUSES,
   createWorkItem,
@@ -7,7 +7,7 @@ import {
   listWorkItems,
   updateWorkItemStatus,
   type ClockAndIds,
-} from './workbench';
+} from './repository';
 
 export function workbenchTools(db: D1Like, projectId: string, deps: ClockAndIds = {}): ToolDefinition[] {
   const create = defineTool({
