@@ -226,9 +226,9 @@ test('propose_self_change creates a project-scoped structured source-change work
 test('dispatch_coding_run creates a coding_webhook run and posts the generic runner payload', async () => {
   const db = new FakeD1();
   const deps = seq();
-  let captured: { url: string; init: RequestInit; body: any } | null = null;
+  const captured: { current?: { url: string; init: RequestInit; body: any } } = {};
   const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
-    captured = { url: String(url), init: init ?? {}, body: JSON.parse(String(init?.body ?? '{}')) };
+    captured.current = { url: String(url), init: init ?? {}, body: JSON.parse(String(init?.body ?? '{}')) };
     return new Response(JSON.stringify({ externalRunId: 'runner-42' }), { status: 202 });
   };
   const tools = sourceChangeTools({
@@ -247,12 +247,14 @@ test('dispatch_coding_run creates a coding_webhook run and posts the generic run
   assert.equal(db.workRuns[0].dispatch_status, 'dispatched');
   assert.equal(db.workRuns[0].external_run_id, 'runner-42');
   assert.equal(db.workItems[0].status, 'running');
-  assert.equal(captured?.url, 'https://runner.example/run');
-  assert.equal((captured?.init.headers as Record<string, string>)['x-hatchery-runner-token'], 'runner-secret');
-  assert.equal(JSON.stringify(captured?.body).includes('runner-secret'), false);
-  assert.equal(captured?.body.workItemId, item.id);
-  assert.equal(captured?.body.runId, db.workRuns[0].id);
-  assert.equal(captured?.body.request.targetRepo, request.targetRepo);
+  const sent = captured.current;
+  assert.ok(sent);
+  assert.equal(sent.url, 'https://runner.example/run');
+  assert.equal((sent.init.headers as Record<string, string>)['x-hatchery-runner-token'], 'runner-secret');
+  assert.equal(JSON.stringify(sent.body).includes('runner-secret'), false);
+  assert.equal(sent.body.workItemId, item.id);
+  assert.equal(sent.body.runId, db.workRuns[0].id);
+  assert.equal(sent.body.request.targetRepo, request.targetRepo);
 });
 
 test('dispatch_coding_run records failed runner dispatch without losing the work item', async () => {
