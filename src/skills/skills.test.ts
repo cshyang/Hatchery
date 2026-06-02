@@ -5,14 +5,14 @@
 // are isolated, and there is no hard-delete tool.
 
 import assert from 'node:assert/strict';
-import { createTestRunner } from './test-utils';
+import { createTestRunner } from '../test-utils';
 import {
   loadSkillCatalog,
   loadActiveSkillBody,
   loadRunnableSkillBody,
   skillTools,
   type D1Like,
-} from './skills';
+} from './repository';
 
 interface SkillRow {
   project_id: string;
@@ -27,7 +27,7 @@ interface SkillRow {
   archived_at: number | null;
 }
 
-// Minimal D1 fake covering the fixed queries in skills.ts. Keyed by (project_id, name); UPDATEs
+// Minimal D1 fake covering the fixed queries in skills/repository.ts. Keyed by (project_id, name); UPDATEs
 // report rowcount via { meta: { changes } } the way real D1 does (archive/restore read it).
 class FakeD1 implements D1Like {
   rows: SkillRow[] = [];

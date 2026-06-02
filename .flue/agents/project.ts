@@ -2,7 +2,7 @@ import { createAgent, defineTool, Type, type AgentRuntimeConfig, type ToolDefini
 import { bindingByProject, parseAgentInstanceId, DEFAULT_MODEL, resolveModel } from '../../src/project/bindings';
 import { resolveTarget, sendToConversationTarget } from '../../src/project/conversations';
 import { withToolLogging, withReplyReminder } from '../../src/agent/observability';
-import { skillTools, loadSkillCatalog, loadActiveSkillBody, skillBody, type D1Like } from '../../src/skills';
+import { skillTools, loadSkillCatalog, loadActiveSkillBody, skillBody, type D1Like } from '../../src/skills/repository';
 import { reminderTools } from '../../src/agent/reminders';
 import { buildInstructions } from '../../src/agent/prompt';
 import { loadProjectMemory, memoryTools, renderMemory } from '../../src/knowledge/memory';

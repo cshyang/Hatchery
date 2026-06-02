@@ -1,4 +1,4 @@
-import type { D1Like } from '../skills';
+import type { D1Like } from '../skills/repository';
 
 export const WORK_ITEM_STATUSES = [
   'requested',

@@ -1,6 +1,6 @@
 import type { Binding } from './bindings';
 import { DEFAULT_AGENT_SLUG } from './bindings';
-import type { D1Like } from '../skills';
+import type { D1Like } from '../skills/repository';
 import { postMessage } from '../slack/post';
 
 export type Provider = 'slack';

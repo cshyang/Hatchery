@@ -13,7 +13,7 @@ import {
   profileLabel,
   userTools,
 } from './users';
-import type { D1Like } from '../skills';
+import type { D1Like } from '../skills/repository';
 
 interface Row {
   [k: string]: unknown;

@@ -9,7 +9,7 @@
 // and the watermark advances server-side here (consume-on-take; a failed turn loses that batch —
 // best-effort is fine for background consolidation).
 
-import type { D1Like } from '../skills';
+import type { D1Like } from '../skills/repository';
 
 const BATCH_LIMIT = 300; // cap one night's batch so a busy channel can't blow the context window
 

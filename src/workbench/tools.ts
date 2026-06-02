@@ -1,5 +1,5 @@
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
-import type { D1Like } from '../skills';
+import type { D1Like } from '../skills/repository';
 import {
   MODEL_WORK_ITEM_STATUSES,
   createWorkItem,

@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../test-utils';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch } from './reflection';
-import type { D1Like } from '../skills';
+import type { D1Like } from '../skills/repository';
 
 interface MsgRow { id: number; project_id: string; conversation_id: string; sender_id: string; role: string; text: string; ambient: number; created_at: number; }
 

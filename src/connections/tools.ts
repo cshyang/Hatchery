@@ -4,7 +4,7 @@ import { disconnectedNotice, disableConnectionByRef, loadConnections, type Conne
 import { githubReadTools } from '../providers/github';
 import { deleteConnection, startConnectSession } from '../providers/nango';
 import { PROVIDER_CATALOG, providerUsesGenericApi, type ProviderCatalogEntry } from './catalog';
-import type { D1Like } from '../skills';
+import type { D1Like } from '../skills/repository';
 
 // The CONNECTIONS prompt block (mirrors the skills catalog injection). Tells the agent what it
 // can reach and what is connectable but not yet wired by an operator.

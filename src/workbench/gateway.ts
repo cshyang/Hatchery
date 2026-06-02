@@ -1,4 +1,4 @@
-import type { D1Like } from '../skills';
+import type { D1Like } from '../skills/repository';
 import type { Binding } from '../project/bindings';
 import { agentInstanceId } from '../project/bindings';
 import { hasMatchingSecretHeader } from '../gateway/auth';
