@@ -6,7 +6,7 @@
 // config: the agent's allowed channel and credential reference come from HERE,
 // never from prompt text or model-supplied arguments.
 
-import type { D1Like } from './skills';
+import type { D1Like } from '../skills';
 
 export type SandboxMode = 'virtual' | 'cloudflare-sandbox' | 'daytona' | 'e2b';
 

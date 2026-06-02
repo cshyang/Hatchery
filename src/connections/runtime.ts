@@ -1,5 +1,5 @@
 import type { ToolDefinition } from '@flue/runtime';
-import type { Binding } from '../bindings';
+import type { Binding } from '../project/bindings';
 import { connectionState, loadConnectionSpecs, resolveConnection, type ResolvedConnection } from './repository';
 import {
   connectionTools,

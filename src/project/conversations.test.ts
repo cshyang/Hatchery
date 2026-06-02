@@ -2,7 +2,7 @@
 // agent only receives Hatchery's stable conversationId and resolves the target at send time.
 
 import assert from 'node:assert/strict';
-import { createTestRunner } from './test-utils';
+import { createTestRunner } from '../test-utils';
 import type { Binding } from './bindings';
 import {
   loadConversationTarget,
@@ -12,8 +12,8 @@ import {
   upsertConversationTarget,
   type ConversationTarget,
 } from './conversations';
-import { normalizeSlackMessage } from './canonical';
-import type { D1Like } from './skills';
+import { normalizeSlackMessage } from '../canonical';
+import type { D1Like } from '../skills';
 
 interface TargetRow {
   project_id: string;
