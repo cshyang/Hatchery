@@ -20,9 +20,9 @@ import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflect
 import { upsertConnection, loadConnections, connectedNotice, disconnectedNotice, disableConnectionByRef } from '../src/connections/repository';
 import { verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook } from '../src/providers/nango';
 import { isCatalogProvider } from '../src/connections/catalog';
-import { buildScheduledInput } from '../src/scheduled';
-import { hasMatchingSecretHeader } from '../src/gateway-auth';
-import { readJsonOrNull } from '../src/gateway-json';
+import { buildScheduledInput } from '../src/gateway/scheduled';
+import { hasMatchingSecretHeader } from '../src/gateway/auth';
+import { readJsonOrNull } from '../src/gateway/json';
 import { postConnectionNotice } from '../src/connections/notices';
 import { handleInternalWorkItemRequest } from '../src/workbench/gateway';
 
