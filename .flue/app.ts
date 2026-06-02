@@ -11,8 +11,9 @@ import { upsertConversationTarget, topLevelTargetFromBinding, sendToConversation
 import { claimEvent, type KVLike } from '../src/idempotency';
 import { loadRunnableSkillBody, type D1Like } from '../src/skills';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/reflection';
-import { upsertConnection, loadConnections, PROVIDER_CATALOG, connectedNotice, disconnectedNotice, disableConnectionByRef } from '../src/connections';
+import { upsertConnection, loadConnections, connectedNotice, disconnectedNotice, disableConnectionByRef } from '../src/connections';
 import { verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook } from '../src/nango';
+import { isCatalogProvider } from '../src/provider-catalog';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -277,7 +278,7 @@ app.post('/nango/webhook', async (c) => {
   // Convention guard: the Nango integration id MUST equal a catalog provider slug, else the row would
   // be connected-but-toolless (no API profile / typed tools). Log loudly and skip rather than store a
   // dead row. (See the runbook: operators name the Nango integration exactly the catalog slug.)
-  if (!PROVIDER_CATALOG.some((p) => p.provider === event.provider)) {
+  if (!isCatalogProvider(event.provider)) {
     console.log(`[nango] webhook for unknown provider "${event.provider}" (cfg "${event.providerConfigKey}") — skipping upsert; name the Nango integration to match a catalog slug`);
     return c.json({ ignored: 'unknown provider' });
   }

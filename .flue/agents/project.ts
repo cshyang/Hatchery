@@ -17,10 +17,10 @@ import {
   loadConnectionSpecs,
   requestConnectionTool,
   disconnectConnectionTool,
-  PROVIDER_CATALOG,
   type ConnectionState,
   type ResolvedConnection,
 } from '../../src/connections';
+import { PROVIDER_CATALOG } from '../../src/provider-catalog';
 
 // The project agent. Addressed at /agents/project/<id>, id = "project:<projectId>:agent:<slug>"
 // (slug = "default" until a channel hosts multiple personas). Each instance is a persistent
