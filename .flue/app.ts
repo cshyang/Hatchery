@@ -16,6 +16,7 @@ import { verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook } 
 import { isCatalogProvider } from '../src/provider-catalog';
 import { buildScheduledInput } from '../src/scheduled';
 import { hasMatchingSecretHeader } from '../src/gateway-auth';
+import { readJsonOrNull } from '../src/gateway-json';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -76,13 +77,8 @@ function requireHeartbeat(c: { env: Env; req: { header(n: string): string | unde
 // optional {topic} in the body overrides the default.
 app.post('/__heartbeat', async (c) => {
   if (!requireHeartbeat(c)) return c.body(null, 404);
-  let topic: string | undefined;
-  try {
-    const body = (await c.req.json()) as { topic?: string };
-    if (body?.topic) topic = String(body.topic);
-  } catch {
-    // no/invalid body → bare liveness wake (agent stays silent unless it has scheduled work)
-  }
+  const body = await readJsonOrNull<{ topic?: string }>(() => c.req.json());
+  const topic = body?.topic ? String(body.topic) : undefined;
   const dispatched = await fireHeartbeat(topic);
   return c.json({ dispatched, topic: topic ?? null });
 });
@@ -94,13 +90,13 @@ app.post('/__heartbeat', async (c) => {
 app.post('/__internal/scheduled', async (c) => {
   if (!requireHeartbeat(c)) return c.body(null, 404);
 
-  const body = (await c.req.json().catch(() => null)) as {
+  const body = await readJsonOrNull<{
     fireId?: string;
     projectId?: string;
     jobId?: string;
     kind?: string;
     payload?: Record<string, unknown>;
-  } | null;
+  }>(() => c.req.json());
   if (!body?.fireId || !body.projectId || !body.jobId) return c.json({ error: 'bad request' }, 400);
 
   if (!(await claimEvent(c.env.SLACK_EVENTS, `sched:${body.fireId}`))) {
@@ -169,14 +165,14 @@ app.post('/__admin/connections', async (c) => {
   if (!requireAdmin(c)) return c.body(null, 404); // inert/invisible unless the admin token matches
   const db = c.env.DB;
   if (!db) return c.json({ error: 'no DB binding' }, 500);
-  const body = (await c.req.json().catch(() => null)) as {
+  const body = await readJsonOrNull<{
     projectId?: string;
     provider?: string;
     tokenRef?: string;
     connectionRef?: string;
     config?: Record<string, unknown>;
     status?: 'active' | 'disabled';
-  } | null;
+  }>(() => c.req.json());
   if (!body?.projectId || !body.provider) return c.json({ error: 'projectId and provider are required' }, 400);
   if (!body.tokenRef && !body.connectionRef && body.status !== 'disabled') {
     return c.json({ error: 'tokenRef or connectionRef is required (omit only when disabling)' }, 400);
