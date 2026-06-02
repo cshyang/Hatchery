@@ -7,7 +7,7 @@ import { mentionsBot, stripMention } from '../src/slack/mentions';
 import { postMessage } from '../src/slack/post';
 import { bindings, bindingBySlack, bindingByProject, agentInstanceId, autoCreateBinding, isKnownTeam } from '../src/bindings';
 import { normalizeSlackMessage } from '../src/canonical';
-import { upsertConversationTarget, topLevelTargetFromBinding, sendToConversationTarget } from '../src/conversations';
+import { upsertConversationTarget } from '../src/conversations';
 import { claimEvent, type KVLike } from '../src/idempotency';
 import type { D1Like } from '../src/skills';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/reflection';
@@ -17,6 +17,7 @@ import { isCatalogProvider } from '../src/provider-catalog';
 import { buildScheduledInput } from '../src/scheduled';
 import { hasMatchingSecretHeader } from '../src/gateway-auth';
 import { readJsonOrNull } from '../src/gateway-json';
+import { postConnectionNotice } from '../src/connection-notices';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -215,18 +216,6 @@ app.post('/nango/webhook', async (c) => {
   const db = c.env.DB;
   if (!db) return c.json({ error: 'no DB binding' }, 500);
 
-  // Post a deterministic notice to a channel root from the GATEWAY (not an agent turn — a model might
-  // skip the reply; this must not). Best-effort: a Slack hiccup must never fail the D1 write that
-  // already succeeded. project_id IS the channel id; the bot token comes from the project's binding.
-  const postNotice = async (projectId: string, text: string) => {
-    const binding = await bindingByProject(projectId, db).catch(() => undefined);
-    if (!binding) return;
-    const target = topLevelTargetFromBinding(binding);
-    await sendToConversationTarget(c.env as Record<string, unknown>, target, text).catch((e) =>
-      console.log(`[nango] channel notice failed to post: ${e instanceof Error ? e.message : 'error'}`),
-    );
-  };
-
   // Deletion FIRST (a deletion event is not a creation). Target the row by connection_ref — the only
   // field guaranteed on a deletion webhook. Disabling makes loadConnectionSpecs drop it → the
   // provider's tools disappear next turn, instead of going stale and erroring on use. NOTE: whether
@@ -237,7 +226,12 @@ app.post('/nango/webhook', async (c) => {
     const disabled = await disableConnectionByRef(db, deletion.connectionId);
     if (disabled) {
       console.log(`[nango] disconnected provider "${disabled.provider}" for project ${disabled.projectId} (connection ${deletion.connectionId})`);
-      await postNotice(disabled.projectId, disconnectedNotice(disabled.provider));
+      await postConnectionNotice({
+        db,
+        env: c.env as Record<string, unknown>,
+        projectId: disabled.projectId,
+        text: disconnectedNotice(disabled.provider),
+      });
       return c.json({ ok: true, disconnected: disabled.provider, projectId: disabled.projectId });
     }
     console.log(`[nango] deletion for unknown connection_ref ${deletion.connectionId} — nothing to disable`);
@@ -266,7 +260,12 @@ app.post('/nango/webhook', async (c) => {
     createdBy: 'nango-webhook',
   });
   console.log(`[nango] connected provider "${event.provider}" for project ${event.projectId} (connection ${event.connectionId})`);
-  await postNotice(event.projectId, connectedNotice(event.provider));
+  await postConnectionNotice({
+    db,
+    env: c.env as Record<string, unknown>,
+    projectId: event.projectId,
+    text: connectedNotice(event.provider),
+  });
   return c.json({ ok: true, projectId: event.projectId, provider: event.provider });
 });
 
