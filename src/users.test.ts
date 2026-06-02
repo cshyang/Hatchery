@@ -4,6 +4,7 @@
 // names only (never a token).
 
 import assert from 'node:assert/strict';
+import { createTestRunner } from './test-utils';
 import {
   parseSenderId,
   resolveUserName,
@@ -49,8 +50,7 @@ class FakeD1 implements D1Like {
   }
 }
 
-const tests: [string, () => Promise<void>][] = [];
-const test = (n: string, fn: () => Promise<void>) => tests.push([n, fn]);
+const { test, run } = createTestRunner();
 
 test('parseSenderId: handles slack:team:user, bare id, and rejects agent/unknown/garbage', async () => {
   assert.deepEqual(parseSenderId('slack:T1:U2'), { provider: 'slack', accountId: 'T1', userId: 'U2' });
@@ -112,20 +112,4 @@ test('resolve_user tool: returns a friendly message for an unresolvable id', asy
   assert.match(String(out), /No name available/);
 });
 
-const main = async () => {
-  let pass = 0;
-  let fail = 0;
-  for (const [n, fn] of tests) {
-    try {
-      await fn();
-      console.log(`  ✓ ${n}`);
-      pass++;
-    } catch (e) {
-      console.log(`  ✗ ${n}\n    ${(e as Error).message}`);
-      fail++;
-    }
-  }
-  console.log(`\n${pass} passed, ${fail} failed`);
-  if (fail) process.exit(1);
-};
-await main();
+await run();

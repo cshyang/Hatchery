@@ -1,9 +1,9 @@
 // Thread backscroll: fetch + render for context hydration — run: npx tsx src/slack/threads.test.ts
 import assert from 'node:assert/strict';
+import { createTestRunner } from '../test-utils';
 import { renderThreadBackscroll, fetchThreadReplies, type ThreadMessage } from './threads';
 
-const tests: [string, () => Promise<void>][] = [];
-const test = (name: string, fn: () => Promise<void>) => tests.push([name, fn]);
+const { test, run } = createTestRunner();
 
 const msgs: ThreadMessage[] = [
   { user: 'Ualex', text: 'can we change the pricing?', ts: '1.0' },
@@ -65,13 +65,4 @@ test('fetchThreadReplies: ok:false → empty array', async () => {
   assert.deepEqual(await fetchThreadReplies('t', 'C1', '1.0', { fetchImpl: fn }), []);
 });
 
-const main = async () => {
-  let pass = 0, fail = 0;
-  for (const [n, fn] of tests) {
-    try { await fn(); console.log(`  ✓ ${n}`); pass++; }
-    catch (e) { console.log(`  ✗ ${n}\n    ${(e as Error).message}`); fail++; }
-  }
-  console.log(`\n${pass} passed, ${fail} failed`);
-  if (fail) process.exit(1);
-};
-await main();
+await run();

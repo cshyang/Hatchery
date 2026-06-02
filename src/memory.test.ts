@@ -4,6 +4,7 @@
 // is project-scoped; project ISOLATION is the load-bearing security invariant, not ceremony.
 
 import assert from 'node:assert/strict';
+import { createTestRunner } from './test-utils';
 import { memoryTools, loadProjectMemory, PROJECT_LIMIT, PER_ENTRY_MAX } from './memory';
 import type { D1Like } from './skills';
 
@@ -80,8 +81,7 @@ const byName = (tools: Tool[], name: string): Tool => {
   return t;
 };
 
-const tests: [string, () => Promise<void>][] = [];
-const test = (name: string, fn: () => Promise<void>) => tests.push([name, fn]);
+const { test, run } = createTestRunner();
 
 test('project isolation: a project-A fact is invisible to project B', async () => {
   const db = new FakeD1();
@@ -134,21 +134,4 @@ test('per-entry cap: an essay is refused', async () => {
   );
 });
 
-const main = async () => {
-  let pass = 0;
-  let fail = 0;
-  for (const [name, fn] of tests) {
-    try {
-      await fn();
-      console.log(`  ✓ ${name}`);
-      pass++;
-    } catch (e) {
-      console.log(`  ✗ ${name}\n    ${(e as Error).message}`);
-      fail++;
-    }
-  }
-  console.log(`\n${pass} passed, ${fail} failed`);
-  if (fail) process.exit(1);
-};
-
-await main();
+await run();

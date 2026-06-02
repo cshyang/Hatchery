@@ -6,6 +6,7 @@
 // per-provider method policy, and the D1 metadata layer (operator add without redeploy).
 
 import assert from 'node:assert/strict';
+import { createTestRunner } from './test-utils';
 import {
   connectionState,
   resolveConnection,
@@ -93,8 +94,7 @@ class FakeD1 implements D1Like {
   }
 }
 
-const tests: [string, () => Promise<void>][] = [];
-const test = (name: string, fn: () => Promise<void>) => tests.push([name, fn]);
+const { test, run } = createTestRunner();
 
 test('not connected: a declared spec with no secret present reads as not_connected', async () => {
   const state = connectionState(GH, {});
@@ -426,21 +426,4 @@ test('connectionsBlock: canRequest=true tells the agent to use request_connectio
   assert.match(without, /wired by an operator first/);
 });
 
-const main = async () => {
-  let pass = 0;
-  let fail = 0;
-  for (const [name, fn] of tests) {
-    try {
-      await fn();
-      console.log(`  ✓ ${name}`);
-      pass++;
-    } catch (e) {
-      console.log(`  ✗ ${name}\n    ${(e as Error).message}`);
-      fail++;
-    }
-  }
-  console.log(`\n${pass} passed, ${fail} failed`);
-  if (fail) process.exit(1);
-};
-
-await main();
+await run();

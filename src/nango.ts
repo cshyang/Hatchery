@@ -12,6 +12,8 @@
 // uncapped fetch that hangs past ~30s lets a concurrent blockConcurrencyWhile(onStart) time out and
 // reset the DO mid-turn (the partyserver lesson). Same 12s ceiling as api.ts / github.ts.
 
+import { fetchWithTimeout } from './http';
+
 const NANGO_API = 'https://api.nango.dev';
 const NANGO_FETCH_TIMEOUT_MS = 12_000;
 
@@ -32,16 +34,12 @@ function nangoBody<T>(json: unknown): T {
 }
 
 async function nangoFetch(url: string, init: RequestInit, fetchImpl: typeof fetch): Promise<Response> {
-  try {
-    return await fetchImpl(url, { ...init, signal: AbortSignal.timeout(NANGO_FETCH_TIMEOUT_MS) });
-  } catch (e) {
-    const aborted = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
-    throw new Error(
-      aborted
-        ? `Nango request timed out after ${NANGO_FETCH_TIMEOUT_MS}ms (${url}).`
-        : `Nango request failed: ${(e as Error).message}`,
-    );
-  }
+  return fetchWithTimeout(url, init, {
+    timeoutMs: NANGO_FETCH_TIMEOUT_MS,
+    timeoutMessage: `Nango request timed out after ${NANGO_FETCH_TIMEOUT_MS}ms (${url}).`,
+    failurePrefix: 'Nango request failed',
+    fetchImpl,
+  });
 }
 
 export interface StartConnectSessionArgs {

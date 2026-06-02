@@ -7,6 +7,7 @@
 // (see connections.ts → connectionTools), so the model never reaches a write directly.
 
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { fetchWithTimeout, jsonMessageOrText } from './http';
 
 const API = 'https://api.github.com';
 const UA = 'hatchery-agent'; // GitHub requires a User-Agent or returns 403.
@@ -26,22 +27,15 @@ function ghHeaders(pat: string): Record<string, string> {
 const GH_FETCH_TIMEOUT_MS = 12_000;
 
 async function ghGet(pat: string, path: string): Promise<unknown> {
-  let res: Response;
-  try {
-    res = await fetch(`${API}${path}`, { headers: ghHeaders(pat), signal: AbortSignal.timeout(GH_FETCH_TIMEOUT_MS) });
-  } catch (e) {
-    const aborted = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
-    throw new Error(aborted ? `GitHub request timed out after ${GH_FETCH_TIMEOUT_MS}ms (${path}).` : `GitHub request failed: ${(e as Error).message}`);
-  }
+  const res = await fetchWithTimeout(`${API}${path}`, { headers: ghHeaders(pat) }, {
+    timeoutMs: GH_FETCH_TIMEOUT_MS,
+    timeoutMessage: `GitHub request timed out after ${GH_FETCH_TIMEOUT_MS}ms (${path}).`,
+    failurePrefix: 'GitHub request failed',
+  });
   const text = await res.text();
   if (!res.ok) {
     // Surface a sanitized error to the model — status + GitHub's message, never the PAT.
-    let msg = text.slice(0, 200);
-    try {
-      msg = (JSON.parse(text) as { message?: string }).message ?? msg;
-    } catch {
-      /* keep raw slice */
-    }
+    const msg = jsonMessageOrText(text, 200);
     throw new Error(`GitHub ${res.status}: ${msg}`);
   }
   return text ? JSON.parse(text) : null;
@@ -194,12 +188,7 @@ export async function executeCreateIssue(
   });
   const text = await res.text();
   if (!res.ok) {
-    let msg = text.slice(0, 200);
-    try {
-      msg = (JSON.parse(text) as { message?: string }).message ?? msg;
-    } catch {
-      /* keep */
-    }
+    const msg = jsonMessageOrText(text, 200);
     throw new Error(`GitHub create issue ${res.status}: ${msg}`);
   }
   const created = JSON.parse(text) as { number: number; html_url: string };

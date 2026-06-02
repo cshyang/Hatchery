@@ -5,6 +5,7 @@
 // are isolated, and there is no hard-delete tool.
 
 import assert from 'node:assert/strict';
+import { createTestRunner } from './test-utils';
 import {
   loadSkillCatalog,
   loadActiveSkillBody,
@@ -161,8 +162,7 @@ const mkmd = (name: string, body = 'Steps here.') =>
 const invoke = (tools: ReturnType<typeof skillTools>, name: string, args: Record<string, unknown>) =>
   (tools.find((t) => t.name === name) as { execute: (a: Record<string, unknown>) => Promise<string> }).execute(args);
 
-const tests: [string, () => Promise<void>][] = [];
-const test = (n: string, f: () => Promise<void>) => tests.push([n, f]);
+const { test, run } = createTestRunner();
 
 test('catalog hides archived skills', async () => {
   const db = new FakeD1();
@@ -322,21 +322,4 @@ test('loadRunnableSkillBody: absent in both → absent', async () => {
   assert.equal(r.status, 'absent');
 });
 
-const main = async () => {
-  let pass = 0;
-  let fail = 0;
-  for (const [name, fn] of tests) {
-    try {
-      await fn();
-      console.log(`  ✓ ${name}`);
-      pass++;
-    } catch (e) {
-      console.log(`  ✗ ${name}\n    ${(e as Error).message}`);
-      fail++;
-    }
-  }
-  console.log(`\n${pass} passed, ${fail} failed`);
-  if (fail) process.exit(1);
-};
-
-await main();
+await run();
