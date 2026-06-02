@@ -1,7 +1,7 @@
 // Slack working acknowledgement invariants — run: npx tsx src/slack/ack.test.ts
 
 import assert from 'node:assert/strict';
-import { createTestRunner } from '../test-utils';
+import { createTestRunner } from '../shared/test-utils';
 import { queueWorkingAck, WORKING_ACK } from './ack';
 
 const { test, run } = createTestRunner();

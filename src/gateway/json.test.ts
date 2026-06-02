@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { readJsonOrNull } from './json';
-import { createTestRunner } from '../test-utils';
+import { createTestRunner } from '../shared/test-utils';
 
 const { test, run } = createTestRunner();
 

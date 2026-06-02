@@ -12,9 +12,9 @@ import {
   slackUserMessageEvent,
 } from '../src/slack/events';
 import { bindings, bindingBySlack, bindingByProject, agentInstanceId, autoCreateBinding, isKnownTeam } from '../src/project/bindings';
-import { normalizeSlackMessage } from '../src/canonical';
+import { normalizeSlackMessage } from '../src/shared/canonical';
 import { upsertConversationTarget } from '../src/project/conversations';
-import { claimEvent, type KVLike } from '../src/idempotency';
+import { claimEvent, type KVLike } from '../src/shared/idempotency';
 import type { D1Like } from '../src/skills/repository';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/knowledge/reflection';
 import { upsertConnection, loadConnections, connectedNotice, disconnectedNotice, disableConnectionByRef } from '../src/connections/repository';

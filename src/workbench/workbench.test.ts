@@ -1,6 +1,6 @@
 // Workbench M0 invariants — run: npx tsx src/workbench/workbench.test.ts
 import assert from 'node:assert/strict';
-import { createTestRunner } from '../test-utils';
+import { createTestRunner } from '../shared/test-utils';
 import type { D1Like } from '../skills/repository';
 import {
   claimWorkItem,

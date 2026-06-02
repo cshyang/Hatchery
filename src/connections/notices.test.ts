@@ -5,7 +5,7 @@ import type { Binding } from '../project/bindings';
 import { postConnectionNotice } from './notices';
 import type { ConversationTarget } from '../project/conversations';
 import type { D1Like } from '../skills/repository';
-import { createTestRunner } from '../test-utils';
+import { createTestRunner } from '../shared/test-utils';
 
 const { test, run } = createTestRunner();
 

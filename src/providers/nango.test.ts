@@ -3,7 +3,7 @@
 // reconciled live in the integration task (see the plan's live-probe task) — green here != Nango-correct.
 
 import assert from 'node:assert/strict';
-import { createTestRunner } from '../test-utils';
+import { createTestRunner } from '../shared/test-utils';
 import { startConnectSession, fetchToken, deleteConnection, verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook } from './nango';
 
 // A fake fetch that records the last call and returns a canned Response.

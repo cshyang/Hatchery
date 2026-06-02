@@ -3,7 +3,7 @@
 // re-processing, no loss), and the nightly gate only surfaces projects with something new.
 
 import assert from 'node:assert/strict';
-import { createTestRunner } from '../test-utils';
+import { createTestRunner } from '../shared/test-utils';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch } from './reflection';
 import type { D1Like } from '../skills/repository';
 

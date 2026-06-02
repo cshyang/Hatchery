@@ -4,7 +4,7 @@
 // names only (never a token).
 
 import assert from 'node:assert/strict';
-import { createTestRunner } from '../test-utils';
+import { createTestRunner } from '../shared/test-utils';
 import {
   parseSenderId,
   resolveUserName,

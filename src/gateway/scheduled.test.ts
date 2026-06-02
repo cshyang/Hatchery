@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { buildScheduledInput } from './scheduled';
-import { createTestRunner } from '../test-utils';
+import { createTestRunner } from '../shared/test-utils';
 import type { D1Like } from '../skills/repository';
 
 const { test, run } = createTestRunner();

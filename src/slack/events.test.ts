@@ -1,7 +1,7 @@
 // Slack Events API envelope invariants — run: npx tsx src/slack/events.test.ts
 
 import assert from 'node:assert/strict';
-import { createTestRunner } from '../test-utils';
+import { createTestRunner } from '../shared/test-utils';
 import {
   parseSlackEventEnvelope,
   slackEventId,
