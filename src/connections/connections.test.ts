@@ -6,7 +6,7 @@
 // and the D1 metadata layer (operator add without redeploy).
 
 import assert from 'node:assert/strict';
-import { createTestRunner } from '../test-utils';
+import { createTestRunner } from '../shared/test-utils';
 import {
   connectionState,
   resolveConnection,

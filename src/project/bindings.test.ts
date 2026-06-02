@@ -5,7 +5,7 @@
 // is gated to KNOWN_TEAM_IDS so "any channel" can never become "any workspace".
 
 import assert from 'node:assert/strict';
-import { createTestRunner } from '../test-utils';
+import { createTestRunner } from '../shared/test-utils';
 import {
   loadBindings,
   upsertBinding,

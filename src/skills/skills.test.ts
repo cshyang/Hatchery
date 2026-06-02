@@ -5,7 +5,7 @@
 // are isolated, and there is no hard-delete tool.
 
 import assert from 'node:assert/strict';
-import { createTestRunner } from '../test-utils';
+import { createTestRunner } from '../shared/test-utils';
 import {
   loadSkillCatalog,
   loadActiveSkillBody,

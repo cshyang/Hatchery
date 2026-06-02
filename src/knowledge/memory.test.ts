@@ -4,7 +4,7 @@
 // is project-scoped; project ISOLATION is the load-bearing security invariant, not ceremony.
 
 import assert from 'node:assert/strict';
-import { createTestRunner } from '../test-utils';
+import { createTestRunner } from '../shared/test-utils';
 import { memoryTools, loadProjectMemory, PROJECT_LIMIT, PER_ENTRY_MAX } from './memory';
 import type { D1Like } from '../skills/repository';
 

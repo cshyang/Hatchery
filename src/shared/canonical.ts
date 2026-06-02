@@ -3,7 +3,7 @@
 // adapter framework (see docs/decisions/0001: keep the type, skip the framework
 // until provider #2 earns it).
 
-import type { Binding } from './project/bindings';
+import type { Binding } from '../project/bindings';
 
 export interface CanonicalMessage {
   provider: 'slack';

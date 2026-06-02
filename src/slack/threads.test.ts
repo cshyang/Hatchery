@@ -1,6 +1,6 @@
 // Thread backscroll: fetch + render for context hydration — run: npx tsx src/slack/threads.test.ts
 import assert from 'node:assert/strict';
-import { createTestRunner } from '../test-utils';
+import { createTestRunner } from '../shared/test-utils';
 import { renderThreadBackscroll, fetchThreadReplies, type ThreadMessage } from './threads';
 
 const { test, run } = createTestRunner();
