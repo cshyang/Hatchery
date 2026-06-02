@@ -1,6 +1,6 @@
 import { createAgent, defineTool, Type, type AgentRuntimeConfig, type ToolDefinition } from '@flue/runtime';
-import { bindingByProject, parseAgentInstanceId, DEFAULT_MODEL, resolveModel } from '../../src/bindings';
-import { resolveTarget, sendToConversationTarget } from '../../src/conversations';
+import { bindingByProject, parseAgentInstanceId, DEFAULT_MODEL, resolveModel } from '../../src/project/bindings';
+import { resolveTarget, sendToConversationTarget } from '../../src/project/conversations';
 import { withToolLogging, withReplyReminder } from '../../src/observability';
 import { skillTools, loadSkillCatalog, loadActiveSkillBody, skillBody, type D1Like } from '../../src/skills';
 import { reminderTools } from '../../src/reminders';

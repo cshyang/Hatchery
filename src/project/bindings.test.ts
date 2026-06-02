@@ -1,11 +1,11 @@
-// Binding D1 cascade + auto-create invariants — run: npx tsx src/bindings.test.ts
+// Binding D1 cascade + auto-create invariants — run: npx tsx src/project/bindings.test.ts
 // Mirrors the connections D1+seed pattern: D1 rows are the live source merged OVER the
 // bindings.ts seed; the gateway auto-creates a per-channel binding (race-safe, team-allowlisted).
 // Load-bearing: the bot token is referenced by NAME (transport_token_ref), never stored; auto-create
 // is gated to KNOWN_TEAM_IDS so "any channel" can never become "any workspace".
 
 import assert from 'node:assert/strict';
-import { createTestRunner } from './test-utils';
+import { createTestRunner } from '../test-utils';
 import {
   loadBindings,
   upsertBinding,
@@ -19,7 +19,7 @@ import {
   DEFAULT_MODEL,
   type BindingRecord,
 } from './bindings';
-import type { D1Like } from './skills';
+import type { D1Like } from '../skills';
 
 // In-memory D1 fake covering only the two statements bindings.ts issues.
 interface Row {

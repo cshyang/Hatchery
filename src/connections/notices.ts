@@ -1,9 +1,9 @@
-import { bindingByProject as defaultBindingByProject, type Binding } from '../bindings';
+import { bindingByProject as defaultBindingByProject, type Binding } from '../project/bindings';
 import {
   sendToConversationTarget as defaultSendToConversationTarget,
   topLevelTargetFromBinding,
   type ConversationTarget,
-} from '../conversations';
+} from '../project/conversations';
 import type { D1Like } from '../skills';
 
 type BindingLookup = (projectId: string, db?: D1Like) => Promise<Binding | undefined>;

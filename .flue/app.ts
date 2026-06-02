@@ -11,9 +11,9 @@ import {
   slackUrlVerification,
   slackUserMessageEvent,
 } from '../src/slack/events';
-import { bindings, bindingBySlack, bindingByProject, agentInstanceId, autoCreateBinding, isKnownTeam } from '../src/bindings';
+import { bindings, bindingBySlack, bindingByProject, agentInstanceId, autoCreateBinding, isKnownTeam } from '../src/project/bindings';
 import { normalizeSlackMessage } from '../src/canonical';
-import { upsertConversationTarget } from '../src/conversations';
+import { upsertConversationTarget } from '../src/project/conversations';
 import { claimEvent, type KVLike } from '../src/idempotency';
 import type { D1Like } from '../src/skills';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/reflection';

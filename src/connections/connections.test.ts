@@ -22,7 +22,7 @@ import { buildConnectionRuntime } from './runtime';
 import { PROVIDER_CATALOG } from './catalog';
 import { GITHUB_READ_TOOL_NAMES } from '../providers/github';
 import type { D1Like } from '../skills';
-import type { Binding, ConnectionSpec } from '../bindings';
+import type { Binding, ConnectionSpec } from '../project/bindings';
 
 const GITHUB_CALL_API_TOOL_NAME = 'github_call_api';
 const NOTION_CALL_API_TOOL_NAME = 'notion_call_api';
