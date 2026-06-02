@@ -1,7 +1,7 @@
-// Workbench M0 invariants — run: npx tsx src/workbench.test.ts
+// Workbench M0 invariants — run: npx tsx src/workbench/workbench.test.ts
 import assert from 'node:assert/strict';
-import { createTestRunner } from './test-utils';
-import type { D1Like } from './skills';
+import { createTestRunner } from '../test-utils';
+import type { D1Like } from '../skills';
 import {
   claimWorkItem,
   createWorkItem,
@@ -11,9 +11,9 @@ import {
   registerArtifactRef,
   updateWorkItemStatus,
   updateWorkRun,
-} from './workbench';
-import { workbenchTools } from './workbench-tools';
-import { handleInternalWorkItemRequest } from './workbench-gateway';
+} from './repository';
+import { workbenchTools } from './tools';
+import { handleInternalWorkItemRequest } from './gateway';
 
 const { test, run } = createTestRunner();
 

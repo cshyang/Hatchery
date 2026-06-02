@@ -1,7 +1,7 @@
-import type { D1Like } from './skills';
-import type { Binding } from './bindings';
-import { agentInstanceId } from './bindings';
-import { hasMatchingSecretHeader } from './gateway-auth';
+import type { D1Like } from '../skills';
+import type { Binding } from '../bindings';
+import { agentInstanceId } from '../bindings';
+import { hasMatchingSecretHeader } from '../gateway-auth';
 import {
   WORK_ITEM_SOURCE_TYPES,
   createWorkItem,
@@ -10,7 +10,7 @@ import {
   updateWorkRun,
   type ClockAndIds,
   type WorkItem,
-} from './workbench';
+} from './repository';
 
 export interface DispatchRequest {
   agent: string;

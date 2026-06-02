@@ -24,7 +24,7 @@ import { buildScheduledInput } from '../src/scheduled';
 import { hasMatchingSecretHeader } from '../src/gateway-auth';
 import { readJsonOrNull } from '../src/gateway-json';
 import { postConnectionNotice } from '../src/connection-notices';
-import { handleInternalWorkItemRequest } from '../src/workbench-gateway';
+import { handleInternalWorkItemRequest } from '../src/workbench/gateway';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
