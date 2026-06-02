@@ -17,7 +17,7 @@
 
 import type { Binding, ConnectionSpec } from '../bindings';
 import type { D1Like } from '../skills';
-import { fetchToken } from '../nango';
+import { fetchToken } from '../providers/nango';
 
 export interface ConnectionState {
   provider: string;

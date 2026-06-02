@@ -21,7 +21,7 @@ function ghHeaders(pat: string): Record<string, string> {
   };
 }
 
-// Bound every GitHub call well under the ~30s DO-turn budget (see FETCH_TIMEOUT_MS in api.ts):
+// Bound every GitHub call well under the ~30s DO-turn budget (see FETCH_TIMEOUT_MS in generic-api.ts):
 // an uncapped fetch that hangs can drag a turn past the point where a concurrent
 // blockConcurrencyWhile(onStart) times out and resets the DO mid-turn.
 const GH_FETCH_TIMEOUT_MS = 12_000;
@@ -168,7 +168,7 @@ export const GITHUB_READ_TOOL_NAMES = [
   'github_get_file_contents',
 ] as const;
 
-// The generic "bet on intelligence" tool (Test A) now lives in src/api.ts as a provider profile —
+// The generic "bet on intelligence" tool (Test A) now lives in providers/generic-api.ts as a provider profile —
 // github is one entry in PROVIDER_API_PROFILES. The typed read tools above remain the reversible
 // fallback (apiMode: 'typed').
 

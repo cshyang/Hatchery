@@ -7,7 +7,7 @@
 // person is looked up at most once (until the TTL), and only for people the agent actually asks about.
 
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
-import { fetchWithTimeout } from './http';
+import { fetchWithTimeout } from './providers/http';
 import type { D1Like } from './skills';
 
 const SLACK_API = 'https://slack.com/api';

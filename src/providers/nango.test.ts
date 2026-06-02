@@ -1,9 +1,9 @@
-// Nango backend invariants (Hatchery M2) — run: npx tsx src/nango.test.ts
+// Nango backend invariants (Hatchery M2) — run: npx tsx src/providers/nango.test.ts
 // Fake fetch proves the CODE shape (URL, headers, body, parsing, bounds). The real WIRE shape is
 // reconciled live in the integration task (see the plan's live-probe task) — green here != Nango-correct.
 
 import assert from 'node:assert/strict';
-import { createTestRunner } from './test-utils';
+import { createTestRunner } from '../test-utils';
 import { startConnectSession, fetchToken, deleteConnection, verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook } from './nango';
 
 // A fake fetch that records the last call and returns a canned Response.

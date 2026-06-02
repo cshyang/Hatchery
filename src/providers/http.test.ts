@@ -1,7 +1,7 @@
-// Shared HTTP helper invariants — run: npx tsx src/http.test.ts
+// Shared HTTP helper invariants — run: npx tsx src/providers/http.test.ts
 import assert from 'node:assert/strict';
 import { fetchWithTimeout, jsonMessageOrText } from './http';
-import { createTestRunner } from './test-utils';
+import { createTestRunner } from '../test-utils';
 
 const { test, run } = createTestRunner();
 
