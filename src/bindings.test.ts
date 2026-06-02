@@ -5,6 +5,7 @@
 // is gated to KNOWN_TEAM_IDS so "any channel" can never become "any workspace".
 
 import assert from 'node:assert/strict';
+import { createTestRunner } from './test-utils';
 import {
   loadBindings,
   upsertBinding,
@@ -69,8 +70,7 @@ class FakeD1 implements D1Like {
   }
 }
 
-const tests: [string, () => Promise<void>][] = [];
-const test = (n: string, fn: () => Promise<void>) => tests.push([n, fn]);
+const { test, run } = createTestRunner();
 
 test('isKnownTeam: only allowlisted team ids pass', async () => {
   assert.equal(isKnownTeam('T0B6VB415TQ'), true);
@@ -257,13 +257,4 @@ test('autoCreateBinding rejects an unvalidated model pin', async () => {
   assert.equal((await loadBindings(db, 'C_ACB')).length, 0, 'no row written');
 });
 
-const main = async () => {
-  let pass = 0, fail = 0;
-  for (const [n, fn] of tests) {
-    try { await fn(); console.log(`  ✓ ${n}`); pass++; }
-    catch (e) { console.log(`  ✗ ${n}\n    ${(e as Error).message}`); fail++; }
-  }
-  console.log(`\n${pass} passed, ${fail} failed`);
-  if (fail) process.exit(1);
-};
-await main();
+await run();

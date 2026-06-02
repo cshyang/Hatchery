@@ -7,6 +7,7 @@
 // person is looked up at most once (until the TTL), and only for people the agent actually asks about.
 
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { fetchWithTimeout } from './http';
 import type { D1Like } from './skills';
 
 const SLACK_API = 'https://slack.com/api';
@@ -74,16 +75,13 @@ export async function fetchSlackProfile(
   token: string,
   userId: string,
 ): Promise<{ displayName?: string; realName?: string }> {
-  let res: Response;
-  try {
-    res = await fetch(`${SLACK_API}/users.info?user=${encodeURIComponent(userId)}`, {
-      headers: { authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-  } catch (e) {
-    const aborted = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
-    throw new Error(aborted ? `users.info timed out after ${FETCH_TIMEOUT_MS}ms` : `users.info failed: ${(e as Error).message}`);
-  }
+  const res = await fetchWithTimeout(`${SLACK_API}/users.info?user=${encodeURIComponent(userId)}`, {
+    headers: { authorization: `Bearer ${token}` },
+  }, {
+    timeoutMs: FETCH_TIMEOUT_MS,
+    timeoutMessage: `users.info timed out after ${FETCH_TIMEOUT_MS}ms`,
+    failurePrefix: 'users.info failed',
+  });
   const data = (await res.json()) as SlackUsersInfo;
   if (!data.ok) throw new Error(`users.info: ${data.error ?? 'unknown_error'}`);
   const p = data.user?.profile;

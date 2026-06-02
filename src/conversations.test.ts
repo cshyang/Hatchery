@@ -2,6 +2,7 @@
 // agent only receives Hatchery's stable conversationId and resolves the target at send time.
 
 import assert from 'node:assert/strict';
+import { createTestRunner } from './test-utils';
 import type { Binding } from './bindings';
 import {
   loadConversationTarget,
@@ -131,8 +132,7 @@ const binding: Binding = {
   status: 'active',
 };
 
-const tests: [string, () => Promise<void>][] = [];
-const test = (n: string, f: () => Promise<void>) => tests.push([n, f]);
+const { test, run } = createTestRunner();
 
 test('Slack normalization separates stable conversation id from native thread id', async () => {
   const msg = normalizeSlackMessage(
@@ -242,21 +242,4 @@ test('resolveTarget: top-level for empty conversationId, stored target otherwise
   assert.equal(await resolveTarget(undefined, binding, 'demo', 'default', 'slack:T1:C1:100.000'), null);
 });
 
-const main = async () => {
-  let pass = 0;
-  let fail = 0;
-  for (const [name, fn] of tests) {
-    try {
-      await fn();
-      console.log(`  ✓ ${name}`);
-      pass++;
-    } catch (e) {
-      console.log(`  ✗ ${name}\n    ${(e as Error).message}`);
-      fail++;
-    }
-  }
-  console.log(`\n${pass} passed, ${fail} failed`);
-  if (fail) process.exit(1);
-};
-
-await main();
+await run();

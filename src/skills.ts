@@ -55,6 +55,17 @@ export function skillBody(md: string): string {
   return (fence ? md.slice(fence[0].length) : md).trim();
 }
 
+function scopedSkillRows<T extends { project_id: string }>(
+  rows: T[] | undefined,
+  projectId: string,
+): { channel?: T; global?: T } {
+  const all = rows ?? [];
+  return {
+    channel: all.find((r) => r.project_id === projectId),
+    global: all.find((r) => r.project_id === GLOBAL_PROJECT_ID),
+  };
+}
+
 // L1: the cheap catalog (names + descriptions of ACTIVE skills) injected into the system prompt.
 // Merges the shared __global__ baseline with the channel's own skills; the channel WINS on name.
 export async function loadSkillCatalog(db: D1Like, projectId: string): Promise<{ name: string; description: string }[]> {
@@ -80,9 +91,8 @@ export async function loadActiveSkillBody(db: D1Like, projectId: string, name: s
     )
     .bind(name, GLOBAL_PROJECT_ID, projectId)
     .all<{ body_md: string; project_id: string }>();
-  const channel = (results ?? []).find((r) => r.project_id === projectId);
+  const { channel, global } = scopedSkillRows(results, projectId);
   if (channel) return channel.body_md;
-  const global = (results ?? []).find((r) => r.project_id === GLOBAL_PROJECT_ID);
   return global?.body_md ?? null;
 }
 
@@ -104,9 +114,7 @@ export async function loadRunnableSkillBody(db: D1Like, projectId: string, name:
     .prepare('SELECT body_md, state, project_id FROM skills WHERE name=? AND project_id IN (?, ?)')
     .bind(name, GLOBAL_PROJECT_ID, projectId)
     .all<{ body_md: string; state: string; project_id: string }>();
-  const rows = results ?? [];
-  const channel = rows.find((r) => r.project_id === projectId);
-  const global = rows.find((r) => r.project_id === GLOBAL_PROJECT_ID);
+  const { channel, global } = scopedSkillRows(results, projectId);
   // channel active override wins
   if (channel && channel.state === 'active') return { status: 'active', body: channel.body_md };
   // channel archived but a global active exists → run global (re-inherit baseline)

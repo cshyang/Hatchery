@@ -1,10 +1,10 @@
 // Cross-thread Connect + catch-up retrieval — run: npx tsx src/search.test.ts
 import assert from 'node:assert/strict';
+import { createTestRunner } from './test-utils';
 import { buildSearchTerms, parseConversationId, searchRelatedThreads, recentThreads } from './search';
 import type { D1Like } from './skills';
 
-const tests: [string, () => Promise<void>][] = [];
-const test = (n: string, f: () => Promise<void>) => tests.push([n, f]);
+const { test, run } = createTestRunner();
 
 // ── helper unit tests ───────────────────────────────────────────────────────
 test('buildSearchTerms: lowercases, drops punctuation/short tokens, dedupes', async () => {
@@ -173,13 +173,4 @@ test('search_channel: no query → recent activity (catch-up mode)', async () =>
   assert.match(out, /latest channel chatter/);
 });
 
-const main = async () => {
-  let pass = 0, fail = 0;
-  for (const [n, fn] of tests) {
-    try { await fn(); console.log(`  ✓ ${n}`); pass++; }
-    catch (e) { console.log(`  ✗ ${n}\n    ${(e as Error).message}`); fail++; }
-  }
-  console.log(`\n${pass} passed, ${fail} failed`);
-  if (fail) process.exit(1);
-};
-await main();
+await run();

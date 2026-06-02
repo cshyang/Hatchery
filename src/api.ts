@@ -15,6 +15,7 @@
 //      tool DESCRIPTION (loads only when the tool exists, right where the model decides to call).
 
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { fetchWithTimeout, jsonMessageOrText } from './http';
 
 export interface ProviderApiProfile {
   provider: string;
@@ -117,26 +118,14 @@ export function genericApiTool(profile: ProviderApiProfile, secret: string | (()
         headers['content-type'] = 'application/json';
         init.body = String(body);
       }
-      init.signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-      let res: Response;
-      try {
-        res = await fetch(`${profile.baseUrl}${p}`, init);
-      } catch (e) {
-        const aborted = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
-        throw new Error(
-          aborted
-            ? `${profile.provider} request timed out after ${FETCH_TIMEOUT_MS}ms (${m} ${p}). Try a narrower call.`
-            : `${profile.provider} request failed: ${(e as Error).message}`,
-        );
-      }
+      const res = await fetchWithTimeout(`${profile.baseUrl}${p}`, init, {
+        timeoutMs: FETCH_TIMEOUT_MS,
+        timeoutMessage: `${profile.provider} request timed out after ${FETCH_TIMEOUT_MS}ms (${m} ${p}). Try a narrower call.`,
+        failurePrefix: `${profile.provider} request failed`,
+      });
       const text = await res.text();
       if (!res.ok) {
-        let msg = text.slice(0, 300);
-        try {
-          msg = (JSON.parse(text) as { message?: string }).message ?? msg;
-        } catch {
-          /* keep raw slice */
-        }
+        const msg = jsonMessageOrText(text, 300);
         throw new Error(`${profile.provider} ${res.status}: ${msg}`);
       }
       const out = text ?? '';

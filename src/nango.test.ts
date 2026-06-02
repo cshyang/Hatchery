@@ -3,6 +3,7 @@
 // reconciled live in the integration task (see the plan's live-probe task) — green here != Nango-correct.
 
 import assert from 'node:assert/strict';
+import { createTestRunner } from './test-utils';
 import { startConnectSession, fetchToken, deleteConnection, verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook } from './nango';
 
 // A fake fetch that records the last call and returns a canned Response.
@@ -15,8 +16,7 @@ function fakeFetch(responder: (url: string, init: RequestInit) => Response) {
   return { fn, calls };
 }
 
-const tests: [string, () => Promise<void>][] = [];
-const test = (name: string, fn: () => Promise<void>) => tests.push([name, fn]);
+const { test, run } = createTestRunner();
 
 test('startConnectSession: POSTs to /connect/sessions with Bearer + allowed_integrations + tags.end_user_id, returns connect_link', async () => {
   const { fn, calls } = fakeFetch(() =>
@@ -140,13 +140,4 @@ test('parseNangoDeletionWebhook: extracts connectionId on auth/deletion; null ot
   assert.equal(parseNangoDeletionWebhook('not json'), null, 'garbage → null');
 });
 
-const main = async () => {
-  let pass = 0, fail = 0;
-  for (const [name, fn] of tests) {
-    try { await fn(); console.log(`  ✓ ${name}`); pass++; }
-    catch (e) { console.log(`  ✗ ${name}\n    ${(e as Error).message}`); fail++; }
-  }
-  console.log(`\n${pass} passed, ${fail} failed`);
-  if (fail) process.exit(1);
-};
-await main();
+await run();
