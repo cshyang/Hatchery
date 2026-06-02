@@ -21,6 +21,17 @@ import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
 // channel agent can only ever write its OWN project's skills (save/archive/restore stay channel-scoped),
 // so it can never edit the shared baseline.
 export const GLOBAL_PROJECT_ID = '__global__';
+export const PROTECTED_PLATFORM_SKILL_NAMES = new Set(['hatchery']);
+
+export function isProtectedPlatformSkillName(name: string): boolean {
+  return PROTECTED_PLATFORM_SKILL_NAMES.has(name);
+}
+
+function assertCanMutateSkill(projectId: string, name: string): void {
+  if (projectId !== GLOBAL_PROJECT_ID && isProtectedPlatformSkillName(name)) {
+    throw new Error(`"${name}" is a protected platform skill; use load_skill to read it, but do not shadow or mutate it.`);
+  }
+}
 
 // Minimal D1 surface we use (avoids pulling all of @cloudflare/workers-types here).
 export interface D1Like {
@@ -143,6 +154,7 @@ export function skillTools(db: D1Like, projectId: string): ToolDefinition[] {
       const { name, description } = parseSkillFrontmatter(md);
       if (!name || !description) throw new Error('skill_md needs frontmatter with both `name` and `description`.');
       if (!SKILL_NAME.test(name)) throw new Error(`skill name must be lowercase-kebab (a-z 0-9 -); got "${name}".`);
+      assertCanMutateSkill(projectId, name);
       if (description.length > MAX_DESCRIPTION) {
         throw new Error(`description must be ≤ ${MAX_DESCRIPTION} chars (got ${description.length}).`);
       }
@@ -184,6 +196,7 @@ export function skillTools(db: D1Like, projectId: string): ToolDefinition[] {
       'deleting — for a skill that is stale, wrong, or has been folded into a broader one.',
     parameters: Type.Object({ name: Type.String({ description: 'Skill name to archive.' }) }),
     async execute({ name }) {
+      assertCanMutateSkill(projectId, String(name));
       const now = Date.now();
       const res = (await db
         .prepare(
@@ -202,6 +215,7 @@ export function skillTools(db: D1Like, projectId: string): ToolDefinition[] {
     description: 'Bring back a skill you archived, by name — it returns to your skill list and can run again.',
     parameters: Type.Object({ name: Type.String({ description: 'Archived skill name to restore.' }) }),
     async execute({ name }) {
+      assertCanMutateSkill(projectId, String(name));
       const now = Date.now();
       const res = (await db
         .prepare(
