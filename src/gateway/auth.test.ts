@@ -1,8 +1,8 @@
-// Gateway auth helper invariants — run: npx tsx src/gateway-auth.test.ts
+// Gateway auth helper invariants — run: npx tsx src/gateway/auth.test.ts
 
 import assert from 'node:assert/strict';
-import { hasMatchingSecretHeader } from './gateway-auth';
-import { createTestRunner } from './test-utils';
+import { hasMatchingSecretHeader } from './auth';
+import { createTestRunner } from '../test-utils';
 
 const { test, run } = createTestRunner();
 

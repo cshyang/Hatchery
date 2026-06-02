@@ -1,9 +1,9 @@
-// Scheduled job input builder invariants — run: npx tsx src/scheduled.test.ts
+// Scheduled job input builder invariants — run: npx tsx src/gateway/scheduled.test.ts
 
 import assert from 'node:assert/strict';
 import { buildScheduledInput } from './scheduled';
-import { createTestRunner } from './test-utils';
-import type { D1Like } from './skills';
+import { createTestRunner } from '../test-utils';
+import type { D1Like } from '../skills';
 
 const { test, run } = createTestRunner();
 

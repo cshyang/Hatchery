@@ -1,4 +1,4 @@
-import { loadRunnableSkillBody, type D1Like } from './skills';
+import { loadRunnableSkillBody, type D1Like } from '../skills';
 
 export interface ScheduledPayload {
   skill?: string;

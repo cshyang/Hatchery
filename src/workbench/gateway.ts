@@ -1,7 +1,7 @@
 import type { D1Like } from '../skills';
 import type { Binding } from '../bindings';
 import { agentInstanceId } from '../bindings';
-import { hasMatchingSecretHeader } from '../gateway-auth';
+import { hasMatchingSecretHeader } from '../gateway/auth';
 import {
   WORK_ITEM_SOURCE_TYPES,
   createWorkItem,

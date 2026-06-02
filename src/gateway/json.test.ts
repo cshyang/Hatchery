@@ -1,8 +1,8 @@
-// Gateway JSON helper invariants — run: npx tsx src/gateway-json.test.ts
+// Gateway JSON helper invariants — run: npx tsx src/gateway/json.test.ts
 
 import assert from 'node:assert/strict';
-import { readJsonOrNull } from './gateway-json';
-import { createTestRunner } from './test-utils';
+import { readJsonOrNull } from './json';
+import { createTestRunner } from '../test-utils';
 
 const { test, run } = createTestRunner();
 
