@@ -8,6 +8,7 @@ import { buildInstructions } from '../../src/prompt';
 import { loadProjectMemory, memoryTools, renderMemory } from '../../src/memory';
 import { userTools } from '../../src/users';
 import { searchTools } from '../../src/search';
+import { workbenchTools } from '../../src/workbench-tools';
 import { logMessage } from '../../src/reflection';
 import { buildConnectionRuntime } from '../../src/connection-runtime';
 
@@ -127,6 +128,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     ...(db ? memoryTools(db, projectId) : []),
     ...userTools(db, botToken),
     ...(db ? searchTools(db, projectId) : []),
+    ...(db ? workbenchTools(db, projectId) : []),
     ...connectionRuntime.tools,
   ];
 

@@ -24,6 +24,7 @@ import { buildScheduledInput } from '../src/scheduled';
 import { hasMatchingSecretHeader } from '../src/gateway-auth';
 import { readJsonOrNull } from '../src/gateway-json';
 import { postConnectionNotice } from '../src/connection-notices';
+import { handleInternalWorkItemRequest } from '../src/workbench-gateway';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -124,6 +125,23 @@ app.post('/__internal/scheduled', async (c) => {
     input,
   });
   return c.json({ dispatched: true, jobId: body.jobId, skill: input.skill ?? null });
+});
+
+// Internal workbench intake. Future Linear/Slack/manual adapters call this to create a durable
+// work item. Dispatch is tracked on a work_run because Flue dispatch is an external side effect,
+// not part of the D1 write.
+app.post('/__internal/work-items', async (c) => {
+  const result = await handleInternalWorkItemRequest(
+    {
+      db: c.env.DB,
+      expectedToken: c.env.HEARTBEAT_TOKEN,
+      actualToken: c.req.header('x-hatchery-token'),
+      body: await readJsonOrNull(() => c.req.json()),
+    },
+    { bindingByProject, dispatch },
+  );
+  if (result.status === 404) return c.body(null, 404);
+  return c.json(result.body ?? {}, result.status as 200 | 400 | 500);
 });
 
 // Nightly REM: the ticker's nightly cron pokes this. The GATE is cheap SQL (projects with
