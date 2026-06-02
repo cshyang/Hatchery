@@ -249,6 +249,29 @@ test('toolset has no hard-delete', async () => {
   assert.ok(!names.includes('delete_skill'), 'delete_skill must not exist — archive is the destructive ceiling');
 });
 
+test('project skills cannot shadow protected platform self-knowledge', async () => {
+  const db = new FakeD1();
+  const base = { description: 'Use when testing hatchery.', state: 'active', created_by: 'seed', updated_by: 'seed', created_at: 1, updated_at: 1, archived_at: null };
+  db.rows.push({ project_id: '__global__', name: 'hatchery', body_md: mkmd('hatchery', 'GLOBAL'), ...base });
+
+  await assert.rejects(
+    () => invoke(skillTools(db, 'P'), 'save_skill', { skill_md: mkmd('hatchery', 'LOCAL') }),
+    /protected platform skill/,
+  );
+  assert.equal(await loadActiveSkillBody(db, 'P', 'hatchery'), mkmd('hatchery', 'GLOBAL'));
+});
+
+test('project skills cannot restore a protected local override', async () => {
+  const db = new FakeD1();
+  const base = { description: 'Use when testing hatchery.', created_by: 'agent', updated_by: 'agent', created_at: 1, updated_at: 1 };
+  db.rows.push({ project_id: 'P', name: 'hatchery', body_md: mkmd('hatchery', 'STALE LOCAL'), state: 'archived', archived_at: 2, ...base });
+
+  await assert.rejects(
+    () => invoke(skillTools(db, 'P'), 'restore_skill', { name: 'hatchery' }),
+    /protected platform skill/,
+  );
+});
+
 test('catalog merges __global__ with the channel; channel wins on name', async () => {
   const db = new FakeD1();
   const base = { description: 'd', body_md: 'b', state: 'active', created_by: 'seed', updated_by: 'seed', created_at: 1, updated_at: 1, archived_at: null };
