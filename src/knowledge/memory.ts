@@ -20,7 +20,7 @@
 // scanning (the real defense is the framing in renderMemory + tool-bound FUNCTION).
 
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
-import type { D1Like } from './skills';
+import type { D1Like } from '../skills';
 
 // Budget counts RENDERED size (fact + the `[id] ` prefix + a newline), not raw fact text, so
 // it reflects what actually lands in context. The fixed block header is excluded — it carries

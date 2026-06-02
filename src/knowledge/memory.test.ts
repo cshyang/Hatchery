@@ -1,12 +1,12 @@
-// Memory invariants — run: npm test  (npx tsx src/memory.test.ts)
+// Memory invariants — run: npm test  (npx tsx src/knowledge/memory.test.ts)
 //
-// Exercises src/memory.ts against an in-memory D1 fake (no workers runtime needed). v1 memory
+// Exercises knowledge/memory.ts against an in-memory D1 fake (no workers runtime needed). v1 memory
 // is project-scoped; project ISOLATION is the load-bearing security invariant, not ceremony.
 
 import assert from 'node:assert/strict';
-import { createTestRunner } from './test-utils';
+import { createTestRunner } from '../test-utils';
 import { memoryTools, loadProjectMemory, PROJECT_LIMIT, PER_ENTRY_MAX } from './memory';
-import type { D1Like } from './skills';
+import type { D1Like } from '../skills';
 
 interface Row {
   id: number;

@@ -3,9 +3,9 @@
 // re-processing, no loss), and the nightly gate only surfaces projects with something new.
 
 import assert from 'node:assert/strict';
-import { createTestRunner } from './test-utils';
+import { createTestRunner } from '../test-utils';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch } from './reflection';
-import type { D1Like } from './skills';
+import type { D1Like } from '../skills';
 
 interface MsgRow { id: number; project_id: string; conversation_id: string; sender_id: string; role: string; text: string; ambient: number; created_at: number; }
 

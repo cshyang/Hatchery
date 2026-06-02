@@ -1,10 +1,10 @@
-// User name resolution invariants — run: npx tsx src/users.test.ts
+// User name resolution invariants — run: npx tsx src/knowledge/users.test.ts
 // Load-bearing: parse the senderId shape; cache-first (no Slack call on a fresh hit); TTL expiry
 // re-fetches; a non-user id (agent/unknown) resolves to null without any lookup; the cache stores
 // names only (never a token).
 
 import assert from 'node:assert/strict';
-import { createTestRunner } from './test-utils';
+import { createTestRunner } from '../test-utils';
 import {
   parseSenderId,
   resolveUserName,
@@ -13,7 +13,7 @@ import {
   profileLabel,
   userTools,
 } from './users';
-import type { D1Like } from './skills';
+import type { D1Like } from '../skills';
 
 interface Row {
   [k: string]: unknown;

@@ -19,7 +19,7 @@ export interface BuildInstructionsOptions {
   personality: string | null;
   /** L1 skill catalog: names + descriptions, sorted by name. Rendered near the end (semi-volatile). */
   catalog: { name: string; description: string }[];
-  /** Pre-rendered "WHAT YOU REMEMBER" block (see src/memory.ts), or null when there's nothing to show.
+  /** Pre-rendered "WHAT YOU REMEMBER" block (see knowledge/memory.ts), or null when there's nothing to show.
    *  Passed as an opaque string so this assembler stays pure; it's the most volatile block (changes
    *  whenever memory changes), so it goes LAST. */
   memoryBlock?: string | null;
