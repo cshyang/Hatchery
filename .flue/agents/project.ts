@@ -9,18 +9,7 @@ import { loadProjectMemory, memoryTools, renderMemory } from '../../src/memory';
 import { userTools } from '../../src/users';
 import { searchTools } from '../../src/search';
 import { logMessage } from '../../src/reflection';
-import {
-  connectionState,
-  resolveConnection,
-  connectionTools,
-  connectionsBlock,
-  loadConnectionSpecs,
-  requestConnectionTool,
-  disconnectConnectionTool,
-  type ConnectionState,
-  type ResolvedConnection,
-} from '../../src/connections';
-import { PROVIDER_CATALOG } from '../../src/provider-catalog';
+import { buildConnectionRuntime } from '../../src/connection-runtime';
 
 // The project agent. Addressed at /agents/project/<id>, id = "project:<projectId>:agent:<slug>"
 // (slug = "default" until a channel hosts multiple personas). Each instance is a persistent
@@ -69,37 +58,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   const projectMem = db ? await loadProjectMemory(db, projectId).catch(() => []) : [];
   const memoryBlock = renderMemory(projectMem);
 
-  // Connections (ADR 0003): which external services this project can reach. Each connection is a
-  // binding spec naming the Worker secret that holds the provider's token (like the Slack token).
-  // The initializer reads connection state from the binding + env, resolves each CONNECTED
-  // provider's token, and hands it to connectionTools, which contributes that provider's tools
-  // (v2a = reads only). Tool visibility = connection state (gating). No secret missing → that
-  // provider is simply "not connected"; never a broken agent.
-  // Specs come from D1 (live, operator-provisioned) merged over the binding seed — so a connection
-  // can be added/changed without a redeploy. .catch keeps a D1 hiccup from breaking the agent.
-  const connSpecs = await loadConnectionSpecs(db, binding).catch(() => binding.connections ?? []);
-  const connState: ConnectionState[] = connectionState(connSpecs, env);
-  const connSecrets: Record<string, ResolvedConnection> = {};
-  for (const s of connState) {
-    if (s.status !== 'connected') continue;
-    const resolved = resolveConnection(connSpecs, env, s.provider);
-    if (resolved) connSecrets[s.provider] = resolved;
-  }
-  // request_connection is a REQUEST (not a connected-provider tool), so it's always available when we
-  // can actually start a session: DB present (to eventually store the row via the webhook) AND the
-  // platform key present (no broken tool when Nango isn't configured). Mirrors how skill tools are
-  // always-on when a DB exists.
-  const nangoSecretKey = typeof env.NANGO_SECRET_KEY === 'string' ? env.NANGO_SECRET_KEY : '';
-  const canRequestConnect = !!db && !!nangoSecretKey;
-  // request_connection (always available when connectable) + disconnect_connection (the in-Slack
-  // revoke — the only disconnect path a non-operator has). Both gated on db + the Nango platform key;
-  // both no-secret-param. `db &&` in the spread narrows db to non-undefined for disconnect's signature.
-  const nangoTools =
-    canRequestConnect && db
-      ? [requestConnectionTool({ nangoSecretKey, projectId }), disconnectConnectionTool({ nangoSecretKey, projectId, db })]
-      : [];
-
-  const connBlock = connState.length || canRequestConnect ? connectionsBlock(connState, PROVIDER_CATALOG, canRequestConnect) : null;
+  const connectionRuntime = await buildConnectionRuntime({ db, binding, env, projectId });
 
   const replyToConversation = defineTool({
     name: 'reply_to_conversation',
@@ -168,8 +127,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     ...(db ? memoryTools(db, projectId) : []),
     ...userTools(db, botToken),
     ...(db ? searchTools(db, projectId) : []),
-    ...nangoTools,
-    ...connectionTools(connState, connSecrets),
+    ...connectionRuntime.tools,
   ];
 
   return {
@@ -179,7 +137,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       personality: personality ? skillBody(personality) : null,
       catalog,
       memoryBlock,
-      connectionsBlock: connBlock,
+      connectionsBlock: connectionRuntime.connectionsBlock,
     }),
     // withReplyReminder is OUTER (logs capture the original result; the model gets result+reminder).
     tools: tools.map(withToolLogging).map(withReplyReminder),
