@@ -8,7 +8,7 @@ import {
   requestConnectionTool,
 } from './tools';
 import { PROVIDER_CATALOG } from './catalog';
-import type { D1Like } from '../skills';
+import type { D1Like } from '../skills/repository';
 
 export interface ConnectionRuntime {
   tools: ToolDefinition[];

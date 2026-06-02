@@ -13,7 +13,7 @@ import {
   type ConversationTarget,
 } from './conversations';
 import { normalizeSlackMessage } from '../canonical';
-import type { D1Like } from '../skills';
+import type { D1Like } from '../skills/repository';
 
 interface TargetRow {
   project_id: string;

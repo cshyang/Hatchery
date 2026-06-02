@@ -8,7 +8,7 @@
 
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
 import { fetchWithTimeout } from '../providers/http';
-import type { D1Like } from '../skills';
+import type { D1Like } from '../skills/repository';
 
 const SLACK_API = 'https://slack.com/api';
 const FETCH_TIMEOUT_MS = 8000; // bound the users.info call well under the DO turn budget

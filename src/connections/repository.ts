@@ -16,7 +16,7 @@
 //     vault — built only when that pain is real (the crypto.ts version lives in git history).
 
 import type { Binding, ConnectionSpec } from '../project/bindings';
-import type { D1Like } from '../skills';
+import type { D1Like } from '../skills/repository';
 import { fetchToken } from '../providers/nango';
 
 export interface ConnectionState {

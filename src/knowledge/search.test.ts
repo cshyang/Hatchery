@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../test-utils';
 import { buildSearchTerms, parseConversationId, searchRelatedThreads, recentThreads } from './search';
-import type { D1Like } from '../skills';
+import type { D1Like } from '../skills/repository';
 
 const { test, run } = createTestRunner();
 

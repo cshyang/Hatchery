@@ -19,7 +19,7 @@ import {
   DEFAULT_MODEL,
   type BindingRecord,
 } from './bindings';
-import type { D1Like } from '../skills';
+import type { D1Like } from '../skills/repository';
 
 // In-memory D1 fake covering only the two statements bindings.ts issues.
 interface Row {

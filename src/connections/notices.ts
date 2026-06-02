@@ -4,7 +4,7 @@ import {
   topLevelTargetFromBinding,
   type ConversationTarget,
 } from '../project/conversations';
-import type { D1Like } from '../skills';
+import type { D1Like } from '../skills/repository';
 
 type BindingLookup = (projectId: string, db?: D1Like) => Promise<Binding | undefined>;
 type NoticeSender = (env: Record<string, unknown>, target: ConversationTarget, text: string) => Promise<void>;

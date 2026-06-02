@@ -21,7 +21,7 @@ import { connectionTools, connectionsBlock, requestConnectionTool, disconnectCon
 import { buildConnectionRuntime } from './runtime';
 import { PROVIDER_CATALOG } from './catalog';
 import { GITHUB_READ_TOOL_NAMES } from '../providers/github';
-import type { D1Like } from '../skills';
+import type { D1Like } from '../skills/repository';
 import type { Binding, ConnectionSpec } from '../project/bindings';
 
 const GITHUB_CALL_API_TOOL_NAME = 'github_call_api';
