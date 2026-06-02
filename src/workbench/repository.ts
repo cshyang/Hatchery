@@ -16,7 +16,7 @@ export type WorkItemStatus = (typeof WORK_ITEM_STATUSES)[number];
 export const MODEL_WORK_ITEM_STATUSES = ['running', 'waiting_approval', 'blocked', 'completed', 'failed'] as const;
 export type ModelWorkItemStatus = (typeof MODEL_WORK_ITEM_STATUSES)[number];
 
-export const WORK_RUNNERS = ['flue', 'e2b', 'trigger'] as const;
+export const WORK_RUNNERS = ['flue', 'e2b', 'trigger', 'coding_webhook'] as const;
 export type WorkRunner = (typeof WORK_RUNNERS)[number];
 
 export const WORK_RUN_STATUSES = ['pending', 'running', 'completed', 'failed', 'cancelled'] as const;
@@ -218,7 +218,7 @@ export async function getWorkItem(db: D1Like, projectId: string, id: string): Pr
   return row ? rowToWorkItem(row) : null;
 }
 
-async function getWorkItemById(db: D1Like, id: string): Promise<WorkItem | null> {
+export async function getWorkItemById(db: D1Like, id: string): Promise<WorkItem | null> {
   const row = await db
     .prepare(
       `SELECT id, project_id, parent_id, source_type, source_id, dedupe_key, title, body, status, priority,

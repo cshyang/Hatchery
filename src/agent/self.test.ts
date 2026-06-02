@@ -57,7 +57,7 @@ test('self_status tool returns the manifest as formatted JSON', async () => {
     projectId: 'P',
     agentSlug: 'helper',
     model: 'gpt-test',
-    hasDb: false,
+    hasDb: true,
     hasTicker: true,
     hasHeartbeatToken: true,
     hasBotToken: false,
@@ -70,7 +70,7 @@ test('self_status tool returns the manifest as formatted JSON', async () => {
 
   const parsed = JSON.parse(await invoke(tool));
   assert.equal(parsed.identity.projectId, 'P');
-  assert.equal(parsed.capabilities.memory.enabled, false);
+  assert.equal(parsed.capabilities.memory.enabled, true);
   assert.equal(parsed.capabilities.reminders.enabled, true);
   assert.equal(parsed.capabilities.sourceEvolution.enabled, true);
   assert.deepEqual(parsed.capabilities.sourceEvolution.tools, ['propose_self_change']);

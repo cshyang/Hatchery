@@ -10,6 +10,7 @@ import { loadProjectMemory, memoryTools, renderMemory } from '../../src/knowledg
 import { userTools } from '../../src/knowledge/users';
 import { searchTools } from '../../src/knowledge/search';
 import { workbenchTools } from '../../src/workbench/tools';
+import { sourceChangeTools } from '../../src/workbench/source-change';
 import { logMessage } from '../../src/knowledge/reflection';
 import { buildConnectionRuntime } from '../../src/connections/runtime';
 
@@ -121,6 +122,8 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   // Bot token (for resolving Slack user names via users.info). Same ref the reply path uses.
   const botToken = env[binding.transportTokenRef] as string | undefined;
   const model = resolveModel(binding.model);
+  const codingRunnerUrl = typeof env.CODING_RUNNER_URL === 'string' ? env.CODING_RUNNER_URL : '';
+  const workbenchRunnerToken = typeof env.WORKBENCH_RUNNER_TOKEN === 'string' ? env.WORKBENCH_RUNNER_TOKEN : '';
 
   const tools: ToolDefinition[] = [
     replyToConversation,
@@ -133,6 +136,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       hasTicker: !!ticker,
       hasHeartbeatToken: !!heartbeatToken,
       hasBotToken: !!botToken,
+      hasCodingRunner: !!codingRunnerUrl && !!workbenchRunnerToken,
       canRequestConnections: connectionRuntime.canRequestConnections,
       providerCatalog: connectionRuntime.providerCatalog,
       connectionState: connectionRuntime.state,
@@ -144,6 +148,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     ...userTools(db, botToken),
     ...(db ? searchTools(db, projectId) : []),
     ...(db ? workbenchTools(db, projectId) : []),
+    ...(db ? sourceChangeTools({ db, projectId, runnerUrl: codingRunnerUrl, runnerToken: workbenchRunnerToken }) : []),
     ...connectionRuntime.tools,
   ];
 

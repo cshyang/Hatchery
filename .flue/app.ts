@@ -25,6 +25,7 @@ import { hasMatchingSecretHeader } from '../src/gateway/auth';
 import { readJsonOrNull } from '../src/gateway/json';
 import { postConnectionNotice } from '../src/connections/notices';
 import { handleInternalWorkItemRequest } from '../src/workbench/gateway';
+import { handleSourceChangeRunCallback } from '../src/workbench/source-change';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -35,6 +36,8 @@ interface Env {
   SLACK_SIGNING_SECRET?: string;
   SLACK_EVENTS?: KVLike; // KV namespace for event_id idempotency
   HEARTBEAT_TOKEN?: string; // shared secret guarding the /__heartbeat trigger
+  WORKBENCH_RUNNER_TOKEN?: string; // dedicated secret for source-change runner callbacks
+  CODING_RUNNER_URL?: string; // generic source-change runner dispatch endpoint
   ADMIN_CONNECTIONS_TOKEN?: string; // OWN secret guarding /__admin/connections (ADR D11 — NOT the heartbeat token)
   NANGO_SECRET_KEY?: string; // platform Bearer for the Nango API (create session / fetch token)
   NANGO_WEBHOOK_SECRET?: string; // HMAC signing key to verify inbound Nango auth webhooks
@@ -139,6 +142,22 @@ app.post('/__internal/work-items', async (c) => {
       body: await readJsonOrNull(() => c.req.json()),
     },
     { bindingByProject, dispatch },
+  );
+  if (result.status === 404) return c.body(null, 404);
+  return c.json(result.body ?? {}, result.status as 200 | 400 | 500);
+});
+
+// Generic coding-runner callback. The runner edits code and opens PRs elsewhere; this route only
+// records branch/PR/CI/deploy metadata back into the workbench. Dedicated token on purpose: runner
+// reporting is not scheduler/heartbeat authority.
+app.post('/__internal/source-change-runs', async (c) => {
+  const result = await handleSourceChangeRunCallback(
+    {
+      db: c.env.DB,
+      expectedToken: c.env.WORKBENCH_RUNNER_TOKEN,
+      actualToken: c.req.header('x-hatchery-runner-token'),
+      body: await readJsonOrNull(() => c.req.json()),
+    },
   );
   if (result.status === 404) return c.body(null, 404);
   return c.json(result.body ?? {}, result.status as 200 | 400 | 500);

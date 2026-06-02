@@ -10,6 +10,7 @@ export interface SelfStatusInput {
   hasTicker: boolean;
   hasHeartbeatToken: boolean;
   hasBotToken: boolean;
+  hasCodingRunner: boolean;
   canRequestConnections: boolean;
   providerCatalog: ProviderCatalogEntry[];
   connectionState: ConnectionState[];
@@ -60,6 +61,13 @@ export function buildSelfStatus(input: SelfStatusInput) {
       memory: capability(input.hasDb, ['save_memory', 'update_memory', 'forget_memory'], 'Project facts are stored in D1.'),
       search: capability(input.hasDb, ['search_channel'], 'Searches prior channel/thread transcripts stored for this project.'),
       workbench: capability(input.hasDb, ['create_work_item', 'list_work_items', 'get_work_item', 'update_work_item'], 'Durable work items are stored in D1.'),
+      sourceEvolution: capability(
+        input.hasDb,
+        ['propose_self_change', ...(input.hasCodingRunner ? ['dispatch_coding_run'] : [])],
+        input.hasCodingRunner
+          ? 'Source-code change proposals can be recorded and dispatched to the configured generic coding runner.'
+          : 'Source-code change proposals can be recorded; coding-run dispatch is unavailable until CODING_RUNNER_URL and WORKBENCH_RUNNER_TOKEN are configured.',
+      ),
       userLookup: capability(input.hasDb || input.hasBotToken, ['resolve_user'], 'Resolves Slack user ids via cache and, when available, Slack users.info.'),
       connections: capability(
         input.connectionToolNames.length > 0 || input.canRequestConnections,
@@ -81,6 +89,7 @@ export function buildSelfStatus(input: SelfStatusInput) {
       'This Durable Object agent has no filesystem or shell access.',
       'No raw environment access; Worker secrets are resolved only by trusted broker/tool code.',
       'Repository/source inspection requires a connected provider such as GitHub; it is not VM-style self-introspection.',
+      'Source-code evolution happens through workbench proposals, an external coding runner, PR review, and deployment; this agent does not edit or deploy its own code directly.',
       'External writes must go through explicit gated tools; connected read APIs do not grant arbitrary write authority.',
     ],
   };
