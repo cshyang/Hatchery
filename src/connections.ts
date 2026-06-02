@@ -21,6 +21,10 @@ import type { D1Like } from './skills';
 import { githubReadTools } from './github';
 import { genericApiTool, PROVIDER_API_PROFILES } from './api';
 import { fetchToken, startConnectSession, deleteConnection } from './nango';
+import { PROVIDER_CATALOG, providerUsesGenericApi, type ProviderCatalogEntry } from './provider-catalog';
+
+export { PROVIDER_CATALOG } from './provider-catalog';
+export type { ProviderCatalogEntry } from './provider-catalog';
 
 export interface ConnectionState {
   provider: string;
@@ -219,29 +223,11 @@ export async function disableConnectionByRef(
   return { projectId: row.project_id, provider: row.provider };
 }
 
-// The provider catalog (what Hatchery supports at all). Curated platform-side; the agent picks
-// from it, never adds to it.
-export const PROVIDER_CATALOG: { provider: string; summary: string }[] = [
-  { provider: 'github', summary: 'read issues/code, search (creating issues comes later, with approval)' },
-  { provider: 'notion', summary: 'read pages/databases, search (read-only token)' },
-];
-
-// Providers that ship hand-written typed tools as a fallback. For these, the generic call_api tool
-// is opt-IN via config.apiMode='generic'. Everyone else defaults to the generic tool (the
-// bet-on-intelligence path) whenever a provider API profile exists.
-const TYPED_TOOL_PROVIDERS = new Set<string>(['github']);
-
-function useGenericApi(provider: string, config: Record<string, unknown>): boolean {
-  if (config.apiMode === 'typed') return false;
-  if (config.apiMode === 'generic') return true;
-  return !TYPED_TOOL_PROVIDERS.has(provider);
-}
-
 // The CONNECTIONS prompt block (mirrors the skills catalog injection). Tells the agent what it
 // can reach and what is connectable but not yet wired by an operator.
 export function connectionsBlock(
   state: ConnectionState[],
-  catalog: { provider: string; summary: string }[],
+  catalog: ProviderCatalogEntry[],
   canRequest = false,
 ): string {
   const byProvider = new Map(state.map((s) => [s.provider, s]));
@@ -293,7 +279,7 @@ export function connectionTools(
     // toolless — that can't happen today (catalog ⊆ providers-with-a-profile), but the guard degrades
     // to "no tool" rather than a crash.
     const isLazy = typeof creds.secret === 'function';
-    if ((useGenericApi(s.provider, creds.config) || isLazy) && profile) {
+    if ((providerUsesGenericApi(s.provider, creds.config) || isLazy) && profile) {
       tools.push(genericApiTool(profile, creds.secret, creds.config));
       continue;
     }
@@ -316,7 +302,7 @@ export function connectionTools(
  *  token. Gated to the provider catalog (the agent can't request an arbitrary provider).
  *  `deps.startConnectSession` is injectable for tests. */
 export function requestConnectionTool(
-  args: { nangoSecretKey: string; projectId: string; catalog?: { provider: string; summary: string }[] },
+  args: { nangoSecretKey: string; projectId: string; catalog?: ProviderCatalogEntry[] },
   deps: { startConnectSession?: typeof startConnectSession } = {},
 ): ToolDefinition {
   const catalog = args.catalog ?? PROVIDER_CATALOG;
@@ -356,7 +342,7 @@ export function requestConnectionTool(
  *  reconnect), so it's agent-callable without an approval gate (unlike a future github_create_issue).
  *  `deps.deleteConnection` is injectable for tests. */
 export function disconnectConnectionTool(
-  args: { nangoSecretKey: string; projectId: string; db: D1Like; catalog?: { provider: string; summary: string }[] },
+  args: { nangoSecretKey: string; projectId: string; db: D1Like; catalog?: ProviderCatalogEntry[] },
   deps: { deleteConnection?: typeof deleteConnection } = {},
 ): ToolDefinition {
   const catalog = args.catalog ?? PROVIDER_CATALOG;
