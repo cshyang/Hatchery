@@ -18,6 +18,7 @@ test('buildSelfStatus reports the live runtime manifest without exposing connect
     hasHeartbeatToken: false,
     hasBotToken: true,
     canRequestConnections: true,
+    hasCodingRunner: true,
     providerCatalog: [
       { provider: 'github', summary: 'read repos' },
       { provider: 'notion', summary: 'read docs' },
@@ -37,6 +38,8 @@ test('buildSelfStatus reports the live runtime manifest without exposing connect
   });
   assert.equal(status.capabilities.skills.enabled, true);
   assert.equal(status.capabilities.reminders.enabled, false);
+  assert.equal(status.capabilities.sourceEvolution.enabled, true);
+  assert.deepEqual(status.capabilities.sourceEvolution.tools, ['propose_self_change', 'dispatch_coding_run']);
   assert.match(status.capabilities.reminders.note, /TICKER/);
   assert.deepEqual(status.connections.providers, [
     { provider: 'github', status: 'connected', configKeys: ['repo'] },
@@ -59,6 +62,7 @@ test('self_status tool returns the manifest as formatted JSON', async () => {
     hasHeartbeatToken: true,
     hasBotToken: false,
     canRequestConnections: false,
+    hasCodingRunner: false,
     providerCatalog: [],
     connectionState: [],
     connectionToolNames: [],
@@ -68,6 +72,8 @@ test('self_status tool returns the manifest as formatted JSON', async () => {
   assert.equal(parsed.identity.projectId, 'P');
   assert.equal(parsed.capabilities.memory.enabled, false);
   assert.equal(parsed.capabilities.reminders.enabled, true);
+  assert.equal(parsed.capabilities.sourceEvolution.enabled, true);
+  assert.deepEqual(parsed.capabilities.sourceEvolution.tools, ['propose_self_change']);
 });
 
 run();
