@@ -1,27 +1,25 @@
 // Connection broker invariants (ADR 0003) — run: npx tsx src/connections.test.ts
-// Backend = Worker-secret refs (like the Slack token). The pure functions (state/resolve/tools)
-// operate on ConnectionSpec[]; the initializer resolves those from D1 (live) merged over the
-// binding seed via loadConnectionSpecs. Load-bearing invariants: gating (tools appear only when
-// connected, never the write), the secret-name is never the value, generic-vs-typed selection,
-// per-provider method policy, and the D1 metadata layer (operator add without redeploy).
+// Backend = Worker-secret refs (like the Slack token). The state/resolve/tool functions operate on
+// ConnectionSpec[]; the initializer resolves those from D1 (live) merged over the binding seed via
+// loadConnectionSpecs. Load-bearing invariants: gating (tools appear only when connected, never the
+// write), the secret-name is never the value, generic-vs-typed selection, per-provider method policy,
+// and the D1 metadata layer (operator add without redeploy).
 
 import assert from 'node:assert/strict';
 import { createTestRunner } from './test-utils';
 import {
   connectionState,
   resolveConnection,
-  connectionTools,
-  connectionsBlock,
   loadConnections,
   loadConnectionSpecs,
   upsertConnection,
-  PROVIDER_CATALOG,
-  requestConnectionTool,
-  disconnectConnectionTool,
   connectedNotice,
   disconnectedNotice,
   disableConnectionByRef,
 } from './connections';
+import { connectionTools, connectionsBlock, requestConnectionTool, disconnectConnectionTool } from './connection-tools';
+import { buildConnectionRuntime } from './connection-runtime';
+import { PROVIDER_CATALOG } from './provider-catalog';
 import { GITHUB_READ_TOOL_NAMES } from './github';
 import type { D1Like } from './skills';
 import type { Binding, ConnectionSpec } from './bindings';
@@ -186,6 +184,20 @@ test('connectionsBlock shows connected vs not-connected from real state', async 
   assert.match(connected, /✅ github \(connected\)/);
   const notConnected = connectionsBlock(connectionState(GH, {}), PROVIDER_CATALOG);
   assert.match(notConnected, /⚪ github \(not connected\)/);
+});
+
+test('buildConnectionRuntime: assembles connected provider tools and prompt block from the binding seed', async () => {
+  const seeded = binding([{ provider: 'github', tokenRef: 'GITHUB_PAT_DEMO', config: { repo: 'o/r', apiMode: 'generic' } }]);
+  const runtime = await buildConnectionRuntime({ db: undefined, binding: seeded, env: { GITHUB_PAT_DEMO: 'ghp_x' }, projectId: 'demo' });
+  assert.deepEqual(runtime.tools.map((t) => t.name), [GITHUB_CALL_API_TOOL_NAME]);
+  assert.match(runtime.connectionsBlock ?? '', /✅ github \(connected\)/);
+  assert.doesNotMatch(runtime.connectionsBlock ?? '', /request_connection/);
+});
+
+test('buildConnectionRuntime: exposes self-service connection tools when Nango is configured', async () => {
+  const runtime = await buildConnectionRuntime({ db: new FakeD1(), binding: binding([]), env: { NANGO_SECRET_KEY: 'nk' }, projectId: 'demo' });
+  assert.deepEqual(runtime.tools.map((t) => t.name).sort(), ['disconnect_connection', 'request_connection']);
+  assert.match(runtime.connectionsBlock ?? '', /request_connection/);
 });
 
 test('D1 layer: loadConnectionSpecs merges live rows over the binding seed (D1 wins, disabled removes)', async () => {
