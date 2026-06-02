@@ -1,14 +1,14 @@
 import type { ToolDefinition } from '@flue/runtime';
-import type { Binding } from './bindings';
-import { connectionState, loadConnectionSpecs, resolveConnection, type ResolvedConnection } from './connections';
+import type { Binding } from '../bindings';
+import { connectionState, loadConnectionSpecs, resolveConnection, type ResolvedConnection } from './repository';
 import {
   connectionTools,
   connectionsBlock as renderConnectionsBlock,
   disconnectConnectionTool,
   requestConnectionTool,
-} from './connection-tools';
-import { PROVIDER_CATALOG } from './provider-catalog';
-import type { D1Like } from './skills';
+} from './tools';
+import { PROVIDER_CATALOG } from './catalog';
+import type { D1Like } from '../skills';
 
 export interface ConnectionRuntime {
   tools: ToolDefinition[];

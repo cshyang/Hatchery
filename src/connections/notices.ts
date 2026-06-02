@@ -1,10 +1,10 @@
-import { bindingByProject as defaultBindingByProject, type Binding } from './bindings';
+import { bindingByProject as defaultBindingByProject, type Binding } from '../bindings';
 import {
   sendToConversationTarget as defaultSendToConversationTarget,
   topLevelTargetFromBinding,
   type ConversationTarget,
-} from './conversations';
-import type { D1Like } from './skills';
+} from '../conversations';
+import type { D1Like } from '../skills';
 
 type BindingLookup = (projectId: string, db?: D1Like) => Promise<Binding | undefined>;
 type NoticeSender = (env: Record<string, unknown>, target: ConversationTarget, text: string) => Promise<void>;

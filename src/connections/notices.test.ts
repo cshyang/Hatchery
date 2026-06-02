@@ -1,11 +1,11 @@
-// Connection notice invariants — run: npx tsx src/connection-notices.test.ts
+// Connection notice invariants — run: npx tsx src/connections/notices.test.ts
 
 import assert from 'node:assert/strict';
-import type { Binding } from './bindings';
-import { postConnectionNotice } from './connection-notices';
-import type { ConversationTarget } from './conversations';
-import type { D1Like } from './skills';
-import { createTestRunner } from './test-utils';
+import type { Binding } from '../bindings';
+import { postConnectionNotice } from './notices';
+import type { ConversationTarget } from '../conversations';
+import type { D1Like } from '../skills';
+import { createTestRunner } from '../test-utils';
 
 const { test, run } = createTestRunner();
 

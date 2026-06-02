@@ -17,13 +17,13 @@ import { upsertConversationTarget } from '../src/conversations';
 import { claimEvent, type KVLike } from '../src/idempotency';
 import type { D1Like } from '../src/skills';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/reflection';
-import { upsertConnection, loadConnections, connectedNotice, disconnectedNotice, disableConnectionByRef } from '../src/connections';
+import { upsertConnection, loadConnections, connectedNotice, disconnectedNotice, disableConnectionByRef } from '../src/connections/repository';
 import { verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook } from '../src/nango';
-import { isCatalogProvider } from '../src/provider-catalog';
+import { isCatalogProvider } from '../src/connections/catalog';
 import { buildScheduledInput } from '../src/scheduled';
 import { hasMatchingSecretHeader } from '../src/gateway-auth';
 import { readJsonOrNull } from '../src/gateway-json';
-import { postConnectionNotice } from '../src/connection-notices';
+import { postConnectionNotice } from '../src/connections/notices';
 import { handleInternalWorkItemRequest } from '../src/workbench/gateway';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add

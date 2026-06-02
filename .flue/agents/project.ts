@@ -10,7 +10,7 @@ import { userTools } from '../../src/users';
 import { searchTools } from '../../src/search';
 import { workbenchTools } from '../../src/workbench/tools';
 import { logMessage } from '../../src/reflection';
-import { buildConnectionRuntime } from '../../src/connection-runtime';
+import { buildConnectionRuntime } from '../../src/connections/runtime';
 
 // The project agent. Addressed at /agents/project/<id>, id = "project:<projectId>:agent:<slug>"
 // (slug = "default" until a channel hosts multiple personas). Each instance is a persistent

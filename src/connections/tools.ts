@@ -1,10 +1,10 @@
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
-import { genericApiTool, PROVIDER_API_PROFILES } from './api';
-import { disconnectedNotice, disableConnectionByRef, loadConnections, type ConnectionState, type ResolvedConnection } from './connections';
-import { githubReadTools } from './github';
-import { deleteConnection, startConnectSession } from './nango';
-import { PROVIDER_CATALOG, providerUsesGenericApi, type ProviderCatalogEntry } from './provider-catalog';
-import type { D1Like } from './skills';
+import { genericApiTool, PROVIDER_API_PROFILES } from '../api';
+import { disconnectedNotice, disableConnectionByRef, loadConnections, type ConnectionState, type ResolvedConnection } from './repository';
+import { githubReadTools } from '../github';
+import { deleteConnection, startConnectSession } from '../nango';
+import { PROVIDER_CATALOG, providerUsesGenericApi, type ProviderCatalogEntry } from './catalog';
+import type { D1Like } from '../skills';
 
 // The CONNECTIONS prompt block (mirrors the skills catalog injection). Tells the agent what it
 // can reach and what is connectable but not yet wired by an operator.

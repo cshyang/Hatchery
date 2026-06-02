@@ -23,7 +23,7 @@ export interface BuildInstructionsOptions {
    *  Passed as an opaque string so this assembler stays pure; it's the most volatile block (changes
    *  whenever memory changes), so it goes LAST. */
   memoryBlock?: string | null;
-  /** Pre-rendered "YOUR CONNECTIONS" block (see src/connections.ts), or null. Semi-stable (changes
+  /** Pre-rendered "YOUR CONNECTIONS" block (see src/connections/repository.ts), or null. Semi-stable (changes
    *  only when a connection is added/removed), so it sits with the skills catalog, before memory. */
   connectionsBlock?: string | null;
 }

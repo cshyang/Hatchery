@@ -1,5 +1,5 @@
 // Nango backend (Hatchery M2). ALL Nango wire code lives here, behind the connection broker
-// (src/connections.ts). The agent never imports this; it reaches Nango only via the broker's
+// (src/connections/repository.ts). The agent never imports this; it reaches Nango only via the broker's
 // request_connection tool (start a session) and the lazy token fetch inside a connected provider's
 // call tool. Verified facts in memory/nango-integration.md (docs 404 a lot; the webhook signature
 // truth came from reading NangoHQ/nango/packages/webhooks/lib/utils.ts directly).

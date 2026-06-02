@@ -1,4 +1,4 @@
-// Connection broker invariants (ADR 0003) — run: npx tsx src/connections.test.ts
+// Connection broker invariants (ADR 0003) — run: npx tsx src/connections/connections.test.ts
 // Backend = Worker-secret refs (like the Slack token). The state/resolve/tool functions operate on
 // ConnectionSpec[]; the initializer resolves those from D1 (live) merged over the binding seed via
 // loadConnectionSpecs. Load-bearing invariants: gating (tools appear only when connected, never the
@@ -6,7 +6,7 @@
 // and the D1 metadata layer (operator add without redeploy).
 
 import assert from 'node:assert/strict';
-import { createTestRunner } from './test-utils';
+import { createTestRunner } from '../test-utils';
 import {
   connectionState,
   resolveConnection,
@@ -16,13 +16,13 @@ import {
   connectedNotice,
   disconnectedNotice,
   disableConnectionByRef,
-} from './connections';
-import { connectionTools, connectionsBlock, requestConnectionTool, disconnectConnectionTool } from './connection-tools';
-import { buildConnectionRuntime } from './connection-runtime';
-import { PROVIDER_CATALOG } from './provider-catalog';
-import { GITHUB_READ_TOOL_NAMES } from './github';
-import type { D1Like } from './skills';
-import type { Binding, ConnectionSpec } from './bindings';
+} from './repository';
+import { connectionTools, connectionsBlock, requestConnectionTool, disconnectConnectionTool } from './tools';
+import { buildConnectionRuntime } from './runtime';
+import { PROVIDER_CATALOG } from './catalog';
+import { GITHUB_READ_TOOL_NAMES } from '../github';
+import type { D1Like } from '../skills';
+import type { Binding, ConnectionSpec } from '../bindings';
 
 const GITHUB_CALL_API_TOOL_NAME = 'github_call_api';
 const NOTION_CALL_API_TOOL_NAME = 'notion_call_api';
@@ -45,7 +45,7 @@ function binding(connections?: ConnectionSpec[]): Binding {
 const GH: ConnectionSpec[] = [{ provider: 'github', tokenRef: 'GITHUB_PAT_DEMO', config: { repo: 'o/r' } }];
 const NANGO_REF: ConnectionSpec[] = [{ provider: 'notion', connectionRef: 'conn_42', config: {} }];
 
-// In-memory D1 fake — only the two statements connections.ts issues (coupled on purpose).
+// In-memory D1 fake — only the two statements repository.ts issues (coupled on purpose).
 interface Row {
   [k: string]: unknown;
 }
