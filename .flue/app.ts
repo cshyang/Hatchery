@@ -15,6 +15,7 @@ import { upsertConnection, loadConnections, connectedNotice, disconnectedNotice,
 import { verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook } from '../src/nango';
 import { isCatalogProvider } from '../src/provider-catalog';
 import { buildScheduledInput } from '../src/scheduled';
+import { hasMatchingSecretHeader } from '../src/gateway-auth';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -66,12 +67,15 @@ async function fireHeartbeat(topic?: string): Promise<number> {
 
 const app = new Hono<{ Bindings: Env }>();
 
+function requireHeartbeat(c: { env: Env; req: { header(n: string): string | undefined } }): boolean {
+  return hasMatchingSecretHeader(c.env.HEARTBEAT_TOKEN, c.req.header('x-hatchery-token'));
+}
+
 // Manual heartbeat trigger. Token-guarded (inert unless HEARTBEAT_TOKEN is set
 // and the x-hatchery-token header matches) so it can't be fired publicly. An
 // optional {topic} in the body overrides the default.
 app.post('/__heartbeat', async (c) => {
-  const expected = c.env.HEARTBEAT_TOKEN;
-  if (!expected || c.req.header('x-hatchery-token') !== expected) return c.body(null, 404);
+  if (!requireHeartbeat(c)) return c.body(null, 404);
   let topic: string | undefined;
   try {
     const body = (await c.req.json()) as { topic?: string };
@@ -88,8 +92,7 @@ app.post('/__heartbeat', async (c) => {
 // in a session dedicated to the job id so each named schedule keeps its own memory.
 // `fireId` makes it idempotent against alarm retries via the same KV claim layer.
 app.post('/__internal/scheduled', async (c) => {
-  const expected = c.env.HEARTBEAT_TOKEN;
-  if (!expected || c.req.header('x-hatchery-token') !== expected) return c.body(null, 404);
+  if (!requireHeartbeat(c)) return c.body(null, 404);
 
   const body = (await c.req.json().catch(() => null)) as {
     fireId?: string;
@@ -132,8 +135,7 @@ app.post('/__internal/scheduled', async (c) => {
 // transcript INLINE to a fresh consolidation session, so the live agent can't consume the
 // watermark and reflection turns never pollute a real conversation thread.
 app.post('/__internal/reflect-sweep', async (c) => {
-  const expected = c.env.HEARTBEAT_TOKEN;
-  if (!expected || c.req.header('x-hatchery-token') !== expected) return c.body(null, 404);
+  if (!requireHeartbeat(c)) return c.body(null, 404);
   const db = c.env.DB;
   if (!db) return c.json({ swept: 0, reason: 'no DB binding' });
 
@@ -159,13 +161,12 @@ app.post('/__internal/reflect-sweep', async (c) => {
 // connections and poking heartbeats are different privilege levels). The SECRET is set separately via
 // `wrangler secret put` and is only referenced here by name — this route never receives or stores it.
 // HARD LINE: this is OPERATOR-only and out-of-band; the agent (model) can never reach it.
-async function requireAdmin(c: { env: Env; req: { header(n: string): string | undefined } }): Promise<boolean> {
-  const expected = c.env.ADMIN_CONNECTIONS_TOKEN;
-  return !!expected && c.req.header('x-hatchery-admin-token') === expected;
+function requireAdmin(c: { env: Env; req: { header(n: string): string | undefined } }): boolean {
+  return hasMatchingSecretHeader(c.env.ADMIN_CONNECTIONS_TOKEN, c.req.header('x-hatchery-admin-token'));
 }
 
 app.post('/__admin/connections', async (c) => {
-  if (!(await requireAdmin(c))) return c.body(null, 404); // inert/invisible unless the admin token matches
+  if (!requireAdmin(c)) return c.body(null, 404); // inert/invisible unless the admin token matches
   const db = c.env.DB;
   if (!db) return c.json({ error: 'no DB binding' }, 500);
   const body = (await c.req.json().catch(() => null)) as {
@@ -193,7 +194,7 @@ app.post('/__admin/connections', async (c) => {
 });
 
 app.get('/__admin/connections', async (c) => {
-  if (!(await requireAdmin(c))) return c.body(null, 404);
+  if (!requireAdmin(c)) return c.body(null, 404);
   const db = c.env.DB;
   if (!db) return c.json({ error: 'no DB binding' }, 500);
   const projectId = c.req.query('projectId');
