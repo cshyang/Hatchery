@@ -1,8 +1,8 @@
-// Cross-thread Connect + catch-up retrieval — run: npx tsx src/search.test.ts
+// Cross-thread Connect + catch-up retrieval — run: npx tsx src/knowledge/search.test.ts
 import assert from 'node:assert/strict';
-import { createTestRunner } from './test-utils';
+import { createTestRunner } from '../test-utils';
 import { buildSearchTerms, parseConversationId, searchRelatedThreads, recentThreads } from './search';
-import type { D1Like } from './skills';
+import type { D1Like } from '../skills';
 
 const { test, run } = createTestRunner();
 

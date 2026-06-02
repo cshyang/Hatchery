@@ -10,7 +10,7 @@
 // %, _, or a quote), so the `%term%` patterns are always safe to bind.
 
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
-import type { D1Like } from './skills';
+import type { D1Like } from '../skills';
 
 const RAW_LIMIT = 200; // cap rows pulled for in-JS grouping; a single channel won't exceed this for a real query
 const MAX_THREADS = 4; // candidate threads handed to the model

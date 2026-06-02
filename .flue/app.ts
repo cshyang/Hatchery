@@ -16,7 +16,7 @@ import { normalizeSlackMessage } from '../src/canonical';
 import { upsertConversationTarget } from '../src/project/conversations';
 import { claimEvent, type KVLike } from '../src/idempotency';
 import type { D1Like } from '../src/skills';
-import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/reflection';
+import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/knowledge/reflection';
 import { upsertConnection, loadConnections, connectedNotice, disconnectedNotice, disableConnectionByRef } from '../src/connections/repository';
 import { verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook } from '../src/providers/nango';
 import { isCatalogProvider } from '../src/connections/catalog';

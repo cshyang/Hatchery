@@ -5,11 +5,11 @@ import { withToolLogging, withReplyReminder } from '../../src/observability';
 import { skillTools, loadSkillCatalog, loadActiveSkillBody, skillBody, type D1Like } from '../../src/skills';
 import { reminderTools } from '../../src/reminders';
 import { buildInstructions } from '../../src/prompt';
-import { loadProjectMemory, memoryTools, renderMemory } from '../../src/memory';
-import { userTools } from '../../src/users';
-import { searchTools } from '../../src/search';
+import { loadProjectMemory, memoryTools, renderMemory } from '../../src/knowledge/memory';
+import { userTools } from '../../src/knowledge/users';
+import { searchTools } from '../../src/knowledge/search';
 import { workbenchTools } from '../../src/workbench/tools';
-import { logMessage } from '../../src/reflection';
+import { logMessage } from '../../src/knowledge/reflection';
 import { buildConnectionRuntime } from '../../src/connections/runtime';
 
 // The project agent. Addressed at /agents/project/<id>, id = "project:<projectId>:agent:<slug>"
