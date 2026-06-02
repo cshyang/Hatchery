@@ -124,6 +124,8 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   const model = resolveModel(binding.model);
   const codingRunnerUrl = typeof env.CODING_RUNNER_URL === 'string' ? env.CODING_RUNNER_URL : '';
   const workbenchRunnerToken = typeof env.WORKBENCH_RUNNER_TOKEN === 'string' ? env.WORKBENCH_RUNNER_TOKEN : '';
+  const agentRunnerUrl = typeof env.AGENT_RUNNER_URL === 'string' ? env.AGENT_RUNNER_URL : '';
+  const agentRunnerToken = typeof env.AGENT_RUNNER_TOKEN === 'string' ? env.AGENT_RUNNER_TOKEN : '';
 
   const tools: ToolDefinition[] = [
     replyToConversation,
@@ -137,6 +139,8 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       hasHeartbeatToken: !!heartbeatToken,
       hasBotToken: !!botToken,
       hasCodingRunner: !!codingRunnerUrl && !!workbenchRunnerToken,
+      hasAgentRunner: !!agentRunnerUrl && !!agentRunnerToken,
+      hasLinearAgentIngress: typeof env.LINEAR_WEBHOOK_SECRET === 'string' && typeof env.LINEAR_AGENT_PROJECTS === 'string',
       canRequestConnections: connectionRuntime.canRequestConnections,
       providerCatalog: connectionRuntime.providerCatalog,
       connectionState: connectionRuntime.state,

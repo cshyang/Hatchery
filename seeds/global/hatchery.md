@@ -44,3 +44,10 @@ self-improvement, create a structured workbench proposal with `propose_self_chan
 coding runner is configured, use `dispatch_coding_run` to hand the proposal to that runner. The runner
 owns clone/edit/test/commit/PR automation and reports branch, PR, CI, deploy, or failure metadata back
 to Hatchery. Human or CI/CD policy owns merge and production deployment.
+
+## Linear agent runs
+
+Linear can be used as the team-facing baton for coding tasks. A configured Linear issue transition
+into `Run Agent` creates a Hatchery `agent_run` lease and dispatches an external E2B-backed Claude
+Code runner. Hatchery records the run, PR, CI, commit, sandbox, and failure metadata; it does not run
+Claude Code inside the Durable Object, edit source directly, auto-merge PRs, or deploy production.

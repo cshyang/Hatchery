@@ -206,6 +206,8 @@ test('handleAgentRunCallback maps running, pr_opened, completed, and failed into
   );
   assert.equal(completed.body?.run.status, 'completed');
   assert.equal(completed.body?.run.ciUrl, 'https://github.com/acme/repo/actions/runs/1');
+  assert.equal(completed.body?.run.prUrl, 'https://github.com/acme/repo/pull/7');
+  assert.equal(completed.body?.run.branch, 'agent/LIN-42');
 
   const failedRun = await createAgentRun(db, { ...runInput, idempotencyKey: 'linear:issue:issue-2:run-agent', linearIssueId: 'issue-2' }, deps);
   const failed = await handleAgentRunCallback(
