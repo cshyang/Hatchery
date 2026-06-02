@@ -5,6 +5,12 @@ import { verifySlackSignature } from '../src/slack/verify';
 import { fetchThreadReplies, renderThreadBackscroll } from '../src/slack/threads';
 import { mentionsBot, stripMention } from '../src/slack/mentions';
 import { postMessage } from '../src/slack/post';
+import {
+  parseSlackEventEnvelope,
+  slackEventId,
+  slackUrlVerification,
+  slackUserMessageEvent,
+} from '../src/slack/events';
 import { bindings, bindingBySlack, bindingByProject, agentInstanceId, autoCreateBinding, isKnownTeam } from '../src/bindings';
 import { normalizeSlackMessage } from '../src/canonical';
 import { upsertConversationTarget } from '../src/conversations';
@@ -280,34 +286,13 @@ app.post('/slack/events', async (c) => {
   );
   if (!verified) return c.text('unauthorized', 401);
 
-  const body = JSON.parse(raw) as {
-    type?: string;
-    challenge?: string;
-    team_id?: string;
-    event_id?: string;
-    event?: {
-      type?: string;
-      subtype?: string;
-      bot_id?: string;
-      channel?: string;
-      ts?: string;
-      thread_ts?: string;
-      user?: string;
-      text?: string;
-    };
-  };
+  const body = parseSlackEventEnvelope(raw);
 
-  // Slack endpoint handshake.
-  if (body.type === 'url_verification') return c.json({ challenge: body.challenge });
+  const verification = slackUrlVerification(body);
+  if (verification) return c.json({ challenge: verification.challenge });
 
-  const ev = body.event;
-  // Ignore non-user messages and the bot's own echoes — never dispatch them.
-  // NOTE: dropping any `subtype` also drops `thread_broadcast` (a thread reply
-  // the user chose to also send to the channel) — so that variant won't continue
-  // a thread. Intentional for now; revisit if it bites.
-  if (!ev || ev.type !== 'message' || ev.bot_id || ev.subtype || !ev.channel || !ev.ts) {
-    return c.body(null, 200);
-  }
+  const ev = slackUserMessageEvent(body);
+  if (!ev) return c.body(null, 200);
 
   const teamId = body.team_id ?? '';
   let binding = await bindingBySlack(teamId, ev.channel, c.env.DB);
@@ -341,11 +326,11 @@ app.post('/slack/events', async (c) => {
       ? await fetchThreadReplies(token, ev.channel, ev.thread_ts).catch(() => [])
       : [];
 
-  const eventId = body.event_id ?? `${ev.channel}:${ev.ts}`;
+  const eventId = slackEventId(body, ev);
   // Normalize once — both the ambient-log branch and the engaged path below use this.
   const msg = normalizeSlackMessage(
     eventId,
-    body.team_id ?? '',
+    teamId,
     { channel: ev.channel, ts: ev.ts, thread_ts: ev.thread_ts, user: ev.user, text: stripMention(text, binding.transportBotId) },
     binding,
   );
