@@ -15,9 +15,9 @@
 //   - static-key SELF-SERVICE (a client pastes a key at runtime) → encrypted D1 or a managed
 //     vault — built only when that pain is real (the crypto.ts version lives in git history).
 
-import type { Binding, ConnectionSpec } from './bindings';
-import type { D1Like } from './skills';
-import { fetchToken } from './nango';
+import type { Binding, ConnectionSpec } from '../bindings';
+import type { D1Like } from '../skills';
+import { fetchToken } from '../nango';
 
 export interface ConnectionState {
   provider: string;

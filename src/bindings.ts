@@ -181,7 +181,7 @@ export async function bindingByProject(projectId: string, db?: D1Like): Promise<
 }
 
 // ── D1 binding layer (per-channel, auto-provisioned) ─────────────────────────────────────────────
-// Mirrors the connections D1+seed cascade (src/connections.ts): the bindings.ts `bindings` array is
+// Mirrors the connections D1+seed cascade (src/connections/repository.ts): the bindings.ts `bindings` array is
 // a CODE SEED; D1 rows are the live source, merged OVER the seed by project_id. The bot token lives
 // as a Worker secret referenced by transport_token_ref — never stored in this table.
 

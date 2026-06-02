@@ -4,7 +4,7 @@
 //
 // The CREATE (write) is NOT a model-callable tool — it's `executeCreateIssue`, run only by the
 // post-approval executor in the gateway (ADR D4). The agent's create tool merely *proposes*
-// (see connection-tools.ts → connectionTools), so the model never reaches a write directly.
+// (see connections/tools.ts → connectionTools), so the model never reaches a write directly.
 
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
 import { fetchWithTimeout, jsonMessageOrText } from './http';
