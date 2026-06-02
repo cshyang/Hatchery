@@ -3,7 +3,7 @@
 **Date**: 2026-05-30
 **Status**: accepted
 **Supersedes**: nothing
-**Related**: `docs/decisions/0001-runtime-and-tenancy.md`, `src/skills.ts`, `src/reflection.ts`, `src/memory.ts`, `src/prompt.ts`
+**Related**: `docs/decisions/0001-runtime-and-tenancy.md`, `src/skills/repository.ts`, `src/knowledge/reflection.ts`, `src/knowledge/memory.ts`, `src/agent/prompt.ts`, `src/agent/self.ts`
 **Study basis**: a mature open-source agent framework studied as prior art — its background skill-curator, its self-knowledge + skill-authoring bundled skills, and its skill-authoring standards.
 
 ## Context
@@ -19,14 +19,15 @@ filesystem, semi-trusted per ADR 0001).
 
 Three facts frame everything below:
 
-- **Zero *persisted* skills in the deployed D1; three *authored* starter skills in the repo.**
-  `seeds/seed.mjs` seeds `hatchery-self`, `writing-skills`, `humanize` into a project's catalog, but
-  nothing is persisted in the live database yet. So there's no library to curate *yet*, but the
-  starter content exists — building a heavy curator now is still solving a problem we don't have.
-- **The `skills` table has no migration.** `src/skills.ts` reads/writes it, but nothing in
+- **Zero *persisted* skills in the deployed D1; starter skills exist in the repo.**
+  `seeds/seed.mjs` seeds editable project starters such as `writing-skills` and `humanize`; the
+  shared `seeds/seed-global.mjs` path seeds platform-owned global skills such as `hatchery`. So
+  there's no live library to curate *yet*, but starter content exists — building a heavy curator now
+  is still solving a problem we don't have.
+- **The `skills` table has no migration.** `src/skills/repository.ts` reads/writes it, but nothing in
   `migrations/` creates it (only memories, messages, and the ticker's `jobs` exist). We owe the
   table regardless — which makes adding lifecycle columns nearly free.
-- **REM already exists.** The nightly reflection sweep (ADR-adjacent, see `src/reflection.ts`)
+- **REM already exists.** The nightly reflection sweep (ADR-adjacent, see `src/knowledge/reflection.ts`)
   dispatches a consolidation turn into the project's own Durable Object — which already carries the
   full skill toolset. Curation is therefore *instruction*, not new infrastructure.
 
@@ -189,40 +190,29 @@ cursor** (a reserved `reflection_state` row), never advancing a project's waterm
 6. `src/skills.test.ts` (NEW — skills.ts is currently untested): catalog hides archived / `load_skill`
    refuses archived / scheduled fire refuses archived+absent with status / restore un-hides /
    provenance stamped / project isolation / no hard-delete in the toolset.
-7. `seeds/seed.mjs` — extend the INSERT to set `state='active'` + provenance columns so seeded rows
-   match the new schema (the script already exists and seeds `hatchery-self`, `writing-skills`,
-   `humanize`).
+7. `seeds/seed.mjs` / `seeds/seed-global.mjs` — extend the INSERT to set `state='active'` +
+   provenance columns so seeded rows match the new schema.
 
 `.flue/agents/project.ts` needs **no change** — it spreads `skillTools(...)`, so new tools flow through.
 
-**Deferred — design recorded (Decision 2 + 7), ZERO v1 code:** the global tier in every form —
-`__global__` sentinel, `GLOBAL_PROJECT_ID` constant + binding enforcement, two-tier read path, the
-global REM worker, `pinned`, content seeds. The plain `(project_id, name)` PK already *admits* a future
-`__global__` row with no schema change, so nothing is built blind and nothing is foreclosed. We add the
-sentinel/read-path the day the first global skill exists — not before. (This is the "no backpack
-indoors" line: even a one-line constant is furniture until a code path reads it.)
+**Built now:** the `__global__` sentinel and two-tier read path exist, with platform-authored global
+seeds. Global REM, `pinned`, and promotion workflows remain deferred.
 
 ## Seeds: what exists, and the drift watch-item
 
-`seeds/seed.mjs` already authors three **project-level, overwritable, opt-in** starter skills,
-applied by a manual `wrangler d1 execute` (not auto-installed): `hatchery-self` (self-knowledge),
-`writing-skills` (meta-authoring), `humanize` (writing quality). The earlier "zero skills" framing was
-wrong — there is starter *content*; there are just zero *persisted* rows in the live D1.
+`seeds/seed.mjs` authors **project-level, overwritable, opt-in** starter skills, applied by a manual
+`wrangler d1 execute` (not auto-installed): `writing-skills` (meta-authoring) and `humanize`
+(writing quality). `seeds/seed-global.mjs` authors the shared platform baseline, including
+`hatchery` (self-knowledge), `using-connections`, and `personality`. The earlier "zero skills"
+framing was wrong — there is starter *content*; there are just zero *persisted* rows in the live D1.
 
 This is consistent with the decisions above, with one caveat to watch:
 
-- **Project tier, not global, not kernel.** These seed into a project's own catalog and the agent can
-  edit/delete them. They are *not* the trusted global tier (that stays human-curated, Decision 7) and
-  *not* kernel. Opt-in project starters are fine; they don't touch the protected kernel.
-- **`hatchery-self` is the drift watch-item.** It describes the agent's own tools/behaviors — which
-  *also* live in the always-on kernel prompt. Two descriptions of the same surface can drift. Accept
-  it for now (it's overwritable starter content, and the agent self-correcting it is *desirable*), but
-  when Hatchery's surface grows, this is the seam that graduates to a single source: a loadable
-  self-knowledge skill replacing the prompt block (progressive disclosure) — not two copies. The prior
-  art needs a ~1,000-line self-knowledge skill precisely because its surface (dozens of CLI commands,
-  slash commands, and toolsets) outgrew the prompt; Hatchery's ~12 tools haven't yet.
-- **The GLOBAL trusted tier seeds nothing yet.** Distinct from these project starters: no
-  `__global__` rows ship until a skill proves cross-project worth (Decision 7).
+- **Project starters stay editable.** They seed into a project's own catalog and the agent can
+  edit/archive them. Opt-in project starters are fine; they don't touch the protected kernel.
+- **Self-knowledge moved to protected global `hatchery`.** The stale project-level `hatchery-self`
+  duplicate was removed because two descriptions of the same runtime surface drift. The global skill
+  explains the architecture; the `self_status` tool reports the live capability manifest.
 
 ## Verification (the kill-experiment)
 

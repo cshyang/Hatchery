@@ -5,6 +5,7 @@ import { withToolLogging, withReplyReminder } from '../../src/agent/observabilit
 import { skillTools, loadSkillCatalog, loadActiveSkillBody, skillBody, type D1Like } from '../../src/skills/repository';
 import { reminderTools } from '../../src/agent/reminders';
 import { buildInstructions } from '../../src/agent/prompt';
+import { selfStatusTool } from '../../src/agent/self';
 import { loadProjectMemory, memoryTools, renderMemory } from '../../src/knowledge/memory';
 import { userTools } from '../../src/knowledge/users';
 import { searchTools } from '../../src/knowledge/search';
@@ -119,10 +120,24 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
 
   // Bot token (for resolving Slack user names via users.info). Same ref the reply path uses.
   const botToken = env[binding.transportTokenRef] as string | undefined;
+  const model = resolveModel(binding.model);
 
   const tools: ToolDefinition[] = [
     replyToConversation,
     updateStatus,
+    selfStatusTool({
+      projectId,
+      agentSlug: slug,
+      model,
+      hasDb: !!db,
+      hasTicker: !!ticker,
+      hasHeartbeatToken: !!heartbeatToken,
+      hasBotToken: !!botToken,
+      canRequestConnections: connectionRuntime.canRequestConnections,
+      providerCatalog: connectionRuntime.providerCatalog,
+      connectionState: connectionRuntime.state,
+      connectionToolNames: connectionRuntime.tools.map((tool) => tool.name),
+    }),
     ...(db ? skillTools(db, projectId) : []),
     ...reminderTools(ticker, heartbeatToken, projectId),
     ...(db ? memoryTools(db, projectId) : []),
@@ -133,7 +148,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   ];
 
   return {
-    model: resolveModel(binding.model),
+    model,
     instructions: buildInstructions({
       projectName: binding.projectId,
       personality: personality ? skillBody(personality) : null,

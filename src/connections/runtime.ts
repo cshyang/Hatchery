@@ -1,18 +1,21 @@
 import type { ToolDefinition } from '@flue/runtime';
 import type { Binding } from '../project/bindings';
-import { connectionState, loadConnectionSpecs, resolveConnection, type ResolvedConnection } from './repository';
+import { connectionState, loadConnectionSpecs, resolveConnection, type ConnectionState, type ResolvedConnection } from './repository';
 import {
   connectionTools,
   connectionsBlock as renderConnectionsBlock,
   disconnectConnectionTool,
   requestConnectionTool,
 } from './tools';
-import { PROVIDER_CATALOG } from './catalog';
+import { PROVIDER_CATALOG, type ProviderCatalogEntry } from './catalog';
 import type { D1Like } from '../skills/repository';
 
 export interface ConnectionRuntime {
   tools: ToolDefinition[];
   connectionsBlock: string | null;
+  state: ConnectionState[];
+  canRequestConnections: boolean;
+  providerCatalog: ProviderCatalogEntry[];
 }
 
 /** Build the connection-facing part of the project agent initializer. Keeps .flue/agents/project.ts
@@ -45,5 +48,8 @@ export async function buildConnectionRuntime(args: {
   return {
     tools: [...nangoTools, ...connectionTools(state, secrets)],
     connectionsBlock: state.length || canRequestConnect ? renderConnectionsBlock(state, PROVIDER_CATALOG, canRequestConnect) : null,
+    state,
+    canRequestConnections: canRequestConnect,
+    providerCatalog: PROVIDER_CATALOG,
   };
 }
