@@ -26,6 +26,8 @@ import { readJsonOrNull } from '../src/gateway/json';
 import { postConnectionNotice } from '../src/connections/notices';
 import { handleInternalWorkItemRequest } from '../src/workbench/gateway';
 import { handleSourceChangeRunCallback } from '../src/workbench/source-change';
+import { handleLinearWebhook } from '../src/agent-runs/linear';
+import { handleAgentRunCallback } from '../src/agent-runs/repository';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -38,6 +40,12 @@ interface Env {
   HEARTBEAT_TOKEN?: string; // shared secret guarding the /__heartbeat trigger
   WORKBENCH_RUNNER_TOKEN?: string; // dedicated secret for source-change runner callbacks
   CODING_RUNNER_URL?: string; // generic source-change runner dispatch endpoint
+  LINEAR_WEBHOOK_SECRET?: string; // Linear raw-body HMAC signing secret for /linear/webhook
+  LINEAR_AGENT_PROJECTS?: string; // non-secret JSON mapping Linear team key/id to agent-run config
+  LINEAR_API_KEY?: string; // reserved for gateway-owned Linear status comments; never exposed to the model
+  AGENT_RUNNER_URL?: string; // generic E2B-backed Claude Code runner dispatch endpoint
+  AGENT_RUNNER_TOKEN?: string; // dedicated secret for agent-run dispatch and callbacks
+  HATCHERY_PUBLIC_URL?: string; // optional absolute origin used in runner callback payloads
   ADMIN_CONNECTIONS_TOKEN?: string; // OWN secret guarding /__admin/connections (ADR D11 — NOT the heartbeat token)
   NANGO_SECRET_KEY?: string; // platform Bearer for the Nango API (create session / fetch token)
   NANGO_WEBHOOK_SECRET?: string; // HMAC signing key to verify inbound Nango auth webhooks
@@ -159,6 +167,46 @@ app.post('/__internal/source-change-runs', async (c) => {
       body: await readJsonOrNull(() => c.req.json()),
     },
   );
+  if (result.status === 404) return c.body(null, 404);
+  return c.json(result.body ?? {}, result.status as 200 | 400 | 500);
+});
+
+// Linear is the team-facing baton for coding-agent work. The gateway verifies Linear's raw-body
+// HMAC and turns only "Issue transitioned into Run Agent" into an agent_run lease. The external
+// runner owns Claude Code/E2B/PR behavior; Hatchery only records dispatch and callback metadata.
+app.post('/linear/webhook', async (c) => {
+  const raw = await c.req.text();
+  const result = await handleLinearWebhook(
+    {
+      db: c.env.DB,
+      signingSecret: c.env.LINEAR_WEBHOOK_SECRET,
+      signature: c.req.header('linear-signature'),
+      deliveryId: c.req.header('linear-delivery'),
+      event: c.req.header('linear-event'),
+      rawBody: raw,
+      projectsJson: c.env.LINEAR_AGENT_PROJECTS,
+      nowMs: Date.now(),
+    },
+    {
+      runnerUrl: c.env.AGENT_RUNNER_URL,
+      runnerToken: c.env.AGENT_RUNNER_TOKEN,
+      hatcheryPublicUrl: c.env.HATCHERY_PUBLIC_URL,
+      fetch,
+    },
+  );
+  if (result.status === 404) return c.body(null, 404);
+  return c.json(result.body ?? {}, result.status as 200 | 400 | 500);
+});
+
+// Agent-run callback from the external E2B/Claude Code runner. Dedicated token: runner reporting
+// does not grant heartbeat, connection-admin, merge, or deploy authority.
+app.post('/__internal/agent-runs', async (c) => {
+  const result = await handleAgentRunCallback({
+    db: c.env.DB,
+    expectedToken: c.env.AGENT_RUNNER_TOKEN,
+    actualToken: c.req.header('x-hatchery-agent-runner-token'),
+    body: await readJsonOrNull(() => c.req.json()),
+  });
   if (result.status === 404) return c.body(null, 404);
   return c.json(result.body ?? {}, result.status as 200 | 400 | 500);
 });

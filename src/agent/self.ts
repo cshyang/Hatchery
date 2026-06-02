@@ -11,6 +11,8 @@ export interface SelfStatusInput {
   hasHeartbeatToken: boolean;
   hasBotToken: boolean;
   hasCodingRunner: boolean;
+  hasAgentRunner: boolean;
+  hasLinearAgentIngress: boolean;
   canRequestConnections: boolean;
   providerCatalog: ProviderCatalogEntry[];
   connectionState: ConnectionState[];
@@ -68,6 +70,13 @@ export function buildSelfStatus(input: SelfStatusInput) {
           ? 'Source-code change proposals can be recorded and dispatched to the configured generic coding runner.'
           : 'Source-code change proposals can be recorded; coding-run dispatch is unavailable until CODING_RUNNER_URL and WORKBENCH_RUNNER_TOKEN are configured.',
       ),
+      agentRuns: capability(
+        input.hasDb && input.hasLinearAgentIngress,
+        [],
+        input.hasAgentRunner
+          ? 'Linear state transitions can create Hatchery agent-run leases and dispatch an external E2B Claude Code runner.'
+          : 'Linear agent-run intake is available but dispatch is not configured until AGENT_RUNNER_URL and AGENT_RUNNER_TOKEN are set.',
+      ),
       userLookup: capability(input.hasDb || input.hasBotToken, ['resolve_user'], 'Resolves Slack user ids via cache and, when available, Slack users.info.'),
       connections: capability(
         input.connectionToolNames.length > 0 || input.canRequestConnections,
@@ -90,6 +99,7 @@ export function buildSelfStatus(input: SelfStatusInput) {
       'No raw environment access; Worker secrets are resolved only by trusted broker/tool code.',
       'Repository/source inspection requires a connected provider such as GitHub; it is not VM-style self-introspection.',
       'Source-code evolution happens through workbench proposals, an external coding runner, PR review, and deployment; this agent does not edit or deploy its own code directly.',
+      'Linear-driven coding work is control-plane only: Hatchery records leases and callbacks; the external E2B runner owns Claude Code execution, clone/edit/test/commit/PR, and never auto-merges from this runtime.',
       'External writes must go through explicit gated tools; connected read APIs do not grant arbitrary write authority.',
     ],
   };
