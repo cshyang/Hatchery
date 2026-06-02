@@ -9,11 +9,12 @@ import { bindings, bindingBySlack, bindingByProject, agentInstanceId, autoCreate
 import { normalizeSlackMessage } from '../src/canonical';
 import { upsertConversationTarget, topLevelTargetFromBinding, sendToConversationTarget } from '../src/conversations';
 import { claimEvent, type KVLike } from '../src/idempotency';
-import { loadRunnableSkillBody, type D1Like } from '../src/skills';
+import type { D1Like } from '../src/skills';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/reflection';
 import { upsertConnection, loadConnections, connectedNotice, disconnectedNotice, disableConnectionByRef } from '../src/connections';
 import { verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook } from '../src/nango';
 import { isCatalogProvider } from '../src/provider-catalog';
+import { buildScheduledInput } from '../src/scheduled';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -106,37 +107,15 @@ app.post('/__internal/scheduled', async (c) => {
   const binding = await bindingByProject(body.projectId, c.env.DB);
   if (!binding || binding.status !== 'active') return c.json({ skipped: 'no active binding' });
 
-  // Reference, not copy: a reminder holds a skill NAME; resolve it FRESH here so edits to the
-  // skill apply to all future scheduled runs. An archived skill is REFUSED (not run, not silently
-  // dropped): archived = retired from automation, so running its stale steps on a schedule would be
-  // a footgun. The agent can restore_skill or repoint/cancel the reminder.
-  const payload = (body.payload ?? {}) as { skill?: string; prompt?: string; topic?: string };
-  const input: Record<string, unknown> = { kind: body.kind ?? 'heartbeat', now: new Date().toISOString() };
-  // skill body + one-off prompt are both "the procedure for this run": follow them. `topic` is the
-  // legacy blog-on-a-subject path (the default 6h backstop).
-  let procedure = '';
-  if (payload.skill) {
-    const resolved = c.env.DB
-      ? await loadRunnableSkillBody(c.env.DB, body.projectId, payload.skill)
-      : ({ status: 'absent' } as const);
-    if (resolved.status === 'active') {
-      input.skill = payload.skill;
-      procedure = resolved.body;
-    } else if (resolved.status === 'archived') {
-      console.log(
-        `[scheduled] skill "${payload.skill}" is archived for project ${body.projectId} — refusing stale automation; restore it or repoint the reminder`,
-      );
-    } else {
-      console.log(`[scheduled] skill "${payload.skill}" not found for project ${body.projectId}`);
-    }
-  }
-  if (payload.prompt) procedure = procedure ? `${procedure}\n\n${payload.prompt}` : String(payload.prompt);
-  if (procedure) input.instructions = procedure;
-  else if (payload.topic) input.topic = String(payload.topic);
-  // Skill named-but-missing AND no prompt/topic → nothing to run; skip the empty turn.
-  if (!input.instructions && !input.topic) {
-    return c.json({ skipped: 'nothing to run (skill missing, no prompt/topic)' });
-  }
+  const scheduled = await buildScheduledInput({
+    db: c.env.DB,
+    projectId: body.projectId,
+    kind: body.kind,
+    payload: body.payload,
+    now: new Date().toISOString(),
+  });
+  if (scheduled.skipped) return c.json({ skipped: scheduled.skipped });
+  const input = scheduled.input;
 
   await dispatch({
     agent: 'project',
