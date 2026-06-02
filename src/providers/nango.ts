@@ -10,7 +10,7 @@
 //
 // Every external call is bounded by AbortSignal.timeout: a DO turn holds the input gate; an
 // uncapped fetch that hangs past ~30s lets a concurrent blockConcurrencyWhile(onStart) time out and
-// reset the DO mid-turn (the partyserver lesson). Same 12s ceiling as api.ts / github.ts.
+// reset the DO mid-turn (the partyserver lesson). Same 12s ceiling as generic-api.ts / github.ts.
 
 import { fetchWithTimeout } from './http';
 

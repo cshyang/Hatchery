@@ -20,7 +20,7 @@ import {
 import { connectionTools, connectionsBlock, requestConnectionTool, disconnectConnectionTool } from './tools';
 import { buildConnectionRuntime } from './runtime';
 import { PROVIDER_CATALOG } from './catalog';
-import { GITHUB_READ_TOOL_NAMES } from '../github';
+import { GITHUB_READ_TOOL_NAMES } from '../providers/github';
 import type { D1Like } from '../skills';
 import type { Binding, ConnectionSpec } from '../bindings';
 

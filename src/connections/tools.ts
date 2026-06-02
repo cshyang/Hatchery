@@ -1,8 +1,8 @@
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
-import { genericApiTool, PROVIDER_API_PROFILES } from '../api';
+import { genericApiTool, PROVIDER_API_PROFILES } from '../providers/generic-api';
 import { disconnectedNotice, disableConnectionByRef, loadConnections, type ConnectionState, type ResolvedConnection } from './repository';
-import { githubReadTools } from '../github';
-import { deleteConnection, startConnectSession } from '../nango';
+import { githubReadTools } from '../providers/github';
+import { deleteConnection, startConnectSession } from '../providers/nango';
 import { PROVIDER_CATALOG, providerUsesGenericApi, type ProviderCatalogEntry } from './catalog';
 import type { D1Like } from '../skills';
 
