@@ -124,6 +124,9 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
       `• "kind":"heartbeat" → a scheduled/self-triggered run, nobody waiting. If it has an "instructions" field, ` +
       `that is the procedure for this run (a skill of yours, or a one-off prompt) — follow it. Else address the ` +
       `"topic" if one is given. If there is nothing meaningful to do, stay silent. When you do post, omit conversationId.\n` +
+      `• "kind":"work_item" → a durable Hatchery workbench task. Read the workItemId, call get_work_item before ` +
+      `starting, use update_work_item to mark running/blocked/completed/failed as you make progress, and create child ` +
+      `work items only for real subtasks. Do not invent file/artifact references; those are backend-owned evidence.\n` +
       `• reply_to_conversation is the ONLY way your words reach the project space. Plain text you write — INCLUDING a ` +
       `complete answer you compose after tool calls — is silently DISCARDED; the user sees nothing. So your turn's FINAL ` +
       `action is ALWAYS a reply_to_conversation call carrying your full answer. Gathering data with tools and then stopping ` +

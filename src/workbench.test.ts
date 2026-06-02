@@ -381,7 +381,7 @@ test('workbenchTools expose project-scoped model tools and restrict model status
 test('handleInternalWorkItemRequest authenticates, dedupes, and records dispatch success/failure', async () => {
   const db = new FakeD1();
   const deps = seq();
-  const bindingByProject = async (projectId: string) => (projectId === 'P' ? { projectId: 'P', status: 'active' } : undefined);
+  const bindingByProject = async (projectId: string) => (projectId === 'P' ? ({ projectId: 'P', status: 'active' } as const) : undefined);
   const dispatched: unknown[] = [];
 
   const unauthorized = await handleInternalWorkItemRequest(
@@ -395,6 +395,13 @@ test('handleInternalWorkItemRequest authenticates, dedupes, and records dispatch
     { bindingByProject, dispatch: async () => {}, ...deps },
   );
   assert.deepEqual(inactive.body, { skipped: 'no active binding' });
+
+  const badSource = await handleInternalWorkItemRequest(
+    { db, expectedToken: 'secret', actualToken: 'secret', body: { projectId: 'P', title: 'Bad source', sourceType: 'dropbox' } },
+    { bindingByProject, dispatch: async () => {}, ...deps },
+  );
+  assert.equal(badSource.status, 400);
+  assert.deepEqual(badSource.body, { error: 'unknown sourceType' });
 
   const manual = await handleInternalWorkItemRequest(
     { db, expectedToken: 'secret', actualToken: 'secret', body: { projectId: 'P', title: 'Manual', dispatch: false } },
