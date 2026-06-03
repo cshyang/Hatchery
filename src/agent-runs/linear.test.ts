@@ -267,13 +267,13 @@ const projectsJson = JSON.stringify({
     targetRepo: 'github.com/acme/repo',
     baseBranch: 'main',
     kit: 'coding-default',
-    runtime: 'opencode',
+    runtime: 'pi',
     sandboxProvider: 'e2b',
     runStateName: 'Run Agent',
   },
 });
 
-function addActiveRoute(db: FakeD1) {
+function addActiveRoute(db: FakeD1, runtime = 'pi') {
   db.routes.push({
     id: 'route-1',
     project_id: 'P',
@@ -285,7 +285,7 @@ function addActiveRoute(db: FakeD1) {
     github_repo: 'repo',
     base_branch: 'main',
     kit: 'coding-default',
-    runtime: 'opencode',
+    runtime,
     sandbox_provider: 'e2b',
     priority: 0,
     status: 'active',
@@ -305,8 +305,20 @@ test('parseLinearAgentProjects accepts team key/id project config and defaults r
   const parsed = parseLinearAgentProjects(JSON.stringify({ LIN: { projectId: 'P', targetRepo: 'github.com/acme/repo' } }));
   assert.equal(parsed.get('LIN')?.projectId, 'P');
   assert.equal(parsed.get('LIN')?.baseBranch, 'main');
-  assert.equal(parsed.get('LIN')?.runtime, 'opencode');
+  assert.equal(parsed.get('LIN')?.runtime, 'pi');
   assert.equal(parsed.get('LIN')?.sandboxProvider, 'e2b');
+});
+
+test('parseLinearAgentProjects clearly fails legacy non-Pi runtime config', () => {
+  assert.throws(
+    () =>
+      parseLinearAgentProjects(
+        JSON.stringify({
+          LIN: { projectId: 'P', targetRepo: 'github.com/acme/repo', runtime: 'opencode' },
+        }),
+      ),
+    /runtime "opencode" is not supported/i,
+  );
 });
 
 test('verifyLinearWebhook accepts raw-body HMAC and rejects wrong signatures', async () => {
@@ -343,7 +355,7 @@ test('handleLinearWebhook rejects missing/wrong signature and stale timestamps',
   assert.match(String(old.body?.error), /stale/i);
 });
 
-test('handleLinearWebhook creates one agent_run and dispatches expected E2B OpenCode payload', async () => {
+test('handleLinearWebhook creates one agent_run and dispatches expected E2B Pi payload', async () => {
   const db = new FakeD1();
   const raw = JSON.stringify(issuePayload());
   const signature = await hmac('linear-secret', raw);
@@ -376,7 +388,8 @@ test('handleLinearWebhook creates one agent_run and dispatches expected E2B Open
     url: 'https://hatchery.example/__internal/agent-runs',
     authHeader: 'x-hatchery-agent-runner-token',
   });
-  assert.equal(sent[0].body.runtime, 'opencode');
+  assert.equal(sent[0].body.runtime, 'pi');
+  assert.equal(sent[0].body.kit, 'coding-default');
   assert.equal(sent[0].body.sandboxProvider, 'e2b');
   assert.equal((sent[0].body.linearIssue as Record<string, unknown>).identifier, 'LIN-42');
 });
@@ -411,6 +424,32 @@ test('handleLinearWebhook matches active route config and writes event before di
   assert.equal(db.agentRuns[0].github_repo, 'repo');
   assert.equal(sent[0].body.targetRepo, 'https://github.com/acme/repo');
   assert.equal(db.ops.indexOf('event') < db.ops.indexOf('agent_run'), true, 'event receipt is written before run lease');
+});
+
+test('handleLinearWebhook clearly fails legacy active route runtime before dispatch', async () => {
+  const db = new FakeD1();
+  addActiveRoute(db, 'opencode');
+  const raw = JSON.stringify(issuePayload());
+  const signature = await hmac('linear-secret', raw);
+  let calls = 0;
+
+  const result = await handleLinearWebhook(
+    { db, signingSecret: 'linear-secret', signature, deliveryId: 'delivery-legacy-route', event: 'Issue', rawBody: raw, projectsJson: undefined, nowMs: 2_000_000 },
+    {
+      runnerUrl: 'https://runner.example/run',
+      runnerToken: 'runner-secret',
+      fetch: (async () => {
+        calls++;
+        return new Response('{}', { status: 202 });
+      }) as typeof fetch,
+      ...seq(),
+    },
+  );
+
+  assert.equal(result.status, 400);
+  assert.match(String(result.body?.error), /agent_run_routes runtime "opencode" is not supported/i);
+  assert.equal(calls, 0);
+  assert.equal(db.agentRuns.length, 0);
 });
 
 test('handleLinearWebhook dedupes duplicate deliveries and repeated issue payloads', async () => {

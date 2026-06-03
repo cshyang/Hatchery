@@ -28,7 +28,7 @@ export const AGENT_RUN_ROUTE_CREATED_BY_TYPES = ['model', 'admin', 'system'] as 
 export type AgentRunRouteCreatedByType = (typeof AGENT_RUN_ROUTE_CREATED_BY_TYPES)[number];
 
 const SUPPORTED_KITS = new Set(['coding-default']);
-const SUPPORTED_RUNTIMES = new Set(['opencode']);
+const SUPPORTED_RUNTIMES = new Set(['pi']);
 const SUPPORTED_SANDBOX_PROVIDERS = new Set(['e2b']);
 
 export interface ClockAndIds {
@@ -494,7 +494,7 @@ export async function createAgentRunRoute(
   const githubOwner = requireText(input.githubOwner, 'githubOwner', 128);
   const githubRepo = requireText(input.githubRepo, 'githubRepo', 128);
   const kit = normalizeText(input.kit) ?? 'coding-default';
-  const runtime = normalizeText(input.runtime) ?? 'opencode';
+  const runtime = normalizeText(input.runtime) ?? 'pi';
   const sandboxProvider = normalizeText(input.sandboxProvider) ?? 'e2b';
   assertSupportedRouteRuntime({ kit, runtime, sandboxProvider });
   await validateRouteConnections(db, { projectId, provider, githubOwner, githubRepo });

@@ -46,8 +46,10 @@ test('buildSelfStatus reports the live runtime manifest without exposing connect
   assert.deepEqual(status.capabilities.agentRuns.tools, ['propose_agent_route']);
   assert.match(status.capabilities.agentRuns.note, /Linear/);
   assert.match(status.capabilities.agentRuns.note, /E2B/);
-  assert.match(status.capabilities.agentRuns.note, /OpenCode/);
+  assert.match(status.capabilities.agentRuns.note, /Pi/);
+  assert.match(status.capabilities.agentRuns.note, /Agent Kits/);
   assert.match(status.capabilities.agentRuns.note, /admin-only/);
+  assert.equal(JSON.stringify(status).includes('OpenCode'), false);
   assert.equal(JSON.stringify(status).includes('Claude Code'), false);
   assert.match(status.capabilities.reminders.note, /TICKER/);
   assert.deepEqual(status.connections.providers, [

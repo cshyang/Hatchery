@@ -268,7 +268,7 @@ export async function createAgentRun(
       requireText(input.targetRepo, 'targetRepo', 512),
       normalizeText(input.baseBranch) ?? 'main',
       normalizeText(input.kit) ?? 'coding-default',
-      normalizeText(input.runtime) ?? 'opencode',
+      normalizeText(input.runtime) ?? 'pi',
       normalizeText(input.sandboxProvider) ?? 'e2b',
       null,
       'queued',

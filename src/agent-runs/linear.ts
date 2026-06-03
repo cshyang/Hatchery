@@ -6,6 +6,9 @@ import { createAgentRun, updateAgentRun, type AgentRun, type ClockAndIds } from 
 const RUNNER_FETCH_TIMEOUT_MS = 12_000;
 const WEBHOOK_MAX_AGE_MS = 60_000;
 const DEFAULT_RUN_STATE_NAME = 'Run Agent';
+const DEFAULT_KIT = 'coding-default';
+const DEFAULT_RUNTIME = 'pi';
+const DEFAULT_SANDBOX_PROVIDER = 'e2b';
 
 export interface LinearAgentProjectConfig {
   projectId: string;
@@ -88,15 +91,21 @@ function optionalText(value: unknown, max = 4096): string | null {
   return s;
 }
 
+function supportedRuntime(value: unknown, source: string): string {
+  const runtime = optionalText(value, 128) ?? DEFAULT_RUNTIME;
+  if (runtime !== DEFAULT_RUNTIME) throw new Error(`${source} runtime "${runtime}" is not supported; use "${DEFAULT_RUNTIME}"`);
+  return runtime;
+}
+
 function normalizeProjectConfig(input: unknown): LinearAgentProjectConfig {
   const cfg = record(input);
   return {
     projectId: text(cfg.projectId, 'projectId', 256),
     targetRepo: text(cfg.targetRepo, 'targetRepo', 512),
     baseBranch: optionalText(cfg.baseBranch, 128) ?? 'main',
-    kit: optionalText(cfg.kit, 128) ?? 'coding-default',
-    runtime: optionalText(cfg.runtime, 128) ?? 'opencode',
-    sandboxProvider: optionalText(cfg.sandboxProvider, 128) ?? 'e2b',
+    kit: optionalText(cfg.kit, 128) ?? DEFAULT_KIT,
+    runtime: supportedRuntime(cfg.runtime, 'LINEAR_AGENT_PROJECTS'),
+    sandboxProvider: optionalText(cfg.sandboxProvider, 128) ?? DEFAULT_SANDBOX_PROVIDER,
     runStateName: optionalText(cfg.runStateName, 128) ?? DEFAULT_RUN_STATE_NAME,
   };
 }
@@ -162,7 +171,7 @@ function routeToProjectConfig(route: AgentRunRoute): LinearAgentProjectConfig {
     targetRepo: routeTargetRepo(route),
     baseBranch: route.baseBranch,
     kit: route.kit,
-    runtime: route.runtime,
+    runtime: supportedRuntime(route.runtime, 'agent_run_routes'),
     sandboxProvider: route.sandboxProvider,
     runStateName: route.triggerValue,
   };
