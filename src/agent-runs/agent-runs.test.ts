@@ -512,7 +512,8 @@ test('reconciler times out a running run whose heartbeat went stale, and notifie
   row.status = 'running';
   row.last_heartbeat_at = 1_000; // long dead
 
-  const summary = await reconcileAgentRuns(db, runnerDeps, { now: () => 10_000_000, id: () => 'x' });
+  // now well past RUNNING_STALE_MS (3h) since the last heartbeat at t=1000.
+  const summary = await reconcileAgentRuns(db, runnerDeps, { now: () => 20_000_000, id: () => 'x' });
 
   assert.equal(summary.timedOut, 1);
   const run = await getAgentRunById(db, created.run.id);
