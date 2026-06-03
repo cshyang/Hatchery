@@ -215,7 +215,7 @@ const runInput = {
   targetRepo: 'github.com/acme/repo',
   baseBranch: 'main',
   kit: 'coding-default',
-  runtime: 'opencode',
+  runtime: 'pi',
   sandboxProvider: 'e2b',
 };
 
@@ -230,7 +230,7 @@ test('createAgentRun stores a project-scoped lease and dedupes by idempotency ke
   assert.equal(first.duplicate, false);
   assert.equal(first.run.projectId, 'P');
   assert.equal(first.run.status, 'queued');
-  assert.equal(first.run.runtime, 'opencode');
+  assert.equal(first.run.runtime, 'pi');
   assert.equal(first.run.sandboxProvider, 'e2b');
   assert.equal(duplicate.duplicate, true);
   assert.equal(duplicate.run.id, first.run.id);

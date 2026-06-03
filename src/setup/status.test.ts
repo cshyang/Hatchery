@@ -72,7 +72,7 @@ function connection(provider: string, config: Record<string, unknown> = {}): Row
   };
 }
 
-function route(status = 'active'): Row {
+function route(status = 'active', runtime = 'pi'): Row {
   return {
     id: 'route_1',
     project_id: 'project_1',
@@ -83,8 +83,8 @@ function route(status = 'active'): Row {
     github_owner: 'Calibrax-ai',
     github_repo: 'autoship',
     base_branch: 'main',
-    kit: 'default',
-    runtime: 'opencode',
+    kit: 'coding-default',
+    runtime,
     sandbox_provider: 'e2b',
     priority: 10,
     status,
@@ -166,8 +166,29 @@ test('setup_status reports ready when GitHub, Linear, active route, and runner c
   assert.deepEqual(status.missing, []);
   assert.equal(status.routes[0].status, 'active');
   assert.equal(status.routes[0].targetRepo, 'Calibrax-ai/autoship');
-  assert.deepEqual(status.runner, { configured: true, runtime: 'opencode', sandboxProvider: 'e2b' });
+  assert.deepEqual(status.runner, { configured: true, runtime: 'pi', sandboxProvider: 'e2b' });
   assert.equal(status.nextAction?.type, 'none');
+});
+
+test('setup_status flags legacy opencode active routes before Pi readiness', async () => {
+  const db = new FakeD1();
+  db.connections.push(connection('github', { authMode: 'pat', repo: 'Calibrax-ai/autoship' }), connection('linear', { authMode: 'oauth' }));
+  db.routes.push(route('active', 'opencode'));
+
+  const status = await buildSetupStatus({
+    db,
+    binding: binding(),
+    projectId: 'project_1',
+    env: { NANGO_SECRET_KEY: 'secret', AGENT_RUNNER_URL: 'https://runner.example', AGENT_RUNNER_TOKEN: 'runner_secret' },
+    targetRepo: 'Calibrax-ai/autoship',
+    linearTeamKey: 'EDK',
+  });
+
+  assert.equal(status.ready, false);
+  assert.equal(status.runner.runtime, 'pi');
+  assert.ok(status.missing.some((m) => m.kind === 'route' && /legacy runtime "opencode"/.test(m.reason)));
+  assert.equal(status.routes[0].runtime, 'opencode');
+  assert.equal(status.nextAction?.type, 'activate_route');
 });
 
 test('setup_status tool returns structured JSON without exposing configured values', async () => {

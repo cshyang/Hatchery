@@ -268,7 +268,7 @@ test('route proposals are pending only and active route conflicts are rejected',
       githubRepo: 'repo',
       baseBranch: 'main',
       kit: 'coding-default',
-      runtime: 'opencode',
+      runtime: 'pi',
       sandboxProvider: 'e2b',
       reason: 'EDK team wants Linear state transitions to run the coding agent.',
       createdByType: 'model',
@@ -295,7 +295,7 @@ test('route proposals are pending only and active route conflicts are rejected',
       githubRepo: 'repo',
       baseBranch: 'main',
       kit: 'coding-default',
-      runtime: 'opencode',
+      runtime: 'pi',
       sandboxProvider: 'e2b',
       reason: 'duplicate route',
       createdByType: 'admin',
@@ -325,7 +325,7 @@ test('route proposal refuses unconnected provider and disallowed repo', async ()
         githubRepo: 'allowed',
         baseBranch: 'main',
         kit: 'coding-default',
-        runtime: 'opencode',
+        runtime: 'pi',
         sandboxProvider: 'e2b',
         reason: 'missing linear connection',
       }),
@@ -345,7 +345,7 @@ test('route proposal refuses unconnected provider and disallowed repo', async ()
         githubRepo: 'other',
         baseBranch: 'main',
         kit: 'coding-default',
-        runtime: 'opencode',
+        runtime: 'pi',
         sandboxProvider: 'e2b',
         reason: 'wrong repo',
       }),
@@ -353,7 +353,32 @@ test('route proposal refuses unconnected provider and disallowed repo', async ()
   );
 });
 
-test('propose_agent_route tool creates a pending route only', async () => {
+test('route proposal rejects unsupported new runtimes', async () => {
+  const db = new FakeD1();
+  db.connections.push({ project_id: 'P', provider: 'linear', status: 'active' });
+  db.connections.push({ project_id: 'P', provider: 'github', status: 'active', config_json: JSON.stringify({ repo: 'acme/repo' }) });
+
+  await assert.rejects(
+    () =>
+      createAgentRunRoute(db, {
+        projectId: 'P',
+        provider: 'linear',
+        externalKey: 'EDK',
+        triggerType: 'state',
+        triggerValue: 'Run Agent',
+        githubOwner: 'acme',
+        githubRepo: 'repo',
+        baseBranch: 'main',
+        kit: 'coding-default',
+        runtime: 'opencode',
+        sandboxProvider: 'e2b',
+        reason: 'legacy runtime should be replaced',
+      }),
+    /runtime "opencode" is not supported/i,
+  );
+});
+
+test('propose_agent_route tool creates a pending Pi route only', async () => {
   const db = new FakeD1();
   db.connections.push({ project_id: 'P', provider: 'linear', status: 'active' });
   db.connections.push({ project_id: 'P', provider: 'github', status: 'active', config_json: JSON.stringify({ repo: 'acme/repo' }) });
@@ -368,16 +393,18 @@ test('propose_agent_route tool creates a pending route only', async () => {
       githubOwner: 'acme',
       githubRepo: 'repo',
       baseBranch: 'main',
-      kit: 'coding-default',
-      runtime: 'opencode',
-      sandboxProvider: 'e2b',
       reason: 'Route Linear Run Agent state into the coding runner.',
     }),
   );
 
   assert.equal(output.status, 'pending');
+  assert.equal(output.kit, 'coding-default');
+  assert.equal(output.runtime, 'pi');
+  assert.equal(output.sandboxProvider, 'e2b');
   assert.equal(db.routes.length, 1);
   assert.equal(db.routes[0].status, 'pending');
+  assert.equal(db.routes[0].runtime, 'pi');
+  assert.equal(db.routes[0].sandbox_provider, 'e2b');
   assert.equal(await findActiveAgentRunRoute(db, { provider: 'linear', externalKey: 'EDK', triggerType: 'state', triggerValue: 'Run Agent' }), null);
 });
 

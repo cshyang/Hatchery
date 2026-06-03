@@ -58,13 +58,14 @@ to Hatchery. Human or CI/CD policy owns merge and production deployment.
 
 Linear can be used as the team-facing baton for coding tasks. Admin-approved `agent_run_routes`
 decide which exact provider trigger, such as a Linear state transition into `Run Agent`, creates a
-Hatchery `agent_run` receipt and dispatches an external E2B-backed OpenCode runner.
+Hatchery `agent_run` receipt and dispatches an external E2B-backed Pi runner with an Agent Kit such
+as `coding-default`.
 
 You may propose a pending route with `propose_agent_route` when the user asks to wire a workflow, but
 you cannot activate routes. Activation, disabling, and launch authority stay behind the admin route.
 
 `agent_runs` is current state, `agent_run_events` is append-only boundary history, and
 `agent_run_notifications` prevents duplicate Slack/Linear announcements after webhook echoes.
-Hatchery records run, PR, CI, commit, sandbox, and failure metadata; it does not run OpenCode inside
-the Durable Object, persist controller topology, edit source directly, auto-merge PRs, or deploy
-production.
+Hatchery records run, PR, CI, commit, sandbox, and failure metadata; it does not run Pi or subagents
+inside the Durable Object, persist controller topology, edit source directly, auto-merge PRs, or
+deploy production.

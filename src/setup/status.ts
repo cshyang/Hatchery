@@ -3,6 +3,9 @@ import type { Binding } from '../project/bindings';
 import type { D1Like } from '../skills/repository';
 import { connectionState, loadConnectionSpecs } from '../connections/repository';
 
+const DEFAULT_RUNNER_RUNTIME = 'pi';
+const DEFAULT_SANDBOX_PROVIDER = 'e2b';
+
 export interface SetupConnectedProvider {
   provider: string;
   authMode?: string;
@@ -94,7 +97,7 @@ export async function buildSetupStatus(args: {
 
   const routes = args.db ? await loadRoutes(args.db, args.projectId).catch(() => []) : [];
   const activeRoute = routes.find((route) => routeMatches(route, { targetRepo, linearTeamKey, status: 'active' }));
-  const runner = runnerSummary(env, activeRoute);
+  const runner = runnerSummary(env);
   const githubRecommendation = githubAuthRecommendation(targetRepo);
 
   const missing: SetupMissingItem[] = [];
@@ -128,6 +131,13 @@ export async function buildSetupStatus(args: {
       provider: 'linear',
       reason: routeMissingReason({ targetRepo, linearTeamKey }),
       nextAction: 'Ask an admin to create or activate a Linear Run Agent route for this project.',
+    });
+  } else if (activeRoute.runtime !== DEFAULT_RUNNER_RUNTIME) {
+    missing.push({
+      kind: 'route',
+      provider: 'linear',
+      reason: `Active Linear Run Agent route uses legacy runtime "${activeRoute.runtime}".`,
+      nextAction: 'Ask an admin to replace it with a Pi Agent Kits route before launching new runs.',
     });
   }
   if (!runner.configured) {
@@ -240,11 +250,11 @@ function routeMatches(
   return true;
 }
 
-function runnerSummary(env: Record<string, unknown>, route?: SetupRouteSummary): SetupRunnerSummary {
+function runnerSummary(env: Record<string, unknown>): SetupRunnerSummary {
   return {
     configured: hasEnvString(env, 'AGENT_RUNNER_URL') && hasEnvString(env, 'AGENT_RUNNER_TOKEN'),
-    runtime: route?.runtime ?? 'opencode',
-    sandboxProvider: route?.sandboxProvider ?? 'e2b',
+    runtime: DEFAULT_RUNNER_RUNTIME,
+    sandboxProvider: DEFAULT_SANDBOX_PROVIDER,
   };
 }
 
