@@ -1,9 +1,8 @@
-import { fetchWithTimeout, jsonMessageOrText } from '../providers/http';
 import type { D1Like } from '../skills/repository';
 import { createAgentRunEvent, createAgentRunNotification, findActiveAgentRunRoute, type AgentRunRoute } from './events';
-import { createAgentRun, updateAgentRun, type AgentRun, type ClockAndIds } from './repository';
+import { createAgentRun, getLatestAgentRunByLinearIssue, updateAgentRun, type AgentRun, type AgentRunStatus, type ClockAndIds } from './repository';
+import { claimAndDispatchRun } from './dispatch';
 
-const RUNNER_FETCH_TIMEOUT_MS = 12_000;
 const WEBHOOK_MAX_AGE_MS = 60_000;
 const DEFAULT_RUN_STATE_NAME = 'Run Agent';
 const DEFAULT_KIT = 'coding-default';
@@ -36,11 +35,18 @@ export interface LinearWebhookDeps extends ClockAndIds {
   runnerToken?: string;
   hatcheryPublicUrl?: string;
   fetch?: typeof fetch;
+  // Linear actor id of Hatchery's own integration. When set, a transition performed by that actor is
+  // recorded but never triggers a run — closes the self-trigger loop if the bot ever moves an issue.
+  botActorId?: string;
 }
 
 export interface LinearWebhookResult {
   status: number;
   body?: any;
+  // Deferred best-effort dispatch. The handler returns fast (records the queued run); the caller runs
+  // this via waitUntil so the runner call never sits on Slack/Linear's ack budget. The ticker
+  // reconciler is the durable backstop if this never runs or fails.
+  dispatch?: () => Promise<unknown>;
 }
 
 interface LinearIssueSnapshot {
@@ -205,81 +211,44 @@ function idempotencyKey(issue: LinearIssueSnapshot, cfg: LinearAgentProjectConfi
   return `linear:issue:${issue.id}:state:${cfg.runStateName}`;
 }
 
-function callbackUrl(hatcheryPublicUrl: string | undefined): string | undefined {
-  if (!hatcheryPublicUrl) return undefined;
-  return `${hatcheryPublicUrl.replace(/\/+$/, '')}/__internal/agent-runs`;
+function isTerminalRun(status: AgentRunStatus): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
 
-function runnerPayload(args: {
-  run: AgentRun;
-  deliveryId: string;
-  issue: LinearIssueSnapshot;
-  callback?: string;
-}) {
-  return {
-    runId: args.run.id,
-    projectId: args.run.projectId,
-    source: { type: 'linear', id: args.deliveryId },
-    linearIssue: args.issue,
-    targetRepo: args.run.targetRepo,
-    baseBranch: args.run.baseBranch,
-    kit: args.run.kit,
-    runtime: args.run.runtime,
-    sandboxProvider: args.run.sandboxProvider,
-    callback: {
-      ...(args.callback ? { url: args.callback } : { path: '/__internal/agent-runs' }),
-      authHeader: 'x-hatchery-agent-runner-token',
-    },
-  };
+function actorText(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const s = String(value).trim();
+  return s.length ? s : null;
 }
 
-async function dispatchToRunner(args: {
-  runnerUrl: string;
-  runnerToken: string;
-  payload: unknown;
-  fetchImpl?: typeof fetch;
-}): Promise<{ sandboxId?: string | null }> {
-  const res = await fetchWithTimeout(
-    args.runnerUrl,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-hatchery-agent-runner-token': args.runnerToken },
-      body: JSON.stringify(args.payload),
-    },
-    {
-      timeoutMs: RUNNER_FETCH_TIMEOUT_MS,
-      timeoutMessage: `agent runner timed out after ${RUNNER_FETCH_TIMEOUT_MS}ms`,
-      failurePrefix: 'agent runner dispatch failed',
-      fetchImpl: args.fetchImpl,
-    },
-  );
-  const textBody = await res.text();
-  if (!res.ok) throw new Error(`agent runner ${res.status}: ${jsonMessageOrText(textBody, 160)}`);
-  try {
-    const parsed = JSON.parse(textBody) as { sandboxId?: unknown };
-    return { sandboxId: typeof parsed.sandboxId === 'string' ? parsed.sandboxId : null };
-  } catch {
-    return {};
-  }
+// Self-trigger / automation guard. A human moving an issue into the trigger state is the intended baton;
+// a move by Hatchery's own integration (or any non-user actor) must be recorded, not re-triggered, or we
+// loop. Linear omits `actor` on some events — when absent we treat it as human so a real move is never
+// suppressed; the loop is closed precisely once botActorId is configured (or the actor self-identifies).
+function isNonHumanActor(payload: Record<string, unknown>, botActorId: string | undefined): boolean {
+  const actor = objectField(payload, 'actor');
+  if (!actor) return false;
+  const type = actorText(actor.type);
+  if (type && type.toLowerCase() !== 'user') return true;
+  const id = actorText(actor.id);
+  if (botActorId && id === botActorId) return true;
+  const name = (actorText(actor.name) ?? '').toLowerCase();
+  return name.includes('hatchery') || name.includes('[bot]');
 }
 
-async function dispatchAgentRun(db: D1Like, deliveryId: string, run: AgentRun, issue: LinearIssueSnapshot, deps: LinearWebhookDeps) {
-  if (!deps.runnerUrl || !deps.runnerToken) {
-    const failed = await updateAgentRun(db, { id: run.id, status: 'failed', error: 'agent runner is not configured' }, deps);
-    return { run: failed, dispatchStatus: 'failed', dispatchError: 'agent runner is not configured' };
-  }
-
-  const dispatching = await updateAgentRun(db, { id: run.id, status: 'dispatching' }, deps);
-  const payload = runnerPayload({ run: dispatching, deliveryId, issue, callback: callbackUrl(deps.hatcheryPublicUrl) });
-  try {
-    const result = await dispatchToRunner({ runnerUrl: deps.runnerUrl, runnerToken: deps.runnerToken, payload, fetchImpl: deps.fetch });
-    const updated = await updateAgentRun(db, { id: run.id, status: 'running', sandboxId: result.sandboxId }, deps);
-    return { run: updated, dispatchStatus: 'dispatched' };
-  } catch (e) {
-    const message = e instanceof Error ? e.message : 'agent runner dispatch failed';
-    const failed = await updateAgentRun(db, { id: run.id, status: 'failed', error: message }, deps);
-    return { run: failed, dispatchStatus: 'failed', dispatchError: message };
-  }
+// The self-contained dispatch body persisted on the run (the outbox message). runId + projectId +
+// callback are injected at send time by dispatch.ts — runId isn't known until the row exists, and the
+// callback URL is env-derived so a stored copy could go stale.
+function buildDispatchPayload(cfg: LinearAgentProjectConfig, issue: LinearIssueSnapshot, deliveryId: string): string {
+  return JSON.stringify({
+    source: { type: 'linear', id: deliveryId },
+    linearIssue: issue,
+    targetRepo: cfg.targetRepo,
+    baseBranch: cfg.baseBranch,
+    kit: cfg.kit,
+    runtime: cfg.runtime,
+    sandboxProvider: cfg.sandboxProvider,
+  });
 }
 
 async function recordStartedNotification(db: D1Like, run: AgentRun, deps: ClockAndIds) {
@@ -325,6 +294,29 @@ export async function handleLinearWebhook(req: LinearWebhookRequest, deps: Linea
       return { status: 200, body: { skipped: 'not a Run Agent transition' } };
     }
 
+    // Self-trigger guard: record a non-human actor's transition, but never dispatch from it.
+    if (isNonHumanActor(payload, deps.botActorId)) {
+      await createAgentRunEvent(
+        req.db,
+        {
+          projectId: cfg.projectId,
+          provider: 'linear',
+          eventType: 'linear.issue.state_changed',
+          providerDeliveryId: req.deliveryId,
+          providerEntityId: issue.id,
+          dedupeKey: `linear-direct:${req.deliveryId}`,
+          actorType: 'provider_bot',
+          handling: 'record_only',
+          handlingReason: `non-human actor transitioned issue into ${cfg.runStateName}`,
+          payload,
+          occurredAt: timestamp,
+          processedAt: req.nowMs ?? Date.now(),
+        },
+        deps,
+      );
+      return { status: 200, body: { skipped: 'non-human actor; recorded only' } };
+    }
+
     const event = await createAgentRunEvent(
       req.db,
       {
@@ -344,6 +336,15 @@ export async function handleLinearWebhook(req: LinearWebhookRequest, deps: Linea
       deps,
     );
 
+    // Rerun gate: dedupe to a still-active run for this issue; allow a fresh run once the prior is
+    // terminal (re-entering the trigger state is the rerun gesture). The stable key would otherwise
+    // let one terminal run own the issue forever, so re-runs are keyed by delivery.
+    const latest = await getLatestAgentRunByLinearIssue(req.db, cfg.projectId, issue.id);
+    if (latest && !isTerminalRun(latest.status)) {
+      return { status: 200, body: { run: latest, duplicate: true, dispatchStatus: 'deduped' } };
+    }
+    const runKey = latest ? `${idempotencyKey(issue, cfg)}:rerun:${req.deliveryId}` : idempotencyKey(issue, cfg);
+
     const created = await createAgentRun(
       req.db,
       {
@@ -351,7 +352,7 @@ export async function handleLinearWebhook(req: LinearWebhookRequest, deps: Linea
         routeId: route?.id,
         sourceType: 'linear',
         sourceId: req.deliveryId,
-        idempotencyKey: idempotencyKey(issue, cfg),
+        idempotencyKey: runKey,
         linearIssueId: issue.id,
         linearIdentifier: issue.identifier,
         linearUrl: issue.url,
@@ -362,6 +363,7 @@ export async function handleLinearWebhook(req: LinearWebhookRequest, deps: Linea
         kit: cfg.kit,
         runtime: cfg.runtime,
         sandboxProvider: cfg.sandboxProvider,
+        dispatchPayload: buildDispatchPayload(cfg, issue, req.deliveryId),
       },
       deps,
     );
@@ -371,8 +373,15 @@ export async function handleLinearWebhook(req: LinearWebhookRequest, deps: Linea
 
     await updateAgentRun(req.db, { id: created.run.id, lastEventId: event.event.id }, deps);
     await recordStartedNotification(req.db, created.run, deps);
-    const dispatched = await dispatchAgentRun(req.db, req.deliveryId, created.run, issue, deps);
-    return { status: 200, body: { ...dispatched, duplicate: false } };
+
+    // Hand the run to the runner OFF the response path; the ticker reconciler is the durable backstop.
+    const db = req.db;
+    const runId = created.run.id;
+    return {
+      status: 200,
+      body: { run: created.run, duplicate: false, dispatchStatus: 'queued' },
+      dispatch: () => claimAndDispatchRun(db, runId, deps, deps),
+    };
   } catch (e) {
     return { status: 400, body: { error: e instanceof Error ? e.message : 'bad request' } };
   }

@@ -30,6 +30,7 @@ import { handleInternalWorkItemRequest } from '../src/workbench/gateway';
 import { handleSourceChangeRunCallback } from '../src/workbench/source-change';
 import { handleLinearWebhook } from '../src/agent-runs/linear';
 import { handleAgentRunCallback } from '../src/agent-runs/repository';
+import { reconcileAgentRuns } from '../src/agent-runs/dispatch';
 import { activateAgentRunRoute, disableAgentRunRoute } from '../src/agent-runs/events';
 import { handleNangoForwardWebhook } from '../src/agent-runs/provider-events';
 
@@ -50,6 +51,7 @@ interface Env {
   AGENT_RUNNER_URL?: string; // generic E2B-backed coding runner dispatch endpoint
   AGENT_RUNNER_TOKEN?: string; // dedicated secret for agent-run dispatch and callbacks
   HATCHERY_PUBLIC_URL?: string; // optional absolute origin used in runner callback payloads
+  LINEAR_BOT_ACTOR_ID?: string; // Hatchery's own Linear actor id; its transitions never self-trigger a run
   ADMIN_CONNECTIONS_TOKEN?: string; // OWN secret guarding /__admin/connections (ADR D11 — NOT the heartbeat token)
   NANGO_SECRET_KEY?: string; // platform Bearer for the Nango API (create session / fetch token)
   NANGO_WEBHOOK_SECRET?: string; // HMAC signing key to verify inbound Nango auth webhooks
@@ -196,9 +198,12 @@ app.post('/linear/webhook', async (c) => {
       runnerUrl: c.env.AGENT_RUNNER_URL,
       runnerToken: c.env.AGENT_RUNNER_TOKEN,
       hatcheryPublicUrl: c.env.HATCHERY_PUBLIC_URL,
+      botActorId: c.env.LINEAR_BOT_ACTOR_ID,
       fetch,
     },
   );
+  // Immediate best-effort dispatch off the ack path; the ticker reconciler is the durable backstop.
+  if (result.dispatch) c.executionCtx.waitUntil(result.dispatch());
   if (result.status === 404) return c.body(null, 404);
   return c.json(result.body ?? {}, result.status as 200 | 400 | 500);
 });
@@ -214,6 +219,22 @@ app.post('/__internal/agent-runs', async (c) => {
   });
   if (result.status === 404) return c.body(null, 404);
   return c.json(result.body ?? {}, result.status as 200 | 400 | 500);
+});
+
+// Agent-run reconciler. The ticker's frequent cron pokes this (Flue drops scheduled(), so the clock
+// lives on the external ticker worker). It (re)dispatches queued runs, reclaims runs stuck mid-dispatch,
+// and times out runs whose runner went dark — the durability backstop for the fire-and-forget webhook.
+app.post('/__internal/agent-runs/reconcile', async (c) => {
+  if (!requireHeartbeat(c)) return c.body(null, 404);
+  const db = c.env.DB;
+  if (!db) return c.json({ reconciled: false, reason: 'no DB binding' });
+  const summary = await reconcileAgentRuns(db, {
+    runnerUrl: c.env.AGENT_RUNNER_URL,
+    runnerToken: c.env.AGENT_RUNNER_TOKEN,
+    hatcheryPublicUrl: c.env.HATCHERY_PUBLIC_URL,
+    fetch,
+  });
+  return c.json(summary);
 });
 
 // Nightly REM: the ticker's nightly cron pokes this. The GATE is cheap SQL (projects with
