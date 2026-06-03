@@ -207,22 +207,24 @@ export async function reconcileAgentRuns(
     summary.timedOut++;
   }
 
-  // 3. Dispatch the queued backlog (including anything just reclaimed in step 1).
-  for (const run of await listDispatchableRuns(db, RECONCILE_DISPATCH_LIMIT)) {
-    if (run.dispatchAttempts >= DISPATCH_MAX_ATTEMPTS) {
-      await updateAgentRun(
-        db,
-        { id: run.id, status: 'failed', error: `dispatch failed after ${run.dispatchAttempts} attempts`, lastDispatchError: run.lastDispatchError ?? 'attempt cap reached' },
-        clock,
-      );
-      summary.failed++;
-      continue;
-    }
-    const result = await claimAndDispatchRun(db, run.id, deps, clock);
-    if (result.dispatched) summary.dispatched++;
-    else if (result.status === 'failed') summary.failed++;
-    else summary.skipped++;
-  }
+  // 3. Dispatch the queued backlog (including anything just reclaimed in step 1). Run the batch in
+  // PARALLEL: each dispatch is a runner HTTP call with a 12s timeout, so doing 10 sequentially could
+  // blow the Worker request budget. Claims are atomic (CAS), so parallel dispatch is safe.
+  const outcomes = await Promise.all(
+    (await listDispatchableRuns(db, RECONCILE_DISPATCH_LIMIT)).map(async (run): Promise<'dispatched' | 'failed' | 'skipped'> => {
+      if (run.dispatchAttempts >= DISPATCH_MAX_ATTEMPTS) {
+        await updateAgentRun(
+          db,
+          { id: run.id, status: 'failed', error: `dispatch failed after ${run.dispatchAttempts} attempts`, lastDispatchError: run.lastDispatchError ?? 'attempt cap reached' },
+          clock,
+        );
+        return 'failed';
+      }
+      const result = await claimAndDispatchRun(db, run.id, deps, clock);
+      return result.dispatched ? 'dispatched' : result.status === 'failed' ? 'failed' : 'skipped';
+    }),
+  );
+  for (const outcome of outcomes) summary[outcome]++;
 
   return summary;
 }
