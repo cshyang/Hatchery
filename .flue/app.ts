@@ -52,6 +52,7 @@ interface Env {
   ADMIN_CONNECTIONS_TOKEN?: string; // OWN secret guarding /__admin/connections (ADR D11 — NOT the heartbeat token)
   NANGO_SECRET_KEY?: string; // platform Bearer for the Nango API (create session / fetch token)
   NANGO_WEBHOOK_SECRET?: string; // HMAC signing key to verify inbound Nango auth webhooks
+  NANGO_INTEGRATION_KEYS?: string; // optional JSON mapping provider/authMode to Nango integration keys
   DB?: D1Like; // D1 skill catalog, transcript, memory, and conversation targets
   [binding: string]: unknown;
 }
@@ -372,6 +373,7 @@ app.post('/nango/webhook', async (c) => {
     projectId: event.projectId,
     provider: event.provider,
     connectionRef: event.connectionId,
+    config: event.config,
     createdBy: 'nango-webhook',
   });
   console.log(`[nango] connected provider "${event.provider}" for project ${event.projectId} (connection ${event.connectionId})`);

@@ -44,6 +44,9 @@ function binding(connections?: ConnectionSpec[]): Binding {
 
 const GH: ConnectionSpec[] = [{ provider: 'github', tokenRef: 'GITHUB_PAT_DEMO', config: { repo: 'o/r' } }];
 const NANGO_REF: ConnectionSpec[] = [{ provider: 'notion', connectionRef: 'conn_42', config: {} }];
+const NANGO_GITHUB_PAT: ConnectionSpec[] = [
+  { provider: 'github', connectionRef: 'conn_gh_pat', config: { nangoIntegrationKey: 'github-pat', authMode: 'pat', repo: 'acme/repo' } },
+];
 
 // In-memory D1 fake — only the two statements repository.ts issues (coupled on purpose).
 interface Row {
@@ -181,7 +184,7 @@ test('notion_call_api allows POST (reads use POST; token is read-only at the pro
 
 test('connectionsBlock shows connected vs not-connected from real state', async () => {
   const connected = connectionsBlock(connectionState(GH, { GITHUB_PAT_DEMO: 'x' }), PROVIDER_CATALOG);
-  assert.match(connected, /✅ github \(connected\)/);
+  assert.match(connected, /✅ github \(connected: repo o\/r\)/);
   const notConnected = connectionsBlock(connectionState(GH, {}), PROVIDER_CATALOG);
   assert.match(notConnected, /⚪ github \(not connected\)/);
 });
@@ -190,7 +193,7 @@ test('buildConnectionRuntime: assembles connected provider tools and prompt bloc
   const seeded = binding([{ provider: 'github', tokenRef: 'GITHUB_PAT_DEMO', config: { repo: 'o/r', apiMode: 'generic' } }]);
   const runtime = await buildConnectionRuntime({ db: undefined, binding: seeded, env: { GITHUB_PAT_DEMO: 'ghp_x' }, projectId: 'demo' });
   assert.deepEqual(runtime.tools.map((t) => t.name), [GITHUB_CALL_API_TOOL_NAME]);
-  assert.match(runtime.connectionsBlock ?? '', /✅ github \(connected\)/);
+  assert.match(runtime.connectionsBlock ?? '', /✅ github \(connected: repo o\/r\)/);
   assert.doesNotMatch(runtime.connectionsBlock ?? '', /request_connection/);
 });
 
@@ -311,6 +314,20 @@ test('resolveConnection: connectionRef path returns a LAZY thunk, memoized to ON
   assert.equal(fetchCount, 1, 'a multi-call turn pays exactly one Nango round-trip (memoized)');
 });
 
+test('resolveConnection: Nango connectionRef uses config.nangoIntegrationKey when it differs from provider', async () => {
+  const calls: { providerConfigKey: string; connectionId: string }[] = [];
+  const fakeFetchToken = async (args: { providerConfigKey: string; connectionId: string }) => {
+    calls.push(args);
+    return 'live_gh_pat';
+  };
+  const resolved = resolveConnection(NANGO_GITHUB_PAT, { NANGO_SECRET_KEY: 'nk' }, 'github', { fetchToken: fakeFetchToken });
+  const get = resolved!.secret as () => Promise<string>;
+  assert.equal(await get(), 'live_gh_pat');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].connectionId, 'conn_gh_pat');
+  assert.equal(calls[0].providerConfigKey, 'github-pat');
+});
+
 test('resolveConnection: connectionRef but NO platform key → null (no broken tool)', async () => {
   assert.equal(resolveConnection(NANGO_REF, {}, 'notion'), null);
 });
@@ -335,18 +352,18 @@ test('a Nango-backed notion connection builds notion_call_api whose execute reso
   assert.ok(fetchCount >= 1, 'execute resolved the lazy token at least once');
 });
 
-test('request_connection: schema has provider but NO secret/token parameter (the structural wall)', async () => {
+test('request_connection: schema has setup metadata but NO secret/token parameter (the structural wall)', async () => {
   const tool = requestConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123' });
   assert.equal(tool.name, 'request_connection');
   const props = (tool.parameters as { properties?: Record<string, unknown> }).properties ?? {};
   const keys = Object.keys(props);
-  assert.deepEqual(keys, ['provider'], 'exactly one param: provider — no secret/token field exists');
+  assert.deepEqual(keys, ['provider', 'authMode', 'repo'], 'metadata only — no secret/token field exists');
   for (const k of keys) assert.ok(!/secret|token|key|credential/i.test(k), `no credential-shaped param (${k})`);
 });
 
 test('request_connection: starts a session bound to the channel (end_user_id = projectId) and returns the link', async () => {
-  const calls: { secretKey: string; endUserId: string; integrationId: string }[] = [];
-  const fakeStart = async (a: { secretKey: string; endUserId: string; integrationId: string }) => {
+  const calls: { secretKey: string; endUserId: string; integrationId: string; tags?: Record<string, string> }[] = [];
+  const fakeStart = async (a: { secretKey: string; endUserId: string; integrationId: string; tags?: Record<string, string> }) => {
     calls.push(a);
     return { connectLink: 'https://connect.nango.dev/xyz', token: 't', expiresAt: 'e' };
   };
@@ -354,7 +371,70 @@ test('request_connection: starts a session bound to the channel (end_user_id = p
   const out = (await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'notion' }));
   assert.match(out, /https:\/\/connect\.nango\.dev\/xyz/);
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0], { secretKey: 'nk', endUserId: 'C123', integrationId: 'notion' });
+  assert.deepEqual(calls[0], {
+    secretKey: 'nk',
+    endUserId: 'C123',
+    integrationId: 'notion',
+    tags: { provider: 'notion', auth_mode: 'oauth' },
+  });
+});
+
+test('request_connection: GitHub OAuth can use an operator-configured Nango integration key', async () => {
+  const calls: { secretKey: string; endUserId: string; integrationId: string; tags?: Record<string, string> }[] = [];
+  const fakeStart = async (a: { secretKey: string; endUserId: string; integrationId: string; tags?: Record<string, string> }) => {
+    calls.push(a);
+    return { connectLink: 'https://connect.nango.dev/gh', token: 't', expiresAt: 'e' };
+  };
+  const tool = requestConnectionTool(
+    {
+      nangoSecretKey: 'nk',
+      projectId: 'C123',
+      nangoIntegrationKeys: { github: { oauth: 'github-oauth', pat: 'github-pat' } },
+    },
+    { startConnectSession: fakeStart },
+  );
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'github', authMode: 'oauth' });
+  assert.match(out, /github/i);
+  assert.deepEqual(calls[0], {
+    secretKey: 'nk',
+    endUserId: 'C123',
+    integrationId: 'github-oauth',
+    tags: { provider: 'github', auth_mode: 'oauth' },
+  });
+});
+
+test('request_connection: GitHub PAT requires a repo and stores the repo as metadata only', async () => {
+  const calls: { secretKey: string; endUserId: string; integrationId: string; tags?: Record<string, string> }[] = [];
+  const fakeStart = async (a: { secretKey: string; endUserId: string; integrationId: string; tags?: Record<string, string> }) => {
+    calls.push(a);
+    return { connectLink: 'https://connect.nango.dev/pat', token: 't', expiresAt: 'e' };
+  };
+  const tool = requestConnectionTool(
+    {
+      nangoSecretKey: 'nk',
+      projectId: 'C123',
+      nangoIntegrationKeys: { github: { oauth: 'github-oauth', pat: 'github-pat' } },
+    },
+    { startConnectSession: fakeStart },
+  );
+
+  const missingRepo = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'github', authMode: 'pat' });
+  assert.match(missingRepo, /repo is required/i);
+  assert.equal(calls.length, 0, 'no Nango session starts without a repo-bound PAT');
+
+  const badRepo = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'github', authMode: 'pat', repo: 'https://github.com/Acme/Repo/pull/1' });
+  assert.match(badRepo, /repo is required|repo must/i);
+  assert.equal(calls.length, 0, 'no Nango session starts for a PR URL; route policy needs an exact repo');
+
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'github', authMode: 'pat', repo: 'Acme/Repo' });
+  assert.match(out, /Acme\/Repo/);
+  assert.deepEqual(calls[0], {
+    secretKey: 'nk',
+    endUserId: 'C123',
+    integrationId: 'github-pat',
+    tags: { provider: 'github', auth_mode: 'pat', repo: 'Acme/Repo' },
+  });
+  assert.ok(!Object.keys(calls[0].tags ?? {}).some((k) => /secret|token|key|credential/i.test(k)));
 });
 
 test('request_connection: refuses a provider not in the catalog (no session started)', async () => {
@@ -368,7 +448,7 @@ test('request_connection: refuses a provider not in the catalog (no session star
 
 // A fake DB for the disconnect tool: supports loadConnections (SELECT provider, token_ref…) and
 // disableConnectionByRef (SELECT project_id, provider WHERE connection_ref + UPDATE status).
-function disconnectFakeD1(rows: { project_id: string; provider: string; connection_ref: string | null; status: string }[]): D1Like {
+function disconnectFakeD1(rows: { project_id: string; provider: string; connection_ref: string | null; status: string; config_json?: string | null }[]): D1Like {
   return {
     prepare(sql: string) {
       const t = sql.trim();
@@ -385,7 +465,17 @@ function disconnectFakeD1(rows: { project_id: string; provider: string; connecti
           all: async <T = Record<string, unknown>>() => {
             if (t.startsWith('SELECT provider, token_ref')) {
               const [pid] = args;
-              return { results: rows.filter((r) => r.project_id === pid).map((r) => ({ provider: r.provider, token_ref: null, connection_ref: r.connection_ref, config_json: null, status: r.status })) as T[] };
+              return {
+                results: rows
+                  .filter((r) => r.project_id === pid)
+                  .map((r) => ({
+                    provider: r.provider,
+                    token_ref: null,
+                    connection_ref: r.connection_ref,
+                    config_json: r.config_json ?? null,
+                    status: r.status,
+                  })) as T[],
+              };
             }
             return { results: [] as T[] };
           },
@@ -418,6 +508,24 @@ test('disconnect_connection: schema has provider but NO secret param; deletes at
   assert.match(out, /🔌|disconnect/i);
   assert.deepEqual(deleted, [{ secretKey: 'nk', connectionId: 'conn_42', providerConfigKey: 'notion' }], 'revoked at Nango by connection_ref');
   assert.equal(rows[0].status, 'disabled', 'local row disabled → tool disappears next turn');
+});
+
+test('disconnect_connection: revokes with config.nangoIntegrationKey for GitHub PAT integrations', async () => {
+  const rows = [{
+    project_id: 'C123',
+    provider: 'github',
+    connection_ref: 'conn_pat',
+    status: 'active',
+    config_json: JSON.stringify({ authMode: 'pat', repo: 'acme/repo', nangoIntegrationKey: 'github-pat' }),
+  }];
+  const db = disconnectFakeD1(rows);
+  const deleted: { secretKey: string; connectionId: string; providerConfigKey: string }[] = [];
+  const fakeDelete = async (a: { secretKey: string; connectionId: string; providerConfigKey: string }) => { deleted.push(a); };
+  const tool = disconnectConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123', db }, { deleteConnection: fakeDelete });
+
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'github' });
+  assert.match(out, /disconnect/i);
+  assert.deepEqual(deleted, [{ secretKey: 'nk', connectionId: 'conn_pat', providerConfigKey: 'github-pat' }]);
 });
 
 test('disconnect_connection: not-connected provider → friendly message, no Nango call', async () => {

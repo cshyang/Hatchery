@@ -33,6 +33,29 @@ test('startConnectSession: POSTs to /connect/sessions with Bearer + allowed_inte
   assert.equal(body.tags.end_user_id, 'C123');
 });
 
+test('startConnectSession: includes non-secret metadata tags and keeps end_user_id authoritative', async () => {
+  const { fn, calls } = fakeFetch(() =>
+    new Response(JSON.stringify({ token: 'tok_1', expires_at: '2026-06-01T00:30:00Z', connect_link: 'https://connect.nango.dev/abc' }), { status: 200 }),
+  );
+  await startConnectSession(
+    {
+      secretKey: 'nk_secret',
+      endUserId: 'C123',
+      integrationId: 'github-pat',
+      tags: { end_user_id: 'wrong-project', provider: 'github', auth_mode: 'pat', repo: 'Calibrax-ai/autoship' },
+    },
+    { fetchImpl: fn },
+  );
+  const body = JSON.parse(String(calls[0].init.body));
+  assert.deepEqual(body.allowed_integrations, ['github-pat']);
+  assert.deepEqual(body.tags, {
+    provider: 'github',
+    auth_mode: 'pat',
+    repo: 'Calibrax-ai/autoship',
+    end_user_id: 'C123',
+  });
+});
+
 test('startConnectSession: throws on non-2xx', async () => {
   const { fn } = fakeFetch(() => new Response('nope', { status: 401 }));
   await assert.rejects(() => startConnectSession({ secretKey: 'x', endUserId: 'C1', integrationId: 'notion' }, { fetchImpl: fn }), /401/);
@@ -113,7 +136,30 @@ test('parseNangoAuthWebhook: normalizes an auth/creation/success event; null for
     type: 'auth', operation: 'creation', success: true,
     connectionId: 'conn_42', provider: 'notion', providerConfigKey: 'notion', tags: { end_user_id: 'C123' },
   }));
-  assert.deepEqual(ok, { projectId: 'C123', provider: 'notion', providerConfigKey: 'notion', connectionId: 'conn_42' });
+  assert.deepEqual(ok, {
+    projectId: 'C123',
+    provider: 'notion',
+    providerConfigKey: 'notion',
+    connectionId: 'conn_42',
+    config: { nangoIntegrationKey: 'notion' },
+  });
+
+  const githubPat = parseNangoAuthWebhook(JSON.stringify({
+    type: 'auth',
+    operation: 'creation',
+    success: true,
+    connectionId: 'conn_gh',
+    provider: 'github',
+    providerConfigKey: 'github-pat',
+    tags: { end_user_id: 'C123', provider: 'github', auth_mode: 'pat', repo: 'Calibrax-ai/autoship' },
+  }));
+  assert.deepEqual(githubPat, {
+    projectId: 'C123',
+    provider: 'github',
+    providerConfigKey: 'github-pat',
+    connectionId: 'conn_gh',
+    config: { nangoIntegrationKey: 'github-pat', authMode: 'pat', repo: 'Calibrax-ai/autoship' },
+  });
 
   assert.equal(parseNangoAuthWebhook(JSON.stringify({ type: 'auth', operation: 'creation', success: false, connectionId: 'c', provider: 'notion', providerConfigKey: 'notion', tags: { end_user_id: 'C1' } })), null, 'success:false → null (failed consent, no row)');
   assert.equal(parseNangoAuthWebhook(JSON.stringify({ type: 'sync', operation: 'creation', success: true })), null, 'non-auth → null');

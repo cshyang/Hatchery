@@ -268,7 +268,7 @@ export async function handleNangoForwardWebhook(req: { db: D1Like | undefined; r
   const connection = await findActiveConnectionByRef(req.db, String(body.connectionId));
   if (!connection) return { status: 200, body: { ignored: 'unknown connection' } };
 
-  const provider = text(body.providerConfigKey) ?? text(body.provider) ?? connection.provider;
+  const provider = connection.provider || text(body.provider) || text(body.providerConfigKey);
   const payload = record(body.payload);
   if (!payload) return { status: 200, body: { ignored: 'empty forward payload' } };
   if (provider !== 'github') return { status: 200, body: { ignored: 'unsupported provider event', provider } };

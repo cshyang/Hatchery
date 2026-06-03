@@ -251,6 +251,20 @@ test('Nango github forward resolves connection_ref, records event, correlates ru
   assert.equal(db.notifications.filter((n) => n.notification_type === 'pr_opened').length, 1, 'GitHub echo does not double notify after runner callback');
 });
 
+test('Nango github forward treats github-pat as an integration key, not the provider', async () => {
+  const db = new FakeD1();
+  seed(db);
+  const payload = githubPrPayload('opened');
+  payload.providerConfigKey = 'github-pat';
+
+  const result = await handleNangoForwardWebhook({ db, rawBody: JSON.stringify(payload) }, seq());
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body?.handled, true);
+  assert.equal(db.events[0].provider, 'github');
+  assert.equal(db.events[0].dedupe_key, 'nango-forward:conn_gh:github:gh-delivery-1');
+});
+
 test('Nango github pull_request merged completes the correlated run', async () => {
   const db = new FakeD1();
   seed(db);

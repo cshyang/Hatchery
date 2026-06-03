@@ -10,6 +10,7 @@ import {
 import { PROVIDER_CATALOG, type ProviderCatalogEntry } from './catalog';
 import type { D1Like } from '../skills/repository';
 import { proposeAgentRouteTool } from '../agent-runs/route-tools';
+import { parseNangoIntegrationKeys } from './integrations';
 
 export interface ConnectionRuntime {
   tools: ToolDefinition[];
@@ -40,10 +41,11 @@ export async function buildConnectionRuntime(args: {
   }
 
   const nangoSecretKey = typeof env.NANGO_SECRET_KEY === 'string' ? env.NANGO_SECRET_KEY : '';
+  const nangoIntegrationKeys = parseNangoIntegrationKeys(env.NANGO_INTEGRATION_KEYS);
   const canRequestConnect = !!db && !!nangoSecretKey;
   const nangoTools =
     canRequestConnect && db
-      ? [requestConnectionTool({ nangoSecretKey, projectId }), disconnectConnectionTool({ nangoSecretKey, projectId, db })]
+      ? [requestConnectionTool({ nangoSecretKey, projectId, nangoIntegrationKeys }), disconnectConnectionTool({ nangoSecretKey, projectId, db })]
       : [];
   const routeTools = db ? [proposeAgentRouteTool({ db, projectId })] : [];
 

@@ -18,6 +18,7 @@
 import type { Binding, ConnectionSpec } from '../project/bindings';
 import type { D1Like } from '../skills/repository';
 import { fetchToken } from '../providers/nango';
+import { connectionProviderConfigKey } from './integrations';
 
 export interface ConnectionState {
   provider: string;
@@ -82,7 +83,7 @@ export function resolveConnection(
     const fetchTok = deps.fetchToken ?? fetchToken;
     const secretKey = nangoKey;
     const connectionId = spec.connectionRef;
-    const providerConfigKey = provider; // convention: Nango integration id == catalog slug
+    const providerConfigKey = connectionProviderConfigKey(provider, spec.config ?? {});
     // `??=` caches the PROMISE on first call. A REJECTED promise stays cached too — so a failed token
     // fetch is NOT retried within this turn (every later secret() call this turn gets the same
     // rejection). Intentional: one Nango hiccup shouldn't trigger a retry storm across a multi-call
