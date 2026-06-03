@@ -1,6 +1,6 @@
 import type { D1Like } from '../skills/repository';
 import { createAgentRunEvent, createAgentRunNotification, findActiveAgentRunRoute, type AgentRunRoute } from './events';
-import { createAgentRun, getLatestAgentRunByLinearIssue, updateAgentRun, type AgentRun, type AgentRunStatus, type ClockAndIds } from './repository';
+import { createAgentRun, getAgentRunBySource, getLatestAgentRunByLinearIssue, updateAgentRun, type AgentRun, type AgentRunStatus, type ClockAndIds } from './repository';
 import { claimAndDispatchRun } from './dispatch';
 
 const WEBHOOK_MAX_AGE_MS = 60_000;
@@ -335,6 +335,10 @@ export async function handleLinearWebhook(req: LinearWebhookRequest, deps: Linea
       },
       deps,
     );
+    if (event.duplicate) {
+      const existing = await getAgentRunBySource(req.db, cfg.projectId, 'linear', req.deliveryId);
+      if (existing) return { status: 200, body: { run: existing, duplicate: true, dispatchStatus: 'deduped' } };
+    }
 
     // Rerun gate: dedupe to a still-active run for this issue; allow a fresh run once the prior is
     // terminal (re-entering the trigger state is the rerun gesture). The stable key would otherwise

@@ -34,6 +34,13 @@ class FakeD1 implements D1Like {
                 const [id] = values;
                 return { results: db.agentRuns.filter((r) => r.id === id) as T[] };
               }
+              if (query.includes('WHERE project_id=? AND source_type=? AND source_id=?')) {
+                const [projectId, sourceType, sourceId] = values;
+                const rows = db.agentRuns
+                  .filter((r) => r.project_id === projectId && r.source_type === sourceType && r.source_id === sourceId)
+                  .sort((a, b) => Number(b.created_at) - Number(a.created_at));
+                return { results: rows as T[] };
+              }
               if (query.includes('WHERE project_id=? AND idempotency_key=?')) {
                 const [projectId, idempotencyKey] = values;
                 return { results: db.agentRuns.filter((r) => r.project_id === projectId && r.idempotency_key === idempotencyKey) as T[] };
