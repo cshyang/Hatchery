@@ -644,4 +644,32 @@ test('handleLinearWebhook re-runs an issue once the prior run is terminal, but d
   assert.equal(db.agentRuns.length, 2, 'terminal prior run → rerun allowed');
 });
 
+test('handleLinearWebhook does not create a rerun from the same Linear delivery replayed after terminal', async () => {
+  const db = new FakeD1();
+  const raw = JSON.stringify(issuePayload());
+  const signature = await hmac('linear-secret', raw);
+  const deps = {
+    runnerUrl: 'https://runner.example/run',
+    runnerToken: 'runner-secret',
+    fetch: (async () => new Response(JSON.stringify({ sandboxId: 'sbx' }), { status: 202 })) as typeof fetch,
+    ...seq(),
+  };
+
+  const first = await handleLinearWebhook(
+    { db, signingSecret: 'linear-secret', signature, deliveryId: 'd1', event: 'Issue', rawBody: raw, projectsJson, nowMs: 2_000_000 },
+    deps,
+  );
+  await first.dispatch?.();
+  db.agentRuns[0].status = 'completed';
+
+  const replay = await handleLinearWebhook(
+    { db, signingSecret: 'linear-secret', signature, deliveryId: 'd1', event: 'Issue', rawBody: raw, projectsJson, nowMs: 2_000_000 },
+    deps,
+  );
+
+  assert.equal(replay.body?.dispatchStatus, 'deduped');
+  assert.equal(replay.dispatch, undefined);
+  assert.equal(db.agentRuns.length, 1);
+});
+
 await run();

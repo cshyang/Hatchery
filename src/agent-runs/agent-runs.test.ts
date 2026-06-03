@@ -13,6 +13,7 @@ class FakeD1 implements D1Like {
   agentRuns: Row[] = [];
   events: Row[] = [];
   notifications: Row[] = [];
+  beforeUpdateAgentRun?: (row: Row, nextStatus: unknown) => void;
 
   prepare(query: string) {
     const db = this;
@@ -181,6 +182,7 @@ class FakeD1 implements D1Like {
               const [status, sandboxId, branch, commitSha, prUrl, ciUrl, summary, error, statusNote, lastEventId, lastHeartbeatAt, lastDispatchError, completedAt, updatedAt, id] = values;
               const row = db.agentRuns.find((r) => r.id === id);
               if (!row) return { meta: { changes: 0 } };
+              db.beforeUpdateAgentRun?.(row, status);
               Object.assign(row, {
                 status,
                 sandbox_id: sandboxId,
@@ -504,6 +506,30 @@ test('reconciler reclaims a run stuck in dispatching past the lease', async () =
   assert.match(String(run?.lastDispatchError), /lease expired/);
 });
 
+test('reconciler does not requeue a stale dispatching run after a callback moves it forward', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const created = await createAgentRun(db, dispatchableInput, deps);
+  const row = db.agentRuns.find((r) => r.id === created.run.id)!;
+  row.status = 'dispatching';
+  row.updated_at = 1_000;
+  row.dispatch_attempts = 1;
+  db.beforeUpdateAgentRun = (run, nextStatus) => {
+    if (run.id === created.run.id && nextStatus === 'queued') {
+      run.status = 'running';
+      run.sandbox_id = 'sbx_callback';
+      run.updated_at = 9_999_999;
+    }
+  };
+
+  const summary = await reconcileAgentRuns(db, {}, { now: () => 10_000_000, id: () => 'x' });
+
+  assert.equal(summary.reclaimed, 0);
+  const run = await getAgentRunById(db, created.run.id);
+  assert.equal(run?.status, 'running');
+  assert.equal(run?.sandboxId, 'sbx_callback');
+});
+
 test('reconciler times out a running run whose heartbeat went stale, and notifies', async () => {
   const db = new FakeD1();
   const deps = seq();
@@ -522,6 +548,29 @@ test('reconciler times out a running run whose heartbeat went stale, and notifie
   assert.equal(db.notifications.filter((n) => n.run_id === created.run.id && n.notification_type === 'failed').length, 1);
 });
 
+test('reconciler does not fail a stale running run after a fresh callback updates it', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const created = await createAgentRun(db, dispatchableInput, deps);
+  const row = db.agentRuns.find((r) => r.id === created.run.id)!;
+  row.status = 'running';
+  row.last_heartbeat_at = 1_000;
+  db.beforeUpdateAgentRun = (run, nextStatus) => {
+    if (run.id === created.run.id && nextStatus === 'failed') {
+      run.last_heartbeat_at = 19_999_999;
+      run.updated_at = 19_999_999;
+    }
+  };
+
+  const summary = await reconcileAgentRuns(db, runnerDeps, { now: () => 20_000_000, id: () => 'x' });
+
+  assert.equal(summary.timedOut, 0);
+  const run = await getAgentRunById(db, created.run.id);
+  assert.equal(run?.status, 'running');
+  assert.equal(run?.lastHeartbeatAt, 19_999_999);
+  assert.equal(db.notifications.filter((n) => n.run_id === created.run.id && n.notification_type === 'failed').length, 0);
+});
+
 test('reconciler dispatches the queued backlog', async () => {
   const db = new FakeD1();
   const deps = seq();
@@ -532,6 +581,35 @@ test('reconciler dispatches the queued backlog', async () => {
   assert.equal(summary.dispatched, 1);
   const run = await getAgentRunById(db, created.run.id);
   assert.equal(run?.status, 'running');
+});
+
+test('late running callback refreshes heartbeat without downgrading waiting_approval', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const created = await createAgentRun(db, runInput, deps);
+  await handleAgentRunCallback(
+    {
+      db,
+      expectedToken: 'runner-secret',
+      actualToken: 'runner-secret',
+      body: { runId: created.run.id, status: 'pr_opened', prUrl: 'https://github.com/acme/repo/pull/7' },
+    },
+    deps,
+  );
+
+  const lateRunning = await handleAgentRunCallback(
+    {
+      db,
+      expectedToken: 'runner-secret',
+      actualToken: 'runner-secret',
+      body: { runId: created.run.id, status: 'running', summary: 'still working' },
+    },
+    { ...deps, now: () => 9_999 },
+  );
+
+  assert.equal(lateRunning.status, 200);
+  assert.equal(lateRunning.body?.run.status, 'waiting_approval');
+  assert.equal(lateRunning.body?.run.lastHeartbeatAt, 9_999);
 });
 
 await run();
