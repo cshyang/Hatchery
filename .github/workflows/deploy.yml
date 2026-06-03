@@ -1,0 +1,77 @@
+name: deploy
+
+# CD for Hatchery. Push to main → gate → (guard migrations) → build → deploy both workers → smoke.
+# Code deploys are reversible (`wrangler rollback`); the irreversible part — D1 migrations — is NOT
+# auto-applied here (some are destructive rebuilds against the single prod DB). The guard below stops
+# a deploy whenever a migration is unapplied, so prod code never runs ahead of its schema.
+#
+# PREREQUISITE (one-time, in GitHub repo Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   — token with Workers Scripts:Edit, D1:Edit, Workers KV:Edit
+#   CLOUDFLARE_ACCOUNT_ID  — your account id
+# App secrets (ZAI_API_KEY, etc.) are NOT needed here — they persist on the workers across deploys.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # ── Gate: never deploy red code ──────────────────────────────────────────
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Test
+        run: npm test
+
+      # ── Guard: never ship code ahead of its schema ───────────────────────────
+      # Migrations are applied MANUALLY (scripts/setup.sh migrate) because some rebuild tables on the
+      # single prod D1. If any are unapplied, stop — apply them (with a backup) first, then re-run.
+      - name: Guard against unapplied D1 migrations
+        run: |
+          out="$(npx wrangler d1 migrations list hatchery-skills --remote 2>&1 || true)"
+          echo "$out"
+          if echo "$out" | grep -qE '[0-9]{4}_.*\.sql'; then
+            echo "::error::Unapplied D1 migrations detected. Apply them manually (review for destructive ops, take a backup): scripts/setup.sh migrate — then push again."
+            exit 1
+          fi
+          echo "No pending migrations."
+
+      # ── Build + deploy both workers ──────────────────────────────────────────
+      - name: Build (Flue → Cloudflare)
+        run: npx flue build --target cloudflare
+      - name: Deploy hatchery
+        run: npx wrangler deploy --config dist/hatchery/wrangler.json | tee deploy.out
+      - name: Deploy ticker
+        run: npx wrangler deploy --config ticker/wrangler.jsonc
+
+      # ── Smoke: did the worker actually come up? (best-effort for now) ─────────
+      - name: Smoke check
+        continue-on-error: true
+        run: |
+          url="$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.out | head -1)"
+          if [ -z "$url" ]; then echo "Could not parse deployed URL; skipping smoke."; exit 0; fi
+          code="$(curl -s -o /dev/null -w '%{http_code}' -A 'hatchery-ci-smoke' "$url/")"
+          echo "smoke: $url/ → HTTP $code"
+          case "$code" in
+            000|5*) echo "::warning::Smoke check returned $code — worker may not have booted cleanly." ;;
+            *)      echo "Worker is responding (any HTTP status = booted)." ;;
+          esac
