@@ -196,7 +196,7 @@ test('buildConnectionRuntime: assembles connected provider tools and prompt bloc
 
 test('buildConnectionRuntime: exposes self-service connection tools when Nango is configured', async () => {
   const runtime = await buildConnectionRuntime({ db: new FakeD1(), binding: binding([]), env: { NANGO_SECRET_KEY: 'nk' }, projectId: 'demo' });
-  assert.deepEqual(runtime.tools.map((t) => t.name).sort(), ['disconnect_connection', 'request_connection']);
+  assert.deepEqual(runtime.tools.map((t) => t.name).sort(), ['disconnect_connection', 'propose_agent_route', 'request_connection']);
   assert.match(runtime.connectionsBlock ?? '', /request_connection/);
 });
 

@@ -1,5 +1,6 @@
 import { fetchWithTimeout, jsonMessageOrText } from '../providers/http';
 import type { D1Like } from '../skills/repository';
+import { createAgentRunEvent, createAgentRunNotification, findActiveAgentRunRoute, type AgentRunRoute } from './events';
 import { createAgentRun, updateAgentRun, type AgentRun, type ClockAndIds } from './repository';
 
 const RUNNER_FETCH_TIMEOUT_MS = 12_000;
@@ -94,7 +95,7 @@ function normalizeProjectConfig(input: unknown): LinearAgentProjectConfig {
     targetRepo: text(cfg.targetRepo, 'targetRepo', 512),
     baseBranch: optionalText(cfg.baseBranch, 128) ?? 'main',
     kit: optionalText(cfg.kit, 128) ?? 'coding-default',
-    runtime: optionalText(cfg.runtime, 128) ?? 'claude_code',
+    runtime: optionalText(cfg.runtime, 128) ?? 'opencode',
     sandboxProvider: optionalText(cfg.sandboxProvider, 128) ?? 'e2b',
     runStateName: optionalText(cfg.runStateName, 128) ?? DEFAULT_RUN_STATE_NAME,
   };
@@ -151,10 +152,44 @@ function linearProjectFor(issue: LinearIssueSnapshot, projects: Map<string, Line
   return null;
 }
 
-function previousIssueStateName(payload: Record<string, unknown>): string | null {
+function routeTargetRepo(route: AgentRunRoute): string {
+  return `https://github.com/${route.githubOwner}/${route.githubRepo}`;
+}
+
+function routeToProjectConfig(route: AgentRunRoute): LinearAgentProjectConfig {
+  return {
+    projectId: route.projectId,
+    targetRepo: routeTargetRepo(route),
+    baseBranch: route.baseBranch,
+    kit: route.kit,
+    runtime: route.runtime,
+    sandboxProvider: route.sandboxProvider,
+    runStateName: route.triggerValue,
+  };
+}
+
+async function linearRouteFor(db: D1Like, issue: LinearIssueSnapshot): Promise<AgentRunRoute | null> {
+  const keys = [issue.team.key, issue.team.id].filter((v): v is string => !!v);
+  for (const externalKey of keys) {
+    const route = await findActiveAgentRunRoute(db, {
+      provider: 'linear',
+      externalKey,
+      triggerType: 'state',
+      triggerValue: issue.state.name,
+    });
+    if (route) return route;
+  }
+  return null;
+}
+
+function previousIssueStateChange(payload: Record<string, unknown>): { changed: boolean; previousName: string | null } {
   const updatedFrom = objectField(payload, 'updatedFrom');
-  if (!updatedFrom) return null;
-  return stateName(updatedFrom.state);
+  if (!updatedFrom) return { changed: false, previousName: null };
+  const previousName = stateName(updatedFrom.state);
+  return {
+    changed: previousName !== null || Object.prototype.hasOwnProperty.call(updatedFrom, 'stateId'),
+    previousName,
+  };
 }
 
 function idempotencyKey(issue: LinearIssueSnapshot, cfg: LinearAgentProjectConfig): string {
@@ -238,6 +273,22 @@ async function dispatchAgentRun(db: D1Like, deliveryId: string, run: AgentRun, i
   }
 }
 
+async function recordStartedNotification(db: D1Like, run: AgentRun, deps: ClockAndIds) {
+  await createAgentRunNotification(
+    db,
+    {
+      projectId: run.projectId,
+      runId: run.id,
+      channel: 'linear',
+      notificationType: 'run_started',
+      dedupeKey: `notify:${run.id}:run_started:linear`,
+      targetRef: run.linearIssueId ?? run.linearIdentifier ?? null,
+      status: 'pending',
+    },
+    deps,
+  );
+}
+
 export async function handleLinearWebhook(req: LinearWebhookRequest, deps: LinearWebhookDeps): Promise<LinearWebhookResult> {
   if (!(await verifyLinearWebhook(req.signingSecret ?? '', req.rawBody, req.signature))) return { status: 404 };
   if (!req.db) return { status: 500, body: { error: 'no DB binding' } };
@@ -255,25 +306,48 @@ export async function handleLinearWebhook(req: LinearWebhookRequest, deps: Linea
     const data = objectField(payload, 'data');
     if (!data) return { status: 400, body: { error: 'Issue data is required' } };
     const issue = issueSnapshot(data);
+    const route = await linearRouteFor(req.db, issue);
     const projects = parseLinearAgentProjects(req.projectsJson);
-    const cfg = linearProjectFor(issue, projects);
+    const cfg = route ? routeToProjectConfig(route) : linearProjectFor(issue, projects);
     if (!cfg) return { status: 200, body: { skipped: 'no Linear agent project config' } };
 
-    const prevStateName = previousIssueStateName(payload);
-    if (issue.state.name !== cfg.runStateName || !prevStateName || prevStateName === cfg.runStateName) {
+    const stateChange = previousIssueStateChange(payload);
+    if (issue.state.name !== cfg.runStateName || !stateChange.changed || stateChange.previousName === cfg.runStateName) {
       return { status: 200, body: { skipped: 'not a Run Agent transition' } };
     }
+
+    const event = await createAgentRunEvent(
+      req.db,
+      {
+        projectId: cfg.projectId,
+        provider: 'linear',
+        eventType: 'linear.issue.state_changed',
+        providerDeliveryId: req.deliveryId,
+        providerEntityId: issue.id,
+        dedupeKey: `linear-direct:${req.deliveryId}`,
+        actorType: 'human',
+        handling: 'wake_controller',
+        handlingReason: `issue transitioned into ${cfg.runStateName}`,
+        payload,
+        occurredAt: timestamp,
+        processedAt: req.nowMs ?? Date.now(),
+      },
+      deps,
+    );
 
     const created = await createAgentRun(
       req.db,
       {
         projectId: cfg.projectId,
+        routeId: route?.id,
         sourceType: 'linear',
         sourceId: req.deliveryId,
         idempotencyKey: idempotencyKey(issue, cfg),
         linearIssueId: issue.id,
         linearIdentifier: issue.identifier,
         linearUrl: issue.url,
+        githubOwner: route?.githubOwner,
+        githubRepo: route?.githubRepo,
         targetRepo: cfg.targetRepo,
         baseBranch: cfg.baseBranch,
         kit: cfg.kit,
@@ -286,6 +360,8 @@ export async function handleLinearWebhook(req: LinearWebhookRequest, deps: Linea
       return { status: 200, body: { run: created.run, duplicate: true, dispatchStatus: 'deduped' } };
     }
 
+    await updateAgentRun(req.db, { id: created.run.id, lastEventId: event.event.id }, deps);
+    await recordStartedNotification(req.db, created.run, deps);
     const dispatched = await dispatchAgentRun(req.db, req.deliveryId, created.run, issue, deps);
     return { status: 200, body: { ...dispatched, duplicate: false } };
   } catch (e) {

@@ -140,7 +140,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       hasBotToken: !!botToken,
       hasCodingRunner: !!codingRunnerUrl && !!workbenchRunnerToken,
       hasAgentRunner: !!agentRunnerUrl && !!agentRunnerToken,
-      hasLinearAgentIngress: typeof env.LINEAR_WEBHOOK_SECRET === 'string' && typeof env.LINEAR_AGENT_PROJECTS === 'string',
+      hasLinearAgentIngress: typeof env.LINEAR_WEBHOOK_SECRET === 'string',
       canRequestConnections: connectionRuntime.canRequestConnections,
       providerCatalog: connectionRuntime.providerCatalog,
       connectionState: connectionRuntime.state,

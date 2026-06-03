@@ -9,6 +9,7 @@ import {
 } from './tools';
 import { PROVIDER_CATALOG, type ProviderCatalogEntry } from './catalog';
 import type { D1Like } from '../skills/repository';
+import { proposeAgentRouteTool } from '../agent-runs/route-tools';
 
 export interface ConnectionRuntime {
   tools: ToolDefinition[];
@@ -44,9 +45,10 @@ export async function buildConnectionRuntime(args: {
     canRequestConnect && db
       ? [requestConnectionTool({ nangoSecretKey, projectId }), disconnectConnectionTool({ nangoSecretKey, projectId, db })]
       : [];
+  const routeTools = db ? [proposeAgentRouteTool({ db, projectId })] : [];
 
   return {
-    tools: [...nangoTools, ...connectionTools(state, secrets)],
+    tools: [...nangoTools, ...routeTools, ...connectionTools(state, secrets)],
     connectionsBlock: state.length || canRequestConnect ? renderConnectionsBlock(state, PROVIDER_CATALOG, canRequestConnect) : null,
     state,
     canRequestConnections: canRequestConnect,

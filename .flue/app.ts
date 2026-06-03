@@ -28,6 +28,8 @@ import { handleInternalWorkItemRequest } from '../src/workbench/gateway';
 import { handleSourceChangeRunCallback } from '../src/workbench/source-change';
 import { handleLinearWebhook } from '../src/agent-runs/linear';
 import { handleAgentRunCallback } from '../src/agent-runs/repository';
+import { activateAgentRunRoute, disableAgentRunRoute } from '../src/agent-runs/events';
+import { handleNangoForwardWebhook } from '../src/agent-runs/provider-events';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -41,9 +43,9 @@ interface Env {
   WORKBENCH_RUNNER_TOKEN?: string; // dedicated secret for source-change runner callbacks
   CODING_RUNNER_URL?: string; // generic source-change runner dispatch endpoint
   LINEAR_WEBHOOK_SECRET?: string; // Linear raw-body HMAC signing secret for /linear/webhook
-  LINEAR_AGENT_PROJECTS?: string; // non-secret JSON mapping Linear team key/id to agent-run config
+  LINEAR_AGENT_PROJECTS?: string; // legacy one-release fallback; prefer agent_run_routes
   LINEAR_API_KEY?: string; // reserved for gateway-owned Linear status comments; never exposed to the model
-  AGENT_RUNNER_URL?: string; // generic E2B-backed Claude Code runner dispatch endpoint
+  AGENT_RUNNER_URL?: string; // generic E2B-backed coding runner dispatch endpoint
   AGENT_RUNNER_TOKEN?: string; // dedicated secret for agent-run dispatch and callbacks
   HATCHERY_PUBLIC_URL?: string; // optional absolute origin used in runner callback payloads
   ADMIN_CONNECTIONS_TOKEN?: string; // OWN secret guarding /__admin/connections (ADR D11 — NOT the heartbeat token)
@@ -173,7 +175,7 @@ app.post('/__internal/source-change-runs', async (c) => {
 
 // Linear is the team-facing baton for coding-agent work. The gateway verifies Linear's raw-body
 // HMAC and turns only "Issue transitioned into Run Agent" into an agent_run lease. The external
-// runner owns Claude Code/E2B/PR behavior; Hatchery only records dispatch and callback metadata.
+// runner owns coding-agent/E2B/PR behavior; Hatchery only records dispatch and callback metadata.
 app.post('/linear/webhook', async (c) => {
   const raw = await c.req.text();
   const result = await handleLinearWebhook(
@@ -198,7 +200,7 @@ app.post('/linear/webhook', async (c) => {
   return c.json(result.body ?? {}, result.status as 200 | 400 | 500);
 });
 
-// Agent-run callback from the external E2B/Claude Code runner. Dedicated token: runner reporting
+// Agent-run callback from the external E2B coding runner. Dedicated token: runner reporting
 // does not grant heartbeat, connection-admin, merge, or deploy authority.
 app.post('/__internal/agent-runs', async (c) => {
   const result = await handleAgentRunCallback({
@@ -285,6 +287,30 @@ app.get('/__admin/connections', async (c) => {
   return c.json({ projectId, connections });
 });
 
+app.post('/__admin/agent-run-routes/:id/activate', async (c) => {
+  if (!requireAdmin(c)) return c.body(null, 404);
+  const db = c.env.DB;
+  if (!db) return c.json({ error: 'no DB binding' }, 500);
+  try {
+    const route = await activateAgentRunRoute(db, c.req.param('id'), 'admin-route');
+    return c.json({ ok: true, route });
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'bad request' }, 400);
+  }
+});
+
+app.post('/__admin/agent-run-routes/:id/disable', async (c) => {
+  if (!requireAdmin(c)) return c.body(null, 404);
+  const db = c.env.DB;
+  if (!db) return c.json({ error: 'no DB binding' }, 500);
+  try {
+    const route = await disableAgentRunRoute(db, c.req.param('id'), 'admin-route');
+    return c.json({ ok: true, route });
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'bad request' }, 400);
+  }
+});
+
 // Nango auth webhook (Component 3). Nango POSTs here when a Connect flow completes. HMAC-verified
 // against the RAW body with NANGO_WEBHOOK_SECRET (a DEDICATED webhook secret, NOT the API key).
 // Inert (404) until that secret is set. On a verified auth/creation/success event we store the
@@ -325,6 +351,9 @@ app.post('/nango/webhook', async (c) => {
 
   const event = parseNangoAuthWebhook(raw);
   if (!event) {
+    const forwarded = await handleNangoForwardWebhook({ db, rawBody: raw });
+    if (forwarded.status === 404) return c.body(null, 404);
+    if (forwarded.body?.handled || forwarded.body?.ignored) return c.json(forwarded.body ?? {}, forwarded.status as 200 | 400 | 500);
     // non-auth, non-creation, or success:false (failed/abandoned consent) — acknowledge, write nothing.
     console.log('[nango] webhook ignored (not an auth-creation-success event)');
     return c.json({ ignored: true });

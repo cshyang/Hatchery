@@ -7,6 +7,7 @@ export interface ProviderCatalogEntry {
 // from it, never adds to it.
 export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   { provider: 'github', summary: 'read issues/code, search (creating issues comes later, with approval)' },
+  { provider: 'linear', summary: 'team issue workflow and agent-run trigger routes (route activation needs admin approval)' },
   { provider: 'notion', summary: 'read pages/databases, search (read-only token)' },
 ];
 
