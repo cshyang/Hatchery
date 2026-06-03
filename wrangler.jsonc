@@ -18,5 +18,18 @@
   // Flue's wrangler merge.
   "d1_databases": [
     { "binding": "DB", "database_name": "hatchery-skills", "database_id": "6ac5de79-a8c0-4e08-aab8-b9b636278a9d" }
+  ],
+  // Flue 0.9 stops owning Durable Object migrations implicitly. Keep the
+  // deployed Flue classes in ordered project config so Wrangler owns the
+  // migration history instead of relying on generated build output.
+  "durable_objects": {
+    "bindings": [
+      { "name": "Project", "class_name": "Project" },
+      { "name": "FLUE_REGISTRY", "class_name": "FlueRegistry" }
+    ]
+  },
+  "migrations": [
+    { "tag": "flue-class-FlueRegistry", "new_sqlite_classes": ["FlueRegistry"] },
+    { "tag": "flue-class-Project", "new_sqlite_classes": ["Project"] }
   ]
 }
