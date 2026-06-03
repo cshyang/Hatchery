@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { flue } from '@flue/runtime/app';
+import { flue } from '@flue/runtime/routing';
 import { dispatch } from '@flue/runtime';
 import { verifySlackSignature } from '../src/slack/verify';
 import { fetchThreadReplies, renderThreadBackscroll } from '../src/slack/threads';

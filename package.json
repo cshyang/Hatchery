@@ -17,14 +17,14 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@flue/runtime": "^0.8.1",
-    "@flue/sdk": "^0.8.1",
+    "@flue/runtime": "^0.9.1",
+    "@flue/sdk": "^0.9.1",
     "agents": "^0.13.3",
     "hono": "^4.12.23",
     "valibot": "^1.4.1"
   },
   "devDependencies": {
-    "@flue/cli": "^0.8.1",
+    "@flue/cli": "^0.9.1",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "wrangler": "^4.95.0"
