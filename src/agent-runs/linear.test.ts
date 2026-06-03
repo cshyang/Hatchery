@@ -103,6 +103,7 @@ class FakeD1 implements D1Like {
                 statusNote,
                 lastEventId,
                 lastHeartbeatAt,
+                dispatchPayload,
                 createdAt,
                 updatedAt,
                 completedAt,
@@ -139,14 +140,30 @@ class FakeD1 implements D1Like {
                 status_note: statusNote,
                 last_event_id: lastEventId,
                 last_heartbeat_at: lastHeartbeatAt,
+                dispatch_attempts: 0,
+                last_dispatch_error: null,
+                dispatched_at: null,
+                dispatch_payload: dispatchPayload,
                 created_at: createdAt,
                 updated_at: updatedAt,
                 completed_at: completedAt,
               });
               return { meta: { changes: 1 } };
             }
+            if (query.startsWith('UPDATE agent_runs') && query.includes("status='dispatching'") && query.includes("AND status='queued'")) {
+              const [dispatchedAt, updatedAt, id] = values;
+              const row = db.agentRuns.find((r) => r.id === id && r.status === 'queued');
+              if (!row) return { meta: { changes: 0 } };
+              Object.assign(row, {
+                status: 'dispatching',
+                dispatch_attempts: (Number(row.dispatch_attempts) || 0) + 1,
+                dispatched_at: dispatchedAt,
+                updated_at: updatedAt,
+              });
+              return { meta: { changes: 1 } };
+            }
             if (query.startsWith('UPDATE agent_runs')) {
-              const [status, sandboxId, branch, commitSha, prUrl, ciUrl, summary, error, statusNote, lastEventId, lastHeartbeatAt, completedAt, updatedAt, id] = values;
+              const [status, sandboxId, branch, commitSha, prUrl, ciUrl, summary, error, statusNote, lastEventId, lastHeartbeatAt, lastDispatchError, completedAt, updatedAt, id] = values;
               const row = db.agentRuns.find((r) => r.id === id);
               if (!row) return { meta: { changes: 0 } };
               Object.assign(row, {
@@ -161,6 +178,7 @@ class FakeD1 implements D1Like {
                 status_note: statusNote,
                 last_event_id: lastEventId,
                 last_heartbeat_at: lastHeartbeatAt,
+                last_dispatch_error: lastDispatchError,
                 completed_at: completedAt,
                 updated_at: updatedAt,
               });

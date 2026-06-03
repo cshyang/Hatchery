@@ -44,6 +44,10 @@ export interface AgentRun {
   statusNote: string | null;
   lastEventId: string | null;
   lastHeartbeatAt: number | null;
+  dispatchAttempts: number;
+  lastDispatchError: string | null;
+  dispatchedAt: number | null;
+  dispatchPayload: string | null;
   createdAt: number;
   updatedAt: number;
   completedAt: number | null;
@@ -80,6 +84,10 @@ interface AgentRunRow {
   status_note: string | null;
   last_event_id: string | null;
   last_heartbeat_at: number | null;
+  dispatch_attempts: number;
+  last_dispatch_error: string | null;
+  dispatched_at: number | null;
+  dispatch_payload: string | null;
   created_at: number;
   updated_at: number;
   completed_at: number | null;
@@ -163,6 +171,10 @@ function rowToAgentRun(r: AgentRunRow): AgentRun {
     statusNote: r.status_note ?? null,
     lastEventId: r.last_event_id ?? null,
     lastHeartbeatAt: r.last_heartbeat_at == null ? null : Number(r.last_heartbeat_at),
+    dispatchAttempts: r.dispatch_attempts == null ? 0 : Number(r.dispatch_attempts),
+    lastDispatchError: r.last_dispatch_error ?? null,
+    dispatchedAt: r.dispatched_at == null ? null : Number(r.dispatched_at),
+    dispatchPayload: r.dispatch_payload ?? null,
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
     completedAt: r.completed_at == null ? null : Number(r.completed_at),
@@ -173,7 +185,8 @@ const AGENT_RUN_SELECT = `id, project_id, route_id, source_type, source_id, idem
                          linear_identifier, linear_url, slack_team_id, slack_channel_id, slack_thread_ts,
                          github_owner, github_repo, target_repo, base_branch, kit, runtime, sandbox_provider,
                          sandbox_id, status, branch, commit_sha, pr_url, ci_url, summary, error, status_note,
-                         last_event_id, last_heartbeat_at, created_at, updated_at, completed_at`;
+                         last_event_id, last_heartbeat_at, dispatch_attempts, last_dispatch_error, dispatched_at,
+                         dispatch_payload, created_at, updated_at, completed_at`;
 
 export async function getAgentRun(db: D1Like, projectId: string, id: string): Promise<AgentRun | null> {
   const row = await db
@@ -229,6 +242,7 @@ export async function createAgentRun(
     kit?: string | null;
     runtime?: string | null;
     sandboxProvider?: string | null;
+    dispatchPayload?: string | null;
   },
   deps: ClockAndIds = {},
 ): Promise<{ run: AgentRun; duplicate: boolean }> {
@@ -247,8 +261,8 @@ export async function createAgentRun(
                               linear_identifier, linear_url, slack_team_id, slack_channel_id, slack_thread_ts,
                               github_owner, github_repo, target_repo, base_branch, kit, runtime, sandbox_provider,
                               sandbox_id, status, branch, commit_sha, pr_url, ci_url, summary, error,
-                              status_note, last_event_id, last_heartbeat_at, created_at, updated_at, completed_at)
-       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                              status_note, last_event_id, last_heartbeat_at, dispatch_payload, created_at, updated_at, completed_at)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
     .bind(
       id,
@@ -281,6 +295,7 @@ export async function createAgentRun(
       null,
       null,
       null,
+      input.dispatchPayload ?? null,
       t,
       t,
       null,
@@ -307,6 +322,7 @@ export async function updateAgentRun(
     statusNote?: string | null;
     lastEventId?: string | null;
     lastHeartbeatAt?: number | null;
+    lastDispatchError?: string | null;
     completedAt?: number | null;
   },
   deps: ClockAndIds = {},
@@ -327,7 +343,7 @@ export async function updateAgentRun(
     .prepare(
       `UPDATE agent_runs
           SET status=?, sandbox_id=?, branch=?, commit_sha=?, pr_url=?, ci_url=?, summary=?, error=?,
-              status_note=?, last_event_id=?, last_heartbeat_at=?, completed_at=?, updated_at=?
+              status_note=?, last_event_id=?, last_heartbeat_at=?, last_dispatch_error=?, completed_at=?, updated_at=?
         WHERE id=?`,
     )
     .bind(
@@ -342,6 +358,7 @@ export async function updateAgentRun(
       input.statusNote === undefined ? current.statusNote : maybeBody(input.statusNote),
       input.lastEventId === undefined ? current.lastEventId : normalizeText(input.lastEventId),
       input.lastHeartbeatAt === undefined ? current.lastHeartbeatAt : input.lastHeartbeatAt,
+      input.lastDispatchError === undefined ? current.lastDispatchError : maybeBody(input.lastDispatchError),
       completedAt,
       t,
       input.id,
@@ -351,6 +368,79 @@ export async function updateAgentRun(
   const updated = await getAgentRunById(db, input.id);
   if (!updated) throw new Error('updated agent run could not be read back');
   return updated;
+}
+
+/**
+ * Atomic claim for dispatch: queued -> dispatching, bumping the attempt counter and stamping
+ * dispatched_at. The `WHERE status='queued'` makes this a compare-and-set — only ONE caller
+ * (the webhook's immediate dispatch OR a reconciler tick) wins; the loser gets null and must not
+ * dispatch. This is the lever that makes immediate + reconciler safe to run concurrently. D1/SQLite
+ * is single-writer, so the claim is genuinely atomic. Returns the claimed run, or null if the row
+ * wasn't queued (already claimed, terminal, or gone).
+ */
+export async function claimRunForDispatch(db: D1Like, id: string, deps: ClockAndIds = {}): Promise<AgentRun | null> {
+  const t = nowMs(deps);
+  const result = await db
+    .prepare(
+      `UPDATE agent_runs
+          SET status='dispatching', dispatch_attempts = dispatch_attempts + 1, dispatched_at=?, updated_at=?
+        WHERE id=? AND status='queued'`,
+    )
+    .bind(t, t, id)
+    .run();
+  if (changes(result) !== 1) return null;
+  return getAgentRunById(db, id);
+}
+
+/** Latest run for a Linear issue (any state), newest first. Drives the rerun gate: a fresh trigger
+ *  dedupes to a still-active run but is allowed to mint a new one once the prior is terminal. */
+export async function getLatestAgentRunByLinearIssue(db: D1Like, projectId: string, linearIssueId: string): Promise<AgentRun | null> {
+  const row = await db
+    .prepare(
+      `SELECT ${AGENT_RUN_SELECT}
+         FROM agent_runs WHERE project_id=? AND linear_issue_id=? ORDER BY created_at DESC LIMIT 1`,
+    )
+    .bind(projectId, linearIssueId)
+    .first<AgentRunRow>();
+  return row ? rowToAgentRun(row) : null;
+}
+
+/** Queued runs awaiting (re)dispatch, oldest first. The reconciler dispatches these. */
+export async function listDispatchableRuns(db: D1Like, limit: number): Promise<AgentRun[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT ${AGENT_RUN_SELECT}
+         FROM agent_runs WHERE status='queued' ORDER BY created_at ASC LIMIT ?`,
+    )
+    .bind(limit)
+    .all<AgentRunRow>();
+  return results.map(rowToAgentRun);
+}
+
+/** Runs stuck in `dispatching` past the lease — a dispatcher that claimed then died. Reclaim to queued. */
+export async function listStaleDispatchingRuns(db: D1Like, leaseCutoff: number, limit: number): Promise<AgentRun[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT ${AGENT_RUN_SELECT}
+         FROM agent_runs WHERE status='dispatching' AND updated_at < ? ORDER BY updated_at ASC LIMIT ?`,
+    )
+    .bind(leaseCutoff, limit)
+    .all<AgentRunRow>();
+  return results.map(rowToAgentRun);
+}
+
+/** Running runs whose last sign of life predates the heartbeat timeout — presumed dead. Fall back to
+ *  dispatched_at/updated_at when the runner never beat at all. */
+export async function listStaleRunningRuns(db: D1Like, heartbeatCutoff: number, limit: number): Promise<AgentRun[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT ${AGENT_RUN_SELECT}
+         FROM agent_runs WHERE status='running' AND COALESCE(last_heartbeat_at, dispatched_at, updated_at) < ?
+        ORDER BY updated_at ASC LIMIT ?`,
+    )
+    .bind(heartbeatCutoff, limit)
+    .all<AgentRunRow>();
+  return results.map(rowToAgentRun);
 }
 
 function record(value: unknown): Record<string, unknown> {
