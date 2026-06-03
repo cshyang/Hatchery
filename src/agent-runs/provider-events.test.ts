@@ -106,7 +106,7 @@ class FakeD1 implements D1Like {
               return { meta: { changes: 1 } };
             }
             if (query.startsWith('UPDATE agent_runs')) {
-              const [status, sandboxId, branch, commitSha, prUrl, ciUrl, summary, error, statusNote, lastEventId, lastHeartbeatAt, completedAt, updatedAt, id] = values;
+              const [status, sandboxId, branch, commitSha, prUrl, ciUrl, summary, error, statusNote, lastEventId, lastHeartbeatAt, lastDispatchError, completedAt, updatedAt, id] = values;
               const row = db.agentRuns.find((r) => r.id === id);
               if (!row) return { meta: { changes: 0 } };
               Object.assign(row, {
@@ -121,6 +121,7 @@ class FakeD1 implements D1Like {
                 status_note: statusNote,
                 last_event_id: lastEventId,
                 last_heartbeat_at: lastHeartbeatAt,
+                last_dispatch_error: lastDispatchError,
                 completed_at: completedAt,
                 updated_at: updatedAt,
               });

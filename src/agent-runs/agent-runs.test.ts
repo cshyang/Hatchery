@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
 import type { D1Like } from '../skills/repository';
-import { createAgentRun, getAgentRun, handleAgentRunCallback } from './repository';
+import { claimRunForDispatch, createAgentRun, getAgentRun, getAgentRunById, handleAgentRunCallback } from './repository';
+import { claimAndDispatchRun, DISPATCH_MAX_ATTEMPTS, reconcileAgentRuns } from './dispatch';
 
 const { test, run } = createTestRunner();
 
@@ -35,6 +36,38 @@ class FakeD1 implements D1Like {
               if (query.includes('WHERE project_id=? AND idempotency_key=?')) {
                 const [projectId, idempotencyKey] = values;
                 return { results: db.agentRuns.filter((r) => r.project_id === projectId && r.idempotency_key === idempotencyKey) as T[] };
+              }
+              if (query.includes('WHERE project_id=? AND linear_issue_id=?')) {
+                const [projectId, linearIssueId] = values;
+                const rows = db.agentRuns
+                  .filter((r) => r.project_id === projectId && r.linear_issue_id === linearIssueId)
+                  .sort((a, b) => Number(b.created_at) - Number(a.created_at));
+                return { results: rows as T[] };
+              }
+              if (query.includes("WHERE status='queued'")) {
+                const [limit] = values;
+                const rows = db.agentRuns
+                  .filter((r) => r.status === 'queued')
+                  .sort((a, b) => Number(a.created_at) - Number(b.created_at))
+                  .slice(0, Number(limit));
+                return { results: rows as T[] };
+              }
+              if (query.includes("WHERE status='dispatching' AND updated_at < ?")) {
+                const [cutoff, limit] = values;
+                const rows = db.agentRuns
+                  .filter((r) => r.status === 'dispatching' && Number(r.updated_at) < Number(cutoff))
+                  .sort((a, b) => Number(a.updated_at) - Number(b.updated_at))
+                  .slice(0, Number(limit));
+                return { results: rows as T[] };
+              }
+              if (query.includes("WHERE status='running' AND COALESCE")) {
+                const [cutoff, limit] = values;
+                const liveness = (r: Row) => Number(r.last_heartbeat_at ?? r.dispatched_at ?? r.updated_at);
+                const rows = db.agentRuns
+                  .filter((r) => r.status === 'running' && liveness(r) < Number(cutoff))
+                  .sort((a, b) => Number(a.updated_at) - Number(b.updated_at))
+                  .slice(0, Number(limit));
+                return { results: rows as T[] };
               }
             }
             if (query.startsWith('SELECT') && query.includes('FROM agent_run_events')) {
@@ -84,6 +117,7 @@ class FakeD1 implements D1Like {
                 statusNote,
                 lastEventId,
                 lastHeartbeatAt,
+                dispatchPayload,
                 createdAt,
                 updatedAt,
                 completedAt,
@@ -119,14 +153,32 @@ class FakeD1 implements D1Like {
                 status_note: statusNote,
                 last_event_id: lastEventId,
                 last_heartbeat_at: lastHeartbeatAt,
+                dispatch_attempts: 0,
+                last_dispatch_error: null,
+                dispatched_at: null,
+                dispatch_payload: dispatchPayload,
                 created_at: createdAt,
                 updated_at: updatedAt,
                 completed_at: completedAt,
               });
               return { meta: { changes: 1 } };
             }
+            // Atomic claim: queued -> dispatching. Compare-and-set on status, so a row already
+            // claimed (or terminal) yields changes:0 — the same guard the real SQL enforces.
+            if (query.startsWith('UPDATE agent_runs') && query.includes("status='dispatching'") && query.includes("AND status='queued'")) {
+              const [dispatchedAt, updatedAt, id] = values;
+              const row = db.agentRuns.find((r) => r.id === id && r.status === 'queued');
+              if (!row) return { meta: { changes: 0 } };
+              Object.assign(row, {
+                status: 'dispatching',
+                dispatch_attempts: (Number(row.dispatch_attempts) || 0) + 1,
+                dispatched_at: dispatchedAt,
+                updated_at: updatedAt,
+              });
+              return { meta: { changes: 1 } };
+            }
             if (query.startsWith('UPDATE agent_runs')) {
-              const [status, sandboxId, branch, commitSha, prUrl, ciUrl, summary, error, statusNote, lastEventId, lastHeartbeatAt, completedAt, updatedAt, id] = values;
+              const [status, sandboxId, branch, commitSha, prUrl, ciUrl, summary, error, statusNote, lastEventId, lastHeartbeatAt, lastDispatchError, completedAt, updatedAt, id] = values;
               const row = db.agentRuns.find((r) => r.id === id);
               if (!row) return { meta: { changes: 0 } };
               Object.assign(row, {
@@ -141,6 +193,7 @@ class FakeD1 implements D1Like {
                 status_note: statusNote,
                 last_event_id: lastEventId,
                 last_heartbeat_at: lastHeartbeatAt,
+                last_dispatch_error: lastDispatchError,
                 completed_at: completedAt,
                 updated_at: updatedAt,
               });
@@ -350,6 +403,134 @@ test('terminal agent runs cannot move back to running', async () => {
   const readBack = await getAgentRun(db, 'P', created.run.id);
   assert.equal(readBack?.status, 'completed');
   assert.equal(readBack?.summary, 'done');
+});
+
+// ── Outbox: atomic claim ─────────────────────────────────────────────────────
+const dispatchableInput = { ...runInput, dispatchPayload: JSON.stringify({ linearIssue: { id: 'issue-1' }, targetRepo: 'github.com/acme/repo' }) };
+const okFetch = (async () => new Response(JSON.stringify({ sandboxId: 'sbx_1' }), { status: 200 })) as unknown as typeof fetch;
+const retryableFetch = (async () => new Response('upstream boom', { status: 503 })) as unknown as typeof fetch;
+const fatalFetch = (async () => new Response('bad request', { status: 400 })) as unknown as typeof fetch;
+const runnerDeps = { runnerUrl: 'https://runner.test/run', runnerToken: 'rt', hatcheryPublicUrl: 'https://hatchery.test' };
+
+test('claimRunForDispatch is compare-and-set: only the first claim wins', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const created = await createAgentRun(db, dispatchableInput, deps);
+
+  const first = await claimRunForDispatch(db, created.run.id, deps);
+  const second = await claimRunForDispatch(db, created.run.id, deps);
+
+  assert.equal(first?.status, 'dispatching');
+  assert.equal(first?.dispatchAttempts, 1, 'claim bumps the attempt counter');
+  assert.equal(second, null, 'a row already claimed cannot be claimed again');
+});
+
+test('immediate dispatch: success moves queued -> running with sandbox', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const created = await createAgentRun(db, dispatchableInput, deps);
+
+  const result = await claimAndDispatchRun(db, created.run.id, { ...runnerDeps, fetch: okFetch }, deps);
+
+  assert.equal(result.dispatched, true);
+  const run = await getAgentRunById(db, created.run.id);
+  assert.equal(run?.status, 'running');
+  assert.equal(run?.sandboxId, 'sbx_1');
+});
+
+test('immediate dispatch: an unconfigured runner leaves the run queued for the ticker (self-heals)', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const created = await createAgentRun(db, dispatchableInput, deps);
+
+  const result = await claimAndDispatchRun(db, created.run.id, { fetch: okFetch }, deps);
+
+  assert.equal(result.dispatched, false);
+  assert.equal(result.status, 'skipped');
+  const run = await getAgentRunById(db, created.run.id);
+  assert.equal(run?.status, 'queued', 'never claimed → still dispatchable later');
+  assert.equal(run?.dispatchAttempts, 0, 'a config gap does not burn an attempt');
+});
+
+test('transient runner failure requeues, then fails terminally at the attempt cap', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const created = await createAgentRun(db, dispatchableInput, deps);
+
+  for (let i = 1; i < DISPATCH_MAX_ATTEMPTS; i++) {
+    const r = await claimAndDispatchRun(db, created.run.id, { ...runnerDeps, fetch: retryableFetch }, deps);
+    assert.equal(r.status, 'queued', `attempt ${i} should requeue`);
+    const mid = await getAgentRunById(db, created.run.id);
+    assert.equal(mid?.status, 'queued');
+    assert.equal(mid?.dispatchAttempts, i);
+    assert.match(String(mid?.lastDispatchError), /503/);
+  }
+  const last = await claimAndDispatchRun(db, created.run.id, { ...runnerDeps, fetch: retryableFetch }, deps);
+  assert.equal(last.status, 'failed', 'the capped attempt is terminal');
+  const run = await getAgentRunById(db, created.run.id);
+  assert.equal(run?.status, 'failed');
+  assert.equal(run?.dispatchAttempts, DISPATCH_MAX_ATTEMPTS);
+});
+
+test('a 4xx runner response fails immediately (not retryable)', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const created = await createAgentRun(db, dispatchableInput, deps);
+
+  const result = await claimAndDispatchRun(db, created.run.id, { ...runnerDeps, fetch: fatalFetch }, deps);
+
+  assert.equal(result.status, 'failed');
+  const run = await getAgentRunById(db, created.run.id);
+  assert.equal(run?.status, 'failed');
+  assert.equal(run?.dispatchAttempts, 1, 'one attempt, no pointless retries');
+});
+
+// ── Reconciler ───────────────────────────────────────────────────────────────
+test('reconciler reclaims a run stuck in dispatching past the lease', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const created = await createAgentRun(db, dispatchableInput, deps);
+  const row = db.agentRuns.find((r) => r.id === created.run.id)!;
+  row.status = 'dispatching';
+  row.updated_at = 1_000; // ancient → lease expired
+  row.dispatch_attempts = 1;
+
+  // Unconfigured runner so we observe the reclaim in isolation (no same-tick re-dispatch).
+  const summary = await reconcileAgentRuns(db, {}, { now: () => 10_000_000, id: () => 'x' });
+
+  assert.equal(summary.reclaimed, 1);
+  const run = await getAgentRunById(db, created.run.id);
+  assert.equal(run?.status, 'queued');
+  assert.match(String(run?.lastDispatchError), /lease expired/);
+});
+
+test('reconciler times out a running run whose heartbeat went stale, and notifies', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const created = await createAgentRun(db, dispatchableInput, deps);
+  const row = db.agentRuns.find((r) => r.id === created.run.id)!;
+  row.status = 'running';
+  row.last_heartbeat_at = 1_000; // long dead
+
+  const summary = await reconcileAgentRuns(db, runnerDeps, { now: () => 10_000_000, id: () => 'x' });
+
+  assert.equal(summary.timedOut, 1);
+  const run = await getAgentRunById(db, created.run.id);
+  assert.equal(run?.status, 'failed');
+  assert.match(String(run?.error), /heartbeat stale/);
+  assert.equal(db.notifications.filter((n) => n.run_id === created.run.id && n.notification_type === 'failed').length, 1);
+});
+
+test('reconciler dispatches the queued backlog', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const created = await createAgentRun(db, dispatchableInput, deps);
+
+  const summary = await reconcileAgentRuns(db, { ...runnerDeps, fetch: okFetch }, { now: () => 10_000_000, id: () => 'x' });
+
+  assert.equal(summary.dispatched, 1);
+  const run = await getAgentRunById(db, created.run.id);
+  assert.equal(run?.status, 'running');
 });
 
 await run();
