@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@flue/cli": "^0.8.1",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "wrangler": "^4.95.0"
   },
