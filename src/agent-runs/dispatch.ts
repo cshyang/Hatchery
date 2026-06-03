@@ -8,6 +8,13 @@
 //
 // The claim (queued -> dispatching) is an atomic compare-and-set (repository.claimRunForDispatch), so
 // the immediate path and a reconciler tick can race safely — only one wins and dispatches.
+//
+// RUNNER CONTRACT (external assumptions this code can't enforce — keep the runner honest):
+//   1. start(runId) is IDEMPOTENT. A run stuck in `dispatching` (the ->running write failed after the
+//      runner accepted) is reclaimed at the lease and re-dispatched, so the runner may receive the same
+//      runId twice. It must return the existing sandbox, not start a second job.
+//   2. The runner emits callbacks (any status) as it works. Each bumps last_heartbeat_at; a runner that
+//      goes silent past RUNNING_STALE_MS is presumed dead and failed. No callbacks → coarse liveness only.
 
 import { fetchWithTimeout, jsonMessageOrText } from '../providers/http';
 import type { D1Like } from '../skills/repository';
@@ -24,7 +31,11 @@ import {
 
 export const DISPATCH_MAX_ATTEMPTS = 5; // after this many failed starts, the run is terminally failed
 export const DISPATCH_LEASE_MS = 90_000; // a `dispatching` row older than this is a crashed dispatcher → reclaim
-export const RUNNING_STALE_MS = 30 * 60_000; // a `running` run silent this long is presumed dead
+// Coarse liveness, NOT a tight heartbeat. Every runner callback bumps last_heartbeat_at, but a long
+// coding stretch can run for an hour+ with no intermediate callback, so this window must comfortably
+// exceed the longest plausible silent run. For tighter detection the runner must emit periodic
+// heartbeat callbacks (any callback counts). Tune down once it does.
+export const RUNNING_STALE_MS = 3 * 60 * 60_000; // 3h silent → presumed dead
 export const RECONCILE_DISPATCH_LIMIT = 10; // queued runs dispatched per tick (bounds work)
 export const RECONCILE_SWEEP_LIMIT = 50; // stale rows reclaimed/timed-out per tick
 const RUNNER_FETCH_TIMEOUT_MS = 12_000;

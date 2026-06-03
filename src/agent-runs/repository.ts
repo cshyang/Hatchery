@@ -531,6 +531,9 @@ export async function handleAgentRunCallback(
         summary: optionalCallbackText(body, 'summary'),
         error: optionalCallbackText(body, 'error'),
         lastEventId: event.event.id,
+        // Every callback is proof of life — bump the heartbeat so the reconciler's stale-running
+        // timeout only fires on a runner that's gone genuinely silent, not a healthy long run.
+        lastHeartbeatAt: nowMs(deps),
         statusNote: optionalCallbackText(body, 'statusNote'),
       },
       deps,
