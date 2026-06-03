@@ -401,6 +401,20 @@ test('request_connection: GitHub OAuth can use an operator-configured Nango inte
     integrationId: 'github-oauth',
     tags: { provider: 'github', auth_mode: 'oauth' },
   });
+  assert.match(out, /Connect GitHub/i);
+  assert.doesNotMatch(out, /Share this link with the user/i);
+  assert.doesNotMatch(out, /implementation|providerConfigKey|connection_ref/i);
+});
+
+test('request_connection: Linear OAuth returns Slack-ready setup copy', async () => {
+  const fakeStart = async () => ({ connectLink: 'https://connect.nango.dev/linear', token: 't', expiresAt: 'e' });
+  const tool = requestConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123' }, { startConnectSession: fakeStart });
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'linear' });
+
+  assert.match(out, /Connect Linear/i);
+  assert.match(out, /https:\/\/connect\.nango\.dev\/linear/);
+  assert.doesNotMatch(out, /Share this link with the user/i);
+  assert.doesNotMatch(out, /implementation|providerConfigKey|connection_ref/i);
 });
 
 test('request_connection: GitHub PAT requires a repo and stores the repo as metadata only', async () => {
@@ -419,7 +433,8 @@ test('request_connection: GitHub PAT requires a repo and stores the repo as meta
   );
 
   const missingRepo = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'github', authMode: 'pat' });
-  assert.match(missingRepo, /repo is required/i);
+  assert.match(missingRepo, /owner\/name/i);
+  assert.match(missingRepo, /Calibrax-ai\/autoship/i);
   assert.equal(calls.length, 0, 'no Nango session starts without a repo-bound PAT');
 
   const badRepo = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'github', authMode: 'pat', repo: 'https://github.com/Acme/Repo/pull/1' });
@@ -428,6 +443,8 @@ test('request_connection: GitHub PAT requires a repo and stores the repo as meta
 
   const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'github', authMode: 'pat', repo: 'Acme/Repo' });
   assert.match(out, /Acme\/Repo/);
+  assert.match(out, /Connect GitHub PAT/i);
+  assert.doesNotMatch(out, /Share this link with the user/i);
   assert.deepEqual(calls[0], {
     secretKey: 'nk',
     endUserId: 'C123',

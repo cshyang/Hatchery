@@ -147,14 +147,32 @@ export function requestConnectionTool(
       const tags: Record<string, string> = { provider: p, auth_mode: mode };
       if (normalizedRepo) tags.repo = normalizedRepo;
       const { connectLink } = await start({ secretKey: args.nangoSecretKey, endUserId: args.projectId, integrationId, tags });
-      const scope = p === 'github' && mode === 'pat' && normalizedRepo ? ` for repo ${normalizedRepo}` : '';
-      return (
-        `Share this link with the user to connect ${p}${scope} (it opens ${p}'s secure authorization page off-Slack — ` +
-        `you never see the credential):\n${connectLink}\n` +
-        `Once they authorize, ${p} tools will appear automatically and you can use them.`
-      );
+      return connectionRequestCopy(p, mode as ConnectionAuthMode, connectLink, normalizedRepo);
     },
   });
+}
+
+function connectionRequestCopy(provider: string, mode: ConnectionAuthMode, connectLink: string, repo: string | null): string {
+  if (provider === 'github' && mode === 'pat') {
+    return (
+      `Connect GitHub PAT for repo ${repo}:\n${connectLink}\n\n` +
+      'Use this when access should stay limited to that repo. Paste the PAT only on the secure connection page; I never see it.'
+    );
+  }
+  if (provider === 'github') {
+    return (
+      `Connect GitHub with OAuth:\n${connectLink}\n\n` +
+      'Use this for normal workspace setup. If you only want one repo, ask me for a repo-scoped PAT link instead.'
+    );
+  }
+  if (provider === 'linear') {
+    return (
+      `Connect Linear:\n${connectLink}\n\n` +
+      'After authorization, I can read Linear context and react to Run Agent state changes once an admin activates a route.'
+    );
+  }
+  const label = provider.charAt(0).toUpperCase() + provider.slice(1);
+  return `Connect ${label}:\n${connectLink}\n\nAuthorize on the secure connection page; I never see the credential.`;
 }
 
 /** The agent's disconnect tool (Component 3, in-Slack revoke — the only disconnect path a non-operator
