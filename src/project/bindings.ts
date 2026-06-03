@@ -64,14 +64,9 @@ export function assertValidModel(model?: string | null): void {
 /** The persona slug used until a project hosts more than one agent. */
 export const DEFAULT_AGENT_SLUG = 'default';
 
-// Teams whose channels may be AUTO-PROVISIONED by the gateway on first @mention. This is the wall
-// that keeps "any channel" from becoming "any workspace": a stray @mention from an unlisted team is
-// never auto-bound. Same-workspace scope (Milestone 1) — multi-workspace OAuth install is deferred.
-export const KNOWN_TEAM_IDS: readonly string[] = ['T0B6VB415TQ']; // Ecodark
-
-export function isKnownTeam(teamId: string): boolean {
-  return !!teamId && KNOWN_TEAM_IDS.includes(teamId);
-}
+// The auto-provision allowlist (which Slack workspaces may auto-create a channel binding) is
+// account-coupled config and now lives in src/config/deployment.ts (isKnownTeam), read from env so
+// relocating to another workspace is a config change, not a code edit.
 
 // Flue DO instance id for a project's agent persona: `project:<projectId>:agent:<slug>`.
 // The slug is 'default' today — baked in now because DO instance ids are sticky (renaming

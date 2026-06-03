@@ -10,7 +10,6 @@ import {
   loadBindings,
   upsertBinding,
   autoCreateBinding,
-  isKnownTeam,
   bindingRecordToBinding,
   bindingBySlack,
   bindingByProject,
@@ -71,12 +70,6 @@ class FakeD1 implements D1Like {
 }
 
 const { test, run } = createTestRunner();
-
-test('isKnownTeam: only allowlisted team ids pass', async () => {
-  assert.equal(isKnownTeam('T0B6VB415TQ'), true);
-  assert.equal(isKnownTeam('T_SOME_OTHER_WORKSPACE'), false);
-  assert.equal(isKnownTeam(''), false);
-});
 
 test('autoCreateBinding inserts a per-channel row keyed by channel id, token by ref', async () => {
   const db = new FakeD1();

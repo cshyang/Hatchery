@@ -11,7 +11,8 @@ import {
   slackUrlVerification,
   slackUserMessageEvent,
 } from '../src/slack/events';
-import { bindings, bindingBySlack, bindingByProject, agentInstanceId, autoCreateBinding, isKnownTeam } from '../src/project/bindings';
+import { bindings, bindingBySlack, bindingByProject, agentInstanceId, autoCreateBinding } from '../src/project/bindings';
+import { deploymentConfig, isKnownTeam } from '../src/config/deployment';
 import { normalizeSlackMessage } from '../src/shared/canonical';
 import { upsertConversationTarget } from '../src/project/conversations';
 import { claimEvent, type KVLike } from '../src/shared/idempotency';
@@ -56,9 +57,9 @@ interface Env {
 }
 
 // Workspace-level transport identity for gateway auto-provisioning (same-workspace Milestone 1:
-// one bot install, reused across all channels of the known team). These mirror the demo seed row.
-const BOT_ID_FOR_AUTOCREATE = 'U0B6UB2E5HT';
-const DEFAULT_TRANSPORT_TOKEN_REF = 'SLACK_BOT_TOKEN_DEFAULT';
+// one bot install, reused across all channels of the known team) is account-coupled config, resolved
+// from env per request via deploymentConfig(c.env) — see src/config/deployment.ts. Falls back to the
+// original Ecodark literals when unset, so an existing deployment is unchanged.
 
 // Liveness backstop. The 6h cron poke (and any manual /__heartbeat) wakes each active
 // project with NO specific work — the agent stays silent unless it has a self-scheduled
@@ -408,13 +409,14 @@ app.post('/slack/events', async (c) => {
     // No binding yet. If this is a channel of a KNOWN team and the bot is being addressed, the
     // gateway provisions a per-channel project (HARD LINE: gateway-created on a verified Slack
     // signature for an allowlisted team — NOT the agent). Otherwise acknowledge and stay silent.
-    const addressed = mentionsBot(ev.text ?? '', BOT_ID_FOR_AUTOCREATE);
-    if (c.env.DB && isKnownTeam(teamId) && addressed) {
+    const dep = deploymentConfig(c.env);
+    const addressed = mentionsBot(ev.text ?? '', dep.slackBotId);
+    if (c.env.DB && isKnownTeam(c.env, teamId) && addressed) {
       await autoCreateBinding(c.env.DB, {
         teamId,
         channelId: ev.channel,
-        transportBotId: BOT_ID_FOR_AUTOCREATE,
-        transportTokenRef: DEFAULT_TRANSPORT_TOKEN_REF,
+        transportBotId: dep.slackBotId,
+        transportTokenRef: dep.slackTokenRef,
       });
       binding = await bindingBySlack(teamId, ev.channel, c.env.DB);
     }

@@ -5,3 +5,5 @@ dist/
 .flue-vite.wrangler.jsonc
 .env
 .dev.vars
+.env.deploy
+.secrets.bulk.json
