@@ -21,9 +21,11 @@ import type { D1Like } from '../skills/repository';
 import { createAgentRunNotification } from './events';
 import {
   claimRunForDispatch,
+  failStaleRunningRun,
   listDispatchableRuns,
   listStaleDispatchingRuns,
   listStaleRunningRuns,
+  requeueStaleDispatchingRun,
   updateAgentRun,
   type AgentRun,
   type ClockAndIds,
@@ -190,27 +192,26 @@ export async function reconcileAgentRuns(
   const summary: ReconcileSummary = { reclaimed: 0, timedOut: 0, dispatched: 0, failed: 0, skipped: 0 };
 
   // 1. Reclaim dispatchers that claimed then died — the lease expired.
-  for (const run of await listStaleDispatchingRuns(db, now - DISPATCH_LEASE_MS, RECONCILE_SWEEP_LIMIT)) {
-    await updateAgentRun(db, { id: run.id, status: 'queued', lastDispatchError: 'reclaimed after dispatch lease expired' }, clock);
-    summary.reclaimed++;
+  const dispatchLeaseCutoff = now - DISPATCH_LEASE_MS;
+  for (const run of await listStaleDispatchingRuns(db, dispatchLeaseCutoff, RECONCILE_SWEEP_LIMIT)) {
+    const reclaimed = await requeueStaleDispatchingRun(db, run.id, dispatchLeaseCutoff, clock);
+    if (reclaimed) summary.reclaimed++;
   }
 
   // 2. Time out running runs whose runner went dark.
-  for (const run of await listStaleRunningRuns(db, now - RUNNING_STALE_MS, RECONCILE_SWEEP_LIMIT)) {
-    await updateAgentRun(
-      db,
-      { id: run.id, status: 'failed', error: 'runner heartbeat stale; presumed dead', statusNote: 'timed_out by reconciler' },
-      clock,
-    );
+  const heartbeatCutoff = now - RUNNING_STALE_MS;
+  for (const run of await listStaleRunningRuns(db, heartbeatCutoff, RECONCILE_SWEEP_LIMIT)) {
+    const failed = await failStaleRunningRun(db, run.id, heartbeatCutoff, clock);
+    if (!failed) continue;
     await createAgentRunNotification(
       db,
       {
-        projectId: run.projectId,
-        runId: run.id,
+        projectId: failed.projectId,
+        runId: failed.id,
         channel: 'linear',
         notificationType: 'failed',
-        dedupeKey: `notify:${run.id}:failed:linear`,
-        targetRef: run.linearIssueId ?? run.linearIdentifier ?? null,
+        dedupeKey: `notify:${failed.id}:failed:linear`,
+        targetRef: failed.linearIssueId ?? failed.linearIdentifier ?? null,
         status: 'pending',
       },
       clock,

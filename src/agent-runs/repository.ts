@@ -210,6 +210,18 @@ export async function getAgentRunById(db: D1Like, id: string): Promise<AgentRun 
   return row ? rowToAgentRun(row) : null;
 }
 
+export async function getAgentRunBySource(db: D1Like, projectId: string, sourceType: string, sourceId: string): Promise<AgentRun | null> {
+  const row = await db
+    .prepare(
+      `SELECT ${AGENT_RUN_SELECT}
+         FROM agent_runs WHERE project_id=? AND source_type=? AND source_id=?
+        ORDER BY created_at DESC LIMIT 1`,
+    )
+    .bind(projectId, sourceType, sourceId)
+    .first<AgentRunRow>();
+  return row ? rowToAgentRun(row) : null;
+}
+
 async function getAgentRunByIdempotencyKey(db: D1Like, projectId: string, idempotencyKey: string): Promise<AgentRun | null> {
   const row = await db
     .prepare(
@@ -405,6 +417,34 @@ export async function getLatestAgentRunByLinearIssue(db: D1Like, projectId: stri
   return row ? rowToAgentRun(row) : null;
 }
 
+export async function requeueStaleDispatchingRun(db: D1Like, id: string, leaseCutoff: number, deps: ClockAndIds = {}): Promise<AgentRun | null> {
+  const t = nowMs(deps);
+  const result = await db
+    .prepare(
+      `UPDATE agent_runs
+          SET status='queued', last_dispatch_error=?, updated_at=?
+        WHERE id=? AND status='dispatching' AND updated_at < ?`,
+    )
+    .bind('reclaimed after dispatch lease expired', t, id, leaseCutoff)
+    .run();
+  if (changes(result) !== 1) return null;
+  return getAgentRunById(db, id);
+}
+
+export async function failStaleRunningRun(db: D1Like, id: string, heartbeatCutoff: number, deps: ClockAndIds = {}): Promise<AgentRun | null> {
+  const t = nowMs(deps);
+  const result = await db
+    .prepare(
+      `UPDATE agent_runs
+          SET status='failed', error=?, status_note=?, completed_at=?, updated_at=?
+        WHERE id=? AND status='running' AND COALESCE(last_heartbeat_at, dispatched_at, updated_at) < ?`,
+    )
+    .bind('runner heartbeat stale; presumed dead', 'timed_out by reconciler', t, t, id, heartbeatCutoff)
+    .run();
+  if (changes(result) !== 1) return null;
+  return getAgentRunById(db, id);
+}
+
 /** Queued runs awaiting (re)dispatch, oldest first. The reconciler dispatches these. */
 export async function listDispatchableRuns(db: D1Like, limit: number): Promise<AgentRun[]> {
   const { results } = await db
@@ -462,6 +502,11 @@ function mappedStatus(status: ReturnType<typeof callbackStatus>): AgentRunStatus
   return status;
 }
 
+function monotonicCallbackStatus(current: AgentRunStatus, next: AgentRunStatus): AgentRunStatus {
+  if (next === 'running' && (current === 'waiting_human' || current === 'waiting_approval')) return current;
+  return next;
+}
+
 function optionalCallbackText(body: Record<string, unknown>, field: string): string | null | undefined {
   return Object.prototype.hasOwnProperty.call(body, field) ? normalizeText(body[field]) : undefined;
 }
@@ -500,6 +545,7 @@ export async function handleAgentRunCallback(
     const runId = requireText(body.runId, 'runId', 256);
     const currentRun = await getAgentRunById(req.db, runId);
     if (!currentRun) throw new Error('agent run not found');
+    const nextStatus = monotonicCallbackStatus(currentRun.status, mapped);
     const event = await createAgentRunEvent(
       req.db,
       {
@@ -522,7 +568,7 @@ export async function handleAgentRunCallback(
       req.db,
       {
         id: runId,
-        status: mapped,
+        status: nextStatus,
         sandboxId: optionalCallbackText(body, 'sandboxId'),
         branch: optionalCallbackText(body, 'branch'),
         commitSha: optionalCallbackText(body, 'commitSha'),

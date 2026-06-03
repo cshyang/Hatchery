@@ -34,6 +34,13 @@ class FakeD1 implements D1Like {
                 const [id] = values;
                 return { results: db.agentRuns.filter((r) => r.id === id) as T[] };
               }
+              if (query.includes('WHERE project_id=? AND source_type=? AND source_id=?')) {
+                const [projectId, sourceType, sourceId] = values;
+                const rows = db.agentRuns
+                  .filter((r) => r.project_id === projectId && r.source_type === sourceType && r.source_id === sourceId)
+                  .sort((a, b) => Number(b.created_at) - Number(a.created_at));
+                return { results: rows as T[] };
+              }
               if (query.includes('WHERE project_id=? AND idempotency_key=?')) {
                 const [projectId, idempotencyKey] = values;
                 return { results: db.agentRuns.filter((r) => r.project_id === projectId && r.idempotency_key === idempotencyKey) as T[] };
@@ -174,6 +181,35 @@ class FakeD1 implements D1Like {
                 status: 'dispatching',
                 dispatch_attempts: (Number(row.dispatch_attempts) || 0) + 1,
                 dispatched_at: dispatchedAt,
+                updated_at: updatedAt,
+              });
+              return { meta: { changes: 1 } };
+            }
+            if (query.startsWith('UPDATE agent_runs') && query.includes("SET status='queued'") && query.includes("status='dispatching'")) {
+              const [lastDispatchError, updatedAt, id, leaseCutoff] = values;
+              const row = db.agentRuns.find((r) => r.id === id);
+              if (!row) return { meta: { changes: 0 } };
+              db.beforeUpdateAgentRun?.(row, 'queued');
+              if (row.status !== 'dispatching' || Number(row.updated_at) >= Number(leaseCutoff)) return { meta: { changes: 0 } };
+              Object.assign(row, {
+                status: 'queued',
+                last_dispatch_error: lastDispatchError,
+                updated_at: updatedAt,
+              });
+              return { meta: { changes: 1 } };
+            }
+            if (query.startsWith('UPDATE agent_runs') && query.includes("SET status='failed'") && query.includes("status='running'")) {
+              const [error, statusNote, completedAt, updatedAt, id, heartbeatCutoff] = values;
+              const row = db.agentRuns.find((r) => r.id === id);
+              if (!row) return { meta: { changes: 0 } };
+              db.beforeUpdateAgentRun?.(row, 'failed');
+              const liveness = Number(row.last_heartbeat_at ?? row.dispatched_at ?? row.updated_at);
+              if (row.status !== 'running' || liveness >= Number(heartbeatCutoff)) return { meta: { changes: 0 } };
+              Object.assign(row, {
+                status: 'failed',
+                error,
+                status_note: statusNote,
+                completed_at: completedAt,
                 updated_at: updatedAt,
               });
               return { meta: { changes: 1 } };
