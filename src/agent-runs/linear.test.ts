@@ -38,6 +38,13 @@ class FakeD1 implements D1Like {
                 const [projectId, idempotencyKey] = values;
                 return { results: db.agentRuns.filter((r) => r.project_id === projectId && r.idempotency_key === idempotencyKey) as T[] };
               }
+              if (query.includes('WHERE project_id=? AND linear_issue_id=?')) {
+                const [projectId, linearIssueId] = values;
+                const rows = db.agentRuns
+                  .filter((r) => r.project_id === projectId && r.linear_issue_id === linearIssueId)
+                  .sort((a, b) => Number(b.created_at) - Number(a.created_at));
+                return { results: rows as T[] };
+              }
             }
             if (query.startsWith('SELECT') && query.includes('FROM agent_run_routes')) {
               if (query.includes("status='active'")) {
@@ -394,8 +401,13 @@ test('handleLinearWebhook creates one agent_run and dispatches expected E2B Pi p
   );
 
   assert.equal(result.status, 200);
-  assert.equal(result.body?.dispatchStatus, 'dispatched');
+  assert.equal(result.body?.dispatchStatus, 'queued', 'webhook records the run and defers dispatch off the ack path');
   assert.equal(db.agentRuns.length, 1);
+  assert.equal(db.agentRuns[0].status, 'queued');
+  assert.equal(sent.length, 0, 'nothing sent to the runner until the deferred dispatch runs');
+
+  await result.dispatch?.();
+
   assert.equal(db.agentRuns[0].status, 'running');
   assert.equal(db.agentRuns[0].sandbox_id, 'sbx_1');
   assert.equal(sent.length, 1);
@@ -433,15 +445,18 @@ test('handleLinearWebhook matches active route config and writes event before di
   );
 
   assert.equal(result.status, 200);
-  assert.equal(result.body?.dispatchStatus, 'dispatched');
+  assert.equal(result.body?.dispatchStatus, 'queued');
   assert.equal(db.events.length, 1);
   assert.equal(db.events[0].event_type, 'linear.issue.state_changed');
   assert.equal(db.events[0].provider_delivery_id, 'delivery-route-1');
   assert.equal(db.agentRuns[0].route_id, 'route-1');
   assert.equal(db.agentRuns[0].github_owner, 'acme');
   assert.equal(db.agentRuns[0].github_repo, 'repo');
-  assert.equal(sent[0].body.targetRepo, 'https://github.com/acme/repo');
   assert.equal(db.ops.indexOf('event') < db.ops.indexOf('agent_run'), true, 'event receipt is written before run lease');
+
+  await result.dispatch?.();
+  assert.equal(sent[0].body.targetRepo, 'https://github.com/acme/repo');
+  assert.equal(db.agentRuns[0].status, 'running');
 });
 
 test('handleLinearWebhook clearly fails legacy active route runtime before dispatch', async () => {
@@ -498,11 +513,15 @@ test('handleLinearWebhook dedupes duplicate deliveries and repeated issue payloa
     deps,
   );
 
-  assert.equal(first.body?.dispatchStatus, 'dispatched');
+  assert.equal(first.body?.dispatchStatus, 'queued');
   assert.equal(duplicateDelivery.body?.dispatchStatus, 'deduped');
   assert.equal(repeatedIssue.body?.dispatchStatus, 'deduped');
   assert.equal(db.agentRuns.length, 1);
-  assert.equal(calls, 1);
+  assert.equal(duplicateDelivery.dispatch, undefined, 'a deduped delivery carries no dispatch');
+  assert.equal(repeatedIssue.dispatch, undefined);
+
+  await first.dispatch?.();
+  assert.equal(calls, 1, 'only the first delivery ever reaches the runner');
 });
 
 test('handleLinearWebhook treats Linear stateId updates as state transitions', async () => {
@@ -524,12 +543,13 @@ test('handleLinearWebhook treats Linear stateId updates as state transitions', a
     },
   );
 
-  assert.equal(result.body?.dispatchStatus, 'dispatched');
+  assert.equal(result.body?.dispatchStatus, 'queued');
   assert.equal(db.agentRuns.length, 1);
+  await result.dispatch?.();
   assert.equal(calls, 1);
 });
 
-test('handleLinearWebhook ignores non-Run-Agent state changes and records dispatch failure', async () => {
+test('handleLinearWebhook ignores non-Run-Agent state changes and requeues a transient dispatch failure', async () => {
   const ignoredRaw = JSON.stringify(issuePayload('In Progress', 'Backlog'));
   const ignoredSig = await hmac('linear-secret', ignoredRaw);
   const ignored = await handleLinearWebhook(
@@ -550,9 +570,78 @@ test('handleLinearWebhook ignores non-Run-Agent state changes and records dispat
       ...seq(),
     },
   );
-  assert.equal(failed.body?.dispatchStatus, 'failed');
-  assert.equal(db.agentRuns[0].status, 'failed');
-  assert.match(String(db.agentRuns[0].error), /503/);
+  assert.equal(failed.body?.dispatchStatus, 'queued');
+  await failed.dispatch?.();
+  assert.equal(db.agentRuns[0].status, 'queued', 'a transient 503 requeues for the reconciler, not a terminal fail');
+  assert.equal(db.agentRuns[0].dispatch_attempts, 1);
+  assert.match(String(db.agentRuns[0].last_dispatch_error), /503/);
+});
+
+// Self-trigger guard + rerun gate
+test('handleLinearWebhook records a non-human actor transition but never dispatches a run', async () => {
+  const db = new FakeD1();
+  const raw = JSON.stringify({ ...issuePayload(), actor: { id: 'bot-actor', type: 'application', name: 'Hatchery' } });
+  const signature = await hmac('linear-secret', raw);
+  let calls = 0;
+
+  const result = await handleLinearWebhook(
+    { db, signingSecret: 'linear-secret', signature, deliveryId: 'delivery-bot', event: 'Issue', rawBody: raw, projectsJson, nowMs: 2_000_000 },
+    {
+      runnerUrl: 'https://runner.example/run',
+      runnerToken: 'runner-secret',
+      fetch: (async () => {
+        calls++;
+        return new Response('{}', { status: 202 });
+      }) as typeof fetch,
+      ...seq(),
+    },
+  );
+
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, { skipped: 'non-human actor; recorded only' });
+  assert.equal(result.dispatch, undefined);
+  assert.equal(db.agentRuns.length, 0, 'no run created for a bot-driven transition');
+  assert.equal(db.events.at(-1)?.handling, 'record_only');
+  assert.equal(db.events.at(-1)?.actor_type, 'provider_bot');
+  assert.equal(calls, 0);
+});
+
+test('handleLinearWebhook re-runs an issue once the prior run is terminal, but dedupes while it is active', async () => {
+  const db = new FakeD1();
+  const raw = JSON.stringify(issuePayload());
+  const signature = await hmac('linear-secret', raw);
+  const deps = {
+    runnerUrl: 'https://runner.example/run',
+    runnerToken: 'runner-secret',
+    fetch: (async () => new Response(JSON.stringify({ sandboxId: 'sbx' }), { status: 202 })) as typeof fetch,
+    ...seq(),
+  };
+
+  // First trigger → one run, dispatched to running.
+  const first = await handleLinearWebhook(
+    { db, signingSecret: 'linear-secret', signature, deliveryId: 'd1', event: 'Issue', rawBody: raw, projectsJson, nowMs: 2_000_000 },
+    deps,
+  );
+  await first.dispatch?.();
+  assert.equal(db.agentRuns.length, 1);
+  assert.equal(db.agentRuns[0].status, 'running');
+
+  // Re-entering the trigger state while the run is still active dedupes (no second run).
+  const whileActive = await handleLinearWebhook(
+    { db, signingSecret: 'linear-secret', signature, deliveryId: 'd2', event: 'Issue', rawBody: raw, projectsJson, nowMs: 2_000_000 },
+    deps,
+  );
+  assert.equal(whileActive.body?.dispatchStatus, 'deduped');
+  assert.equal(db.agentRuns.length, 1);
+
+  // Once it's terminal, a fresh transition mints a new run.
+  db.agentRuns[0].status = 'completed';
+  const rerun = await handleLinearWebhook(
+    { db, signingSecret: 'linear-secret', signature, deliveryId: 'd3', event: 'Issue', rawBody: raw, projectsJson, nowMs: 2_000_000 },
+    deps,
+  );
+  assert.equal(rerun.body?.duplicate, false);
+  assert.equal(db.agentRuns.length, 2, 'terminal prior run → rerun allowed');
 });
 
 await run();

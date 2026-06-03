@@ -53,7 +53,24 @@ async function reflectSweep(env: Env): Promise<string> {
   return `HTTP ${res.status}: ${body}`;
 }
 
+// Frequent backstop for the agent-run outbox: dispatch queued runs, reclaim runs stuck mid-dispatch,
+// and time out runners that went dark. Hatchery's gate (cheap SQL) decides what actually needs work,
+// so this is safe to fire unconditionally.
+async function reconcileRuns(env: Env): Promise<string> {
+  const res = await env.HATCHERY.fetch(
+    new Request('https://hatchery.internal/__internal/agent-runs/reconcile', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-hatchery-token': env.HEARTBEAT_TOKEN },
+      body: '{}',
+    }),
+  );
+  const body = (await res.text()).slice(0, 160);
+  console.log(`[ticker] agent-run reconcile -> HTTP ${res.status}: ${body}`);
+  return `HTTP ${res.status}: ${body}`;
+}
+
 const REFLECT_CRON = '0 19 * * *'; // 03:00 KL
+const RECONCILE_CRON = '*/2 * * * *'; // agent-run outbox backstop
 
 function unauthorized(req: Request, env: Env): boolean {
   return req.headers.get('x-hatchery-token') !== env.HEARTBEAT_TOKEN;
@@ -70,7 +87,8 @@ const SCHEDULE_ROUTE = /^\/internal\/projects\/([^/]+)\/schedules(?:\/([^/]+))?$
 
 export default {
   async scheduled(event: { cron?: string }, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<void> {
-    ctx.waitUntil(event.cron === REFLECT_CRON ? reflectSweep(env) : tick(env));
+    const job = event.cron === RECONCILE_CRON ? reconcileRuns : event.cron === REFLECT_CRON ? reflectSweep : tick;
+    ctx.waitUntil(job(env));
   },
 
   async fetch(req: Request, env: Env): Promise<Response> {
