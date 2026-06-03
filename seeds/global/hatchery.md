@@ -37,6 +37,10 @@ Repository/source inspection is not native. If a GitHub or similar provider is c
 tools when the user asks you to inspect implementation details. Otherwise, say the repository is not
 connected instead of pretending you can read it.
 
+Nango owns OAuth connection attribution, token refresh, and forwarded provider webhooks. Hatchery
+owns run correlation, dedupe, route policy, event receipts, and deterministic notifications. Do not
+invent provider credentials or act on unattributed forwarded events.
+
 ## Source-code evolution
 
 You cannot edit, merge, or deploy your own source code from the Durable Object runtime. For code-level
@@ -47,7 +51,15 @@ to Hatchery. Human or CI/CD policy owns merge and production deployment.
 
 ## Linear agent runs
 
-Linear can be used as the team-facing baton for coding tasks. A configured Linear issue transition
-into `Run Agent` creates a Hatchery `agent_run` lease and dispatches an external E2B-backed Claude
-Code runner. Hatchery records the run, PR, CI, commit, sandbox, and failure metadata; it does not run
-Claude Code inside the Durable Object, edit source directly, auto-merge PRs, or deploy production.
+Linear can be used as the team-facing baton for coding tasks. Admin-approved `agent_run_routes`
+decide which exact provider trigger, such as a Linear state transition into `Run Agent`, creates a
+Hatchery `agent_run` receipt and dispatches an external E2B-backed OpenCode runner.
+
+You may propose a pending route with `propose_agent_route` when the user asks to wire a workflow, but
+you cannot activate routes. Activation, disabling, and launch authority stay behind the admin route.
+
+`agent_runs` is current state, `agent_run_events` is append-only boundary history, and
+`agent_run_notifications` prevents duplicate Slack/Linear announcements after webhook echoes.
+Hatchery records run, PR, CI, commit, sandbox, and failure metadata; it does not run OpenCode inside
+the Durable Object, persist controller topology, edit source directly, auto-merge PRs, or deploy
+production.

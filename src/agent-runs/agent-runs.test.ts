@@ -10,6 +10,8 @@ type Row = Record<string, unknown>;
 
 class FakeD1 implements D1Like {
   agentRuns: Row[] = [];
+  events: Row[] = [];
+  notifications: Row[] = [];
 
   prepare(query: string) {
     const db = this;
@@ -35,6 +37,18 @@ class FakeD1 implements D1Like {
                 return { results: db.agentRuns.filter((r) => r.project_id === projectId && r.idempotency_key === idempotencyKey) as T[] };
               }
             }
+            if (query.startsWith('SELECT') && query.includes('FROM agent_run_events')) {
+              if (query.includes('WHERE dedupe_key=?')) {
+                const [dedupeKey] = values;
+                return { results: db.events.filter((r) => r.dedupe_key === dedupeKey) as T[] };
+              }
+            }
+            if (query.startsWith('SELECT') && query.includes('FROM agent_run_notifications')) {
+              if (query.includes('WHERE dedupe_key=?')) {
+                const [dedupeKey] = values;
+                return { results: db.notifications.filter((r) => r.dedupe_key === dedupeKey) as T[] };
+              }
+            }
             return { results: [] as T[] };
           },
           async run(): Promise<{ meta: { changes: number } }> {
@@ -42,12 +56,18 @@ class FakeD1 implements D1Like {
               const [
                 id,
                 projectId,
+                routeId,
                 sourceType,
                 sourceId,
                 idempotencyKey,
                 linearIssueId,
                 linearIdentifier,
                 linearUrl,
+                slackTeamId,
+                slackChannelId,
+                slackThreadTs,
+                githubOwner,
+                githubRepo,
                 targetRepo,
                 baseBranch,
                 kit,
@@ -61,18 +81,28 @@ class FakeD1 implements D1Like {
                 ciUrl,
                 summary,
                 error,
+                statusNote,
+                lastEventId,
+                lastHeartbeatAt,
                 createdAt,
                 updatedAt,
+                completedAt,
               ] = values;
               db.agentRuns.push({
                 id,
                 project_id: projectId,
+                route_id: routeId,
                 source_type: sourceType,
                 source_id: sourceId,
                 idempotency_key: idempotencyKey,
                 linear_issue_id: linearIssueId,
                 linear_identifier: linearIdentifier,
                 linear_url: linearUrl,
+                slack_team_id: slackTeamId,
+                slack_channel_id: slackChannelId,
+                slack_thread_ts: slackThreadTs,
+                github_owner: githubOwner,
+                github_repo: githubRepo,
                 target_repo: targetRepo,
                 base_branch: baseBranch,
                 kit,
@@ -86,13 +116,17 @@ class FakeD1 implements D1Like {
                 ci_url: ciUrl,
                 summary,
                 error,
+                status_note: statusNote,
+                last_event_id: lastEventId,
+                last_heartbeat_at: lastHeartbeatAt,
                 created_at: createdAt,
                 updated_at: updatedAt,
+                completed_at: completedAt,
               });
               return { meta: { changes: 1 } };
             }
             if (query.startsWith('UPDATE agent_runs')) {
-              const [status, sandboxId, branch, commitSha, prUrl, ciUrl, summary, error, updatedAt, id] = values;
+              const [status, sandboxId, branch, commitSha, prUrl, ciUrl, summary, error, statusNote, lastEventId, lastHeartbeatAt, completedAt, updatedAt, id] = values;
               const row = db.agentRuns.find((r) => r.id === id);
               if (!row) return { meta: { changes: 0 } };
               Object.assign(row, {
@@ -104,7 +138,53 @@ class FakeD1 implements D1Like {
                 ci_url: ciUrl,
                 summary,
                 error,
+                status_note: statusNote,
+                last_event_id: lastEventId,
+                last_heartbeat_at: lastHeartbeatAt,
+                completed_at: completedAt,
                 updated_at: updatedAt,
+              });
+              return { meta: { changes: 1 } };
+            }
+            if (query.startsWith('INSERT INTO agent_run_events')) {
+              const [id, projectId, runId, provider, eventType, providerDeliveryId, providerEntityId, dedupeKey, actorType, handling, handlingReason, payloadJson, occurredAt, receivedAt, processedAt, createdAt] = values;
+              if (db.events.some((r) => r.dedupe_key === dedupeKey)) return { meta: { changes: 0 } };
+              db.events.push({
+                id,
+                project_id: projectId,
+                run_id: runId,
+                provider,
+                event_type: eventType,
+                provider_delivery_id: providerDeliveryId,
+                provider_entity_id: providerEntityId,
+                dedupe_key: dedupeKey,
+                actor_type: actorType,
+                handling,
+                handling_reason: handlingReason,
+                payload_json: payloadJson,
+                occurred_at: occurredAt,
+                received_at: receivedAt,
+                processed_at: processedAt,
+                created_at: createdAt,
+              });
+              return { meta: { changes: 1 } };
+            }
+            if (query.startsWith('INSERT INTO agent_run_notifications')) {
+              const [id, projectId, runId, channel, notificationType, dedupeKey, targetRef, status, providerMessageId, error, createdAt, sentAt] = values;
+              if (db.notifications.some((r) => r.dedupe_key === dedupeKey)) return { meta: { changes: 0 } };
+              db.notifications.push({
+                id,
+                project_id: projectId,
+                run_id: runId,
+                channel,
+                notification_type: notificationType,
+                dedupe_key: dedupeKey,
+                target_ref: targetRef,
+                status,
+                provider_message_id: providerMessageId,
+                error,
+                created_at: createdAt,
+                sent_at: sentAt,
               });
               return { meta: { changes: 1 } };
             }
@@ -135,7 +215,7 @@ const runInput = {
   targetRepo: 'github.com/acme/repo',
   baseBranch: 'main',
   kit: 'coding-default',
-  runtime: 'claude_code',
+  runtime: 'opencode',
   sandboxProvider: 'e2b',
 };
 
@@ -150,7 +230,7 @@ test('createAgentRun stores a project-scoped lease and dedupes by idempotency ke
   assert.equal(first.duplicate, false);
   assert.equal(first.run.projectId, 'P');
   assert.equal(first.run.status, 'queued');
-  assert.equal(first.run.runtime, 'claude_code');
+  assert.equal(first.run.runtime, 'opencode');
   assert.equal(first.run.sandboxProvider, 'e2b');
   assert.equal(duplicate.duplicate, true);
   assert.equal(duplicate.run.id, first.run.id);
@@ -194,6 +274,20 @@ test('handleAgentRunCallback maps running, pr_opened, completed, and failed into
   );
   assert.equal(pr.body?.run.status, 'waiting_approval');
   assert.equal(pr.body?.run.prUrl, 'https://github.com/acme/repo/pull/7');
+  assert.equal(db.events.some((e) => e.event_type === 'runner.pr_opened'), true);
+  assert.equal(db.notifications.filter((n) => n.notification_type === 'pr_opened').length, 1);
+
+  const duplicatePr = await handleAgentRunCallback(
+    {
+      db,
+      expectedToken: 'runner-secret',
+      actualToken: 'runner-secret',
+      body: { runId: created.run.id, status: 'pr_opened', branch: 'agent/LIN-42', commitSha: 'abc123', prUrl: 'https://github.com/acme/repo/pull/7' },
+    },
+    deps,
+  );
+  assert.equal(duplicatePr.body?.run.status, 'waiting_approval');
+  assert.equal(db.notifications.filter((n) => n.notification_type === 'pr_opened').length, 1, 'duplicate runner echo does not double-notify');
 
   const completed = await handleAgentRunCallback(
     {
@@ -208,6 +302,7 @@ test('handleAgentRunCallback maps running, pr_opened, completed, and failed into
   assert.equal(completed.body?.run.ciUrl, 'https://github.com/acme/repo/actions/runs/1');
   assert.equal(completed.body?.run.prUrl, 'https://github.com/acme/repo/pull/7');
   assert.equal(completed.body?.run.branch, 'agent/LIN-42');
+  assert.equal(db.notifications.filter((n) => n.notification_type === 'completed').length, 1);
 
   const failedRun = await createAgentRun(db, { ...runInput, idempotencyKey: 'linear:issue:issue-2:run-agent', linearIssueId: 'issue-2' }, deps);
   const failed = await handleAgentRunCallback(
@@ -224,6 +319,37 @@ test('handleAgentRunCallback maps running, pr_opened, completed, and failed into
 
   const readBack = await getAgentRun(db, 'P', created.run.id);
   assert.equal(readBack?.status, 'completed');
+});
+
+test('terminal agent runs cannot move back to running', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const created = await createAgentRun(db, runInput, deps);
+  await handleAgentRunCallback(
+    {
+      db,
+      expectedToken: 'runner-secret',
+      actualToken: 'runner-secret',
+      body: { runId: created.run.id, status: 'completed', summary: 'done' },
+    },
+    deps,
+  );
+
+  const resurrect = await handleAgentRunCallback(
+    {
+      db,
+      expectedToken: 'runner-secret',
+      actualToken: 'runner-secret',
+      body: { runId: created.run.id, status: 'running', summary: 'late echo' },
+    },
+    deps,
+  );
+
+  assert.equal(resurrect.status, 400);
+  assert.match(String(resurrect.body?.error), /terminal/i);
+  const readBack = await getAgentRun(db, 'P', created.run.id);
+  assert.equal(readBack?.status, 'completed');
+  assert.equal(readBack?.summary, 'done');
 });
 
 await run();

@@ -43,9 +43,12 @@ test('buildSelfStatus reports the live runtime manifest without exposing connect
   assert.equal(status.capabilities.sourceEvolution.enabled, true);
   assert.deepEqual(status.capabilities.sourceEvolution.tools, ['propose_self_change', 'dispatch_coding_run']);
   assert.equal(status.capabilities.agentRuns.enabled, true);
-  assert.deepEqual(status.capabilities.agentRuns.tools, []);
+  assert.deepEqual(status.capabilities.agentRuns.tools, ['propose_agent_route']);
   assert.match(status.capabilities.agentRuns.note, /Linear/);
   assert.match(status.capabilities.agentRuns.note, /E2B/);
+  assert.match(status.capabilities.agentRuns.note, /OpenCode/);
+  assert.match(status.capabilities.agentRuns.note, /admin-only/);
+  assert.equal(JSON.stringify(status).includes('Claude Code'), false);
   assert.match(status.capabilities.reminders.note, /TICKER/);
   assert.deepEqual(status.connections.providers, [
     { provider: 'github', status: 'connected', configKeys: ['repo'] },
@@ -84,6 +87,7 @@ test('self_status tool returns the manifest as formatted JSON', async () => {
   assert.deepEqual(parsed.capabilities.sourceEvolution.tools, ['propose_self_change']);
   assert.equal(parsed.capabilities.agentRuns.enabled, true);
   assert.match(parsed.capabilities.agentRuns.note, /not configured/);
+  assert.deepEqual(parsed.capabilities.agentRuns.tools, ['propose_agent_route']);
 });
 
 run();
