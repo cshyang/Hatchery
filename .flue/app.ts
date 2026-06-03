@@ -5,6 +5,7 @@ import { verifySlackSignature } from '../src/slack/verify';
 import { fetchThreadReplies, renderThreadBackscroll } from '../src/slack/threads';
 import { mentionsBot, stripMention } from '../src/slack/mentions';
 import { queueWorkingAck } from '../src/slack/ack';
+import { dispatchSlackTurnWithFallback } from '../src/slack/dispatch';
 import {
   parseSlackEventEnvelope,
   slackEventId,
@@ -515,24 +516,33 @@ app.post('/slack/events', async (c) => {
     }).catch(() => {});
   }
 
-  await dispatch({
-    agent: 'project',
-    id: agentInstanceId(msg.projectId),
-    session: `conv:${msg.conversationId}`,
-    // Forward the author identity in neutral terms so history retains who said what — the
-    // future reflection job reads senderId from it to attribute facts. (The initializer itself
-    // can't see this; only the model does.)
-    input: {
-      message: msg.text,
-      conversationId: msg.conversationId,
-      provider: msg.provider,
-      accountId: msg.externalAccountId,
-      senderId: msg.senderId,
-      ...(threadReplies.length
-        ? { threadContext: renderThreadBackscroll(threadReplies, binding.transportBotId, { excludeTs: ev.ts }) }
-        : {}),
+  await dispatchSlackTurnWithFallback(
+    {
+      agent: 'project',
+      id: agentInstanceId(msg.projectId),
+      session: `conv:${msg.conversationId}`,
+      // Forward the author identity in neutral terms so history retains who said what — the
+      // future reflection job reads senderId from it to attribute facts. (The initializer itself
+      // can't see this; only the model does.)
+      input: {
+        message: msg.text,
+        conversationId: msg.conversationId,
+        provider: msg.provider,
+        accountId: msg.externalAccountId,
+        senderId: msg.senderId,
+        ...(threadReplies.length
+          ? { threadContext: renderThreadBackscroll(threadReplies, binding.transportBotId, { excludeTs: ev.ts }) }
+          : {}),
+      },
     },
-  });
+    {
+      executionCtx: c.executionCtx,
+      token,
+      channel: msg.externalSpaceId,
+      threadTs: msg.externalConversationId,
+    },
+    { dispatch },
+  );
 
   return c.body(null, 200); // ack within Slack's 3s window; agent replies async
 });

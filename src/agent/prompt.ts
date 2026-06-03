@@ -68,6 +68,14 @@ const CONNECTING_THE_DOTS =
   `answer — never invent or force a cross-reference; a wrong "this relates to X" is worse than none. When ` +
   `asked to catch up on recent channel activity, call search_channel with NO query to list the latest threads.`;
 
+const SETUP_GUIDANCE =
+  `SETUP QUESTIONS\n` +
+  `When someone asks whether GitHub, Linear, Run Agent, routing, or project setup is ready, call ` +
+  `setup_status FIRST. Use its checklist to answer what is connected, what is missing, and the next ` +
+  `action. Only after setup_status says a provider is missing should you call request_connection for ` +
+  `that exact provider. For GitHub, use OAuth for normal workspace setup; use PAT only when the person ` +
+  `wants access scoped to a specific owner/name repo. Never guess setup state from memory.`;
+
 // Guidance on AUTHORING skills — kept consistent whether or not the catalog is empty, because
 // the failure mode of a self-improving agent is skill SPRAWL (many narrow one-off skills nobody
 // finds), not too few skills. So: write broad/class-level, extend before adding, archive (never
@@ -137,10 +145,10 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
       `for quick answers and heartbeat runs. It is NOT your reply; still send the answer with reply_to_conversation.`,
   );
 
-  // 4–6. Behavioral guidance + platform — stable, model-agnostic, always on.
-  blocks.push(FINISHING_THE_JOB, USING_YOUR_TOOLS, SLACK_FORMATTING, CONNECTING_THE_DOTS);
+  // 4–7. Behavioral guidance + platform — stable, model-agnostic, always on.
+  blocks.push(FINISHING_THE_JOB, USING_YOUR_TOOLS, SLACK_FORMATTING, CONNECTING_THE_DOTS, SETUP_GUIDANCE);
 
-  // 7. Schedule (stable mechanics).
+  // 8. Schedule (stable mechanics).
   blocks.push(
     `YOUR SCHEDULE\n` +
       `Use set_reminder to schedule your own work — cron in KL time (e.g. "0 9 * * *" = 9am daily), everyMs, inMs, ` +
@@ -148,16 +156,16 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
       `resume_reminder, cancel_reminder. Use the "now" field for absolute times. Pick sensible cadences.`,
   );
 
-  // 8. Skills catalog — semi-volatile (changes when skills change), so it trails the stable prefix.
+  // 9. Skills catalog — semi-volatile (changes when skills change), so it trails the stable prefix.
   blocks.push(skillsBlock(catalog));
 
-  // 9. Connections — semi-volatile (changes when a connection is added/removed), after skills.
+  // 10. Connections — semi-volatile (changes when a connection is added/removed), after skills.
   if (connectionsBlock) blocks.push(connectionsBlock);
 
-  // 10. Memory — MOST volatile (changes per turn and per author), so it goes dead last.
+  // 11. Memory — MOST volatile (changes per turn and per author), so it goes dead last.
   if (memoryBlock) blocks.push(memoryBlock);
 
-  // 11. Terminal delivery mandate — placed LAST for recency weight. The confirmed silent-agent
+  // 12. Terminal delivery mandate — placed LAST for recency weight. The confirmed silent-agent
   // failure mode is the model gathering data via tools, then ending the turn in plain text without
   // calling reply_to_conversation. This last line fights that directly, after everything else.
   blocks.push(

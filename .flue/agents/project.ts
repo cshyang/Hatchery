@@ -13,6 +13,7 @@ import { workbenchTools } from '../../src/workbench/tools';
 import { sourceChangeTools } from '../../src/workbench/source-change';
 import { logMessage } from '../../src/knowledge/reflection';
 import { buildConnectionRuntime } from '../../src/connections/runtime';
+import { setupStatusTool } from '../../src/setup/status';
 
 // The project agent. Addressed at /agents/project/<id>, id = "project:<projectId>:agent:<slug>"
 // (slug = "default" until a channel hosts multiple personas). Each instance is a persistent
@@ -146,6 +147,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       connectionState: connectionRuntime.state,
       connectionToolNames: connectionRuntime.tools.map((tool) => tool.name),
     }),
+    setupStatusTool({ db, binding, projectId, env }),
     ...(db ? skillTools(db, projectId) : []),
     ...reminderTools(ticker, heartbeatToken, projectId),
     ...(db ? memoryTools(db, projectId) : []),
