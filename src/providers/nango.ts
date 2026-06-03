@@ -13,6 +13,7 @@
 // reset the DO mid-turn (the partyserver lesson). Same 12s ceiling as generic-api.ts / github.ts.
 
 import { fetchWithTimeout } from './http';
+import { nangoConnectionConfig } from '../connections/integrations';
 
 const NANGO_API = 'https://api.nango.dev';
 const NANGO_FETCH_TIMEOUT_MS = 12_000;
@@ -47,8 +48,11 @@ export interface StartConnectSessionArgs {
   /** Binds the future connection to this Hatchery project (the Slack channel id). Filed under
    *  tags.end_user_id — top-level end_user/organization fields are DEPRECATED. */
   endUserId: string;
-  /** Nango integration id to lock the session to. By convention == the catalog provider slug. */
+  /** Nango integration id to lock the session to. Defaults to the catalog provider slug, but may
+   *  differ for auth-mode-specific integrations such as github-pat. */
   integrationId: string;
+  /** Non-secret attribution metadata only. The credential is entered at the provider/Nango page. */
+  tags?: Record<string, string>;
 }
 
 /** Create a Connect session; return the magic link (a plain clickable URL — no JS SDK). */
@@ -62,7 +66,7 @@ export async function startConnectSession(
     {
       method: 'POST',
       headers: { authorization: `Bearer ${args.secretKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ allowed_integrations: [args.integrationId], tags: { end_user_id: args.endUserId } }),
+      body: JSON.stringify({ allowed_integrations: [args.integrationId], tags: { ...(args.tags ?? {}), end_user_id: args.endUserId } }),
     },
     fetchImpl,
   );
@@ -152,9 +156,10 @@ export async function verifyNangoWebhook(signingKey: string, rawBody: string, he
 
 export interface NangoAuthEvent {
   projectId: string; // tags.end_user_id → the Slack channel id
-  provider: string; // Nango provider (== catalog slug by convention)
+  provider: string; // catalog provider slug (tagged provider wins; falls back to Nango provider)
   providerConfigKey: string;
   connectionId: string; // stored as connection_ref
+  config: Record<string, unknown>;
 }
 
 /** Parse an inbound webhook; return a normalized auth-creation-success event, or null for anything
@@ -168,7 +173,7 @@ export function parseNangoAuthWebhook(rawBody: string): NangoAuthEvent | null {
     connectionId?: string;
     provider?: string;
     providerConfigKey?: string;
-    tags?: { end_user_id?: string };
+    tags?: Record<string, unknown> & { end_user_id?: string; provider?: string };
   };
   try {
     body = JSON.parse(rawBody);
@@ -177,9 +182,12 @@ export function parseNangoAuthWebhook(rawBody: string): NangoAuthEvent | null {
   }
   if (body.type !== 'auth' || body.operation !== 'creation' || body.success !== true) return null;
   const projectId = body.tags?.end_user_id;
-  const { connectionId, provider, providerConfigKey } = body;
+  const { connectionId, providerConfigKey } = body;
+  const provider = body.tags?.provider ?? body.provider;
   if (!projectId || !connectionId || !provider || !providerConfigKey) return null;
-  return { projectId: String(projectId), provider: String(provider), providerConfigKey: String(providerConfigKey), connectionId: String(connectionId) };
+  const providerSlug = String(provider).toLowerCase();
+  const config = nangoConnectionConfig({ provider: providerSlug, providerConfigKey: String(providerConfigKey), tags: body.tags });
+  return { projectId: String(projectId), provider: providerSlug, providerConfigKey: String(providerConfigKey), connectionId: String(connectionId), config };
 }
 
 /** Parse an inbound auth/deletion webhook → just the connectionId, or null. We target the stored row

@@ -5,6 +5,15 @@ import { githubReadTools } from '../providers/github';
 import { deleteConnection, startConnectSession } from '../providers/nango';
 import { PROVIDER_CATALOG, providerUsesGenericApi, type ProviderCatalogEntry } from './catalog';
 import type { D1Like } from '../skills/repository';
+import {
+  connectionProviderConfigKey,
+  nangoIntegrationKey,
+  normalizeAuthMode,
+  normalizeGithubRepo,
+  supportedAuthModes,
+  type ConnectionAuthMode,
+  type NangoIntegrationKeys,
+} from './integrations';
 
 // The CONNECTIONS prompt block (mirrors the skills catalog injection). Tells the agent what it
 // can reach and what is connectable but not yet wired by an operator.
@@ -16,14 +25,18 @@ export function connectionsBlock(
   const byProvider = new Map(state.map((s) => [s.provider, s]));
   const lines = catalog.map((c) => {
     const s = byProvider.get(c.provider);
-    if (s?.status === 'connected') return `  ✅ ${c.provider} (connected) — ${c.summary}`;
+    if (s?.status === 'connected') {
+      const detail = connectionDetail(c.provider, s.config);
+      return `  ✅ ${c.provider} (connected${detail ? `: ${detail}` : ''}) — ${c.summary}`;
+    }
     return `  ⚪ ${c.provider} (not connected) — ${c.summary}`;
   });
   const intro = canRequest
     ? 'External services you can reach. Connected ones expose tools you can call now. For one that is NOT ' +
       'connected, call request_connection with the provider name — you get a secure link to share; the ' +
       'person authorizes off-Slack (you never see the credential) and that provider\'s tools appear ' +
-      'automatically once they finish.'
+      'automatically once they finish. For GitHub, use authMode "oauth" for normal workspace setup or ' +
+      'authMode "pat" plus repo "owner/name" for a repo-scoped PAT connection.'
     : 'External services you can reach. Connected ones expose tools you can call now; the rest must be ' +
       'wired by an operator first (mention that you need it — you cannot connect it yourself).';
   return (
@@ -35,6 +48,17 @@ export function connectionsBlock(
     'to read every result of a search/list — fetch the list, then read details only for what the user ' +
     'actually asked about. Long chains of calls can stall the turn.'
   );
+}
+
+function connectionDetail(provider: string, config: Record<string, unknown>): string {
+  const parts: string[] = [];
+  if (provider === 'github') {
+    const mode = typeof config.authMode === 'string' ? config.authMode : undefined;
+    const repo = typeof config.repo === 'string' ? config.repo : undefined;
+    if (mode) parts.push(mode.toUpperCase());
+    if (repo) parts.push(`repo ${repo}`);
+  }
+  return parts.join(', ');
 }
 
 /** Tools contributed by connections, gated on state (ADR D6): the initializer pushes these only
@@ -85,7 +109,7 @@ export function connectionTools(
  *  token. Gated to the provider catalog (the agent can't request an arbitrary provider).
  *  `deps.startConnectSession` is injectable for tests. */
 export function requestConnectionTool(
-  args: { nangoSecretKey: string; projectId: string; catalog?: ProviderCatalogEntry[] },
+  args: { nangoSecretKey: string; projectId: string; catalog?: ProviderCatalogEntry[]; nangoIntegrationKeys?: NangoIntegrationKeys },
   deps: { startConnectSession?: typeof startConnectSession } = {},
 ): ToolDefinition {
   const catalog = args.catalog ?? PROVIDER_CATALOG;
@@ -97,19 +121,35 @@ export function requestConnectionTool(
       'Start connecting an external service for THIS channel. Pass the provider name; you get back a ' +
       'secure authorization link to share with the person. They click it and authorize off-Slack — you ' +
       "NEVER receive or handle the credential. Once they finish, that provider's tools appear " +
-      `automatically. Connectable providers: ${allowed.join(', ')}.`,
+      `automatically. For GitHub, use authMode "oauth" or authMode "pat" with repo "owner/name". Connectable providers: ${allowed.join(', ')}.`,
     parameters: Type.Object({
       provider: Type.String({ description: `The provider to connect. One of: ${allowed.join(', ')}.` }),
+      authMode: Type.Optional(Type.String({ description: 'Optional auth mode. For GitHub: "oauth" (default) or "pat". Other providers use "oauth".' })),
+      repo: Type.Optional(Type.String({ description: 'Optional GitHub owner/name. Required when provider="github" and authMode="pat".' })),
     }),
-    async execute({ provider }) {
+    async execute({ provider, authMode, repo }) {
       const p = String(provider).toLowerCase();
       if (!allowed.includes(p)) {
         return `Cannot connect "${provider}" — not a supported provider. Supported: ${allowed.join(', ')}.`;
       }
-      // integrationId == provider slug, by convention (the operator names the Nango integration to match).
-      const { connectLink } = await start({ secretKey: args.nangoSecretKey, endUserId: args.projectId, integrationId: p });
+      const mode = normalizeAuthMode(p, authMode);
+      if (!mode) {
+        return `Cannot connect ${p} with authMode "${authMode}" — supported modes: ${supportedAuthModes(p).join(', ')}.`;
+      }
+      const normalizedRepo = repo == null || repo === '' ? null : normalizeGithubRepo(repo);
+      if (p === 'github' && mode === 'pat' && !normalizedRepo) {
+        return 'repo is required for a GitHub PAT connection. Use owner/name, for example Calibrax-ai/autoship.';
+      }
+      if (p === 'github' && repo && !normalizedRepo) {
+        return 'repo must be a GitHub owner/name value, for example Calibrax-ai/autoship.';
+      }
+      const integrationId = nangoIntegrationKey(p, mode as ConnectionAuthMode, args.nangoIntegrationKeys);
+      const tags: Record<string, string> = { provider: p, auth_mode: mode };
+      if (normalizedRepo) tags.repo = normalizedRepo;
+      const { connectLink } = await start({ secretKey: args.nangoSecretKey, endUserId: args.projectId, integrationId, tags });
+      const scope = p === 'github' && mode === 'pat' && normalizedRepo ? ` for repo ${normalizedRepo}` : '';
       return (
-        `Share this link with the user to connect ${p} (it opens ${p}'s secure authorization page off-Slack — ` +
+        `Share this link with the user to connect ${p}${scope} (it opens ${p}'s secure authorization page off-Slack — ` +
         `you never see the credential):\n${connectLink}\n` +
         `Once they authorize, ${p} tools will appear automatically and you can use them.`
       );
@@ -152,7 +192,7 @@ export function disconnectConnectionTool(
       // tools disappear next turn. If the Nango call hard-fails (non-404), surface it rather than
       // claim success while the token still lives at the vendor.
       try {
-        await del({ secretKey: args.nangoSecretKey, connectionId: row.connectionRef, providerConfigKey: p });
+        await del({ secretKey: args.nangoSecretKey, connectionId: row.connectionRef, providerConfigKey: connectionProviderConfigKey(p, row.config) });
       } catch (e) {
         return `Couldn't fully disconnect ${p}: ${e instanceof Error ? e.message : 'error'}. Nothing was changed — try again.`;
       }

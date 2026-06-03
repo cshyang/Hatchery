@@ -81,7 +81,7 @@ export function buildSelfStatus(input: SelfStatusInput) {
       connections: capability(
         input.connectionToolNames.length > 0 || input.canRequestConnections,
         input.connectionToolNames,
-        'External API access is broker-gated by project connection state; secrets are never exposed to the model.',
+        'External API access is broker-gated by project connection state; secrets are never exposed to the model. GitHub can be requested as OAuth or a repo-scoped PAT without passing the PAT through chat/tools.',
       ),
       repositoryInspection: capability(
         githubConnected,
@@ -101,6 +101,7 @@ export function buildSelfStatus(input: SelfStatusInput) {
       'Source-code evolution happens through workbench proposals, an external coding runner, PR review, and deployment; this agent does not edit or deploy its own code directly.',
       'Linear-driven coding work is control-plane only: Hatchery records leases and callbacks; the external E2B runner owns OpenCode execution, clone/edit/test/commit/PR, and never auto-merges from this runtime.',
       'External writes must go through explicit gated tools; connected read APIs do not grant arbitrary write authority.',
+      'GitHub PAT setup stores only auth-mode/repo metadata and a Nango connection reference; the PAT remains in Nango.',
     ],
   };
 }
