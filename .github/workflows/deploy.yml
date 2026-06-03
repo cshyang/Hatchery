@@ -59,7 +59,9 @@ jobs:
       - name: Build (Flue → Cloudflare)
         run: npx flue build --target cloudflare
       - name: Deploy hatchery
-        run: npx wrangler deploy --config dist/hatchery/wrangler.json | tee deploy.out
+        run: |
+          set -o pipefail   # else `| tee` swallows wrangler's exit code → a failed deploy looks green
+          npx wrangler deploy --config dist/hatchery/wrangler.json | tee deploy.out
       - name: Deploy ticker
         run: npx wrangler deploy --config ticker/wrangler.jsonc
 
