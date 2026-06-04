@@ -28,7 +28,7 @@ import { readJsonOrNull } from '../src/gateway/json';
 import { postConnectionNotice } from '../src/connections/notices';
 import { handleInternalWorkItemRequest } from '../src/workbench/gateway';
 import { handleSourceChangeRunCallback } from '../src/workbench/source-change';
-import { handleLinearWebhook } from '../src/agent-runs/linear';
+import { handleLinearComment, handleLinearWebhook } from '../src/agent-runs/linear';
 import { handleAgentRunCallback } from '../src/agent-runs/repository';
 import { reconcileAgentRuns } from '../src/agent-runs/dispatch';
 import { activateAgentRunRoute, disableAgentRunRoute } from '../src/agent-runs/events';
@@ -183,25 +183,31 @@ app.post('/__internal/source-change-runs', async (c) => {
 // runner owns coding-agent/E2B/PR behavior; Hatchery only records dispatch and callback metadata.
 app.post('/linear/webhook', async (c) => {
   const raw = await c.req.text();
-  const result = await handleLinearWebhook(
-    {
-      db: c.env.DB,
-      signingSecret: c.env.LINEAR_WEBHOOK_SECRET,
-      signature: c.req.header('linear-signature'),
-      deliveryId: c.req.header('linear-delivery'),
-      event: c.req.header('linear-event'),
-      rawBody: raw,
-      projectsJson: c.env.LINEAR_AGENT_PROJECTS,
-      nowMs: Date.now(),
-    },
-    {
-      runnerUrl: c.env.AGENT_RUNNER_URL,
-      runnerToken: c.env.AGENT_RUNNER_TOKEN,
-      hatcheryPublicUrl: c.env.HATCHERY_PUBLIC_URL,
-      botActorId: c.env.LINEAR_BOT_ACTOR_ID,
-      fetch,
-    },
-  );
+  // Issue state-changes trigger NEW runs (handleLinearWebhook); comments on an issue with an existing
+  // run/PR spawn CONTINUATION runs on that PR branch (handleLinearComment). Same signed ingress, same
+  // deferred dispatch + reconciler backstop.
+  const event = c.req.header('linear-event');
+  const linearReq = {
+    db: c.env.DB,
+    signingSecret: c.env.LINEAR_WEBHOOK_SECRET,
+    signature: c.req.header('linear-signature'),
+    deliveryId: c.req.header('linear-delivery'),
+    event,
+    rawBody: raw,
+    projectsJson: c.env.LINEAR_AGENT_PROJECTS,
+    nowMs: Date.now(),
+  };
+  const linearDeps = {
+    runnerUrl: c.env.AGENT_RUNNER_URL,
+    runnerToken: c.env.AGENT_RUNNER_TOKEN,
+    hatcheryPublicUrl: c.env.HATCHERY_PUBLIC_URL,
+    botActorId: c.env.LINEAR_BOT_ACTOR_ID,
+    fetch,
+  };
+  const result =
+    event === 'Comment'
+      ? await handleLinearComment(linearReq, linearDeps)
+      : await handleLinearWebhook(linearReq, linearDeps);
   // Immediate best-effort dispatch off the ack path; the ticker reconciler is the durable backstop.
   if (result.dispatch) c.executionCtx.waitUntil(result.dispatch());
   if (result.status === 404) return c.body(null, 404);
