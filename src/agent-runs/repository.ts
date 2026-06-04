@@ -254,6 +254,7 @@ export async function createAgentRun(
     kit?: string | null;
     runtime?: string | null;
     sandboxProvider?: string | null;
+    branch?: string | null;
     dispatchPayload?: string | null;
   },
   deps: ClockAndIds = {},
@@ -298,7 +299,7 @@ export async function createAgentRun(
       normalizeText(input.sandboxProvider) ?? 'e2b',
       null,
       'queued',
-      null,
+      normalizeText(input.branch),
       null,
       null,
       null,
