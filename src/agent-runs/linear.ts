@@ -1,7 +1,8 @@
 import type { D1Like } from '../skills/repository';
 import { createAgentRunEvent, createAgentRunNotification, findActiveAgentRunRoute, type AgentRunRoute } from './events';
-import { createAgentRun, getAgentRunBySource, getLatestAgentRunByLinearIssue, updateAgentRun, type AgentRun, type AgentRunStatus, type ClockAndIds } from './repository';
+import { createAgentRun, findLatestRunByLinearIssue, getAgentRunBySource, getLatestAgentRunByLinearIssue, updateAgentRun, type AgentRun, type AgentRunStatus, type ClockAndIds } from './repository';
 import { claimAndDispatchRun } from './dispatch';
+import { createContinuationRun } from './continuation';
 
 const WEBHOOK_MAX_AGE_MS = 60_000;
 const DEFAULT_RUN_STATE_NAME = 'Run Agent';
@@ -386,6 +387,80 @@ export async function handleLinearWebhook(req: LinearWebhookRequest, deps: Linea
       body: { run: created.run, duplicate: false, dispatchStatus: 'queued' },
       dispatch: () => claimAndDispatchRun(db, runId, deps, deps),
     };
+  } catch (e) {
+    return { status: 400, body: { error: e instanceof Error ? e.message : 'bad request' } };
+  }
+}
+
+export async function handleLinearComment(req: LinearWebhookRequest, deps: LinearWebhookDeps): Promise<LinearWebhookResult> {
+  if (!(await verifyLinearWebhook(req.signingSecret ?? '', req.rawBody, req.signature))) return { status: 404 };
+  if (!req.db) return { status: 500, body: { error: 'no DB binding' } };
+  if (!req.deliveryId) return { status: 400, body: { error: 'Linear-Delivery is required' } };
+  if (req.event !== 'Comment') return { status: 200, body: { skipped: 'not a Comment event' } };
+
+  try {
+    const payload = parsePayload(req.rawBody);
+    const timestamp = Number(payload.webhookTimestamp);
+    if (!Number.isFinite(timestamp) || Math.abs((req.nowMs ?? Date.now()) - timestamp) > WEBHOOK_MAX_AGE_MS) {
+      return { status: 400, body: { error: 'stale Linear webhook' } };
+    }
+    if (payload.action !== 'create' || payload.type !== 'Comment') return { status: 200, body: { skipped: 'not a Comment create' } };
+
+    // Self-trigger guard: a bot/integration comment must never spawn a continuation.
+    if (isNonHumanActor(payload, deps.botActorId)) return { status: 200, body: { skipped: 'non-human actor' } };
+
+    const data = objectField(payload, 'data');
+    if (!data) return { status: 400, body: { error: 'Comment data is required' } };
+    const body = optionalText(data.body, 8000);
+    if (!body) return { status: 200, body: { skipped: 'empty comment' } };
+    const issue = objectField(data, 'issue');
+    const issueId = optionalText(data.issueId, 256) ?? (issue ? optionalText(issue.id, 256) : null);
+    if (!issueId) return { status: 200, body: { skipped: 'no issue id on comment' } };
+
+    // A comment attaches to whatever run/project already owns the issue. Resolve FIRST so we do not
+    // record a boundary event for comments on issues Hatchery never ran (workspace-wide noise).
+    const parent = await findLatestRunByLinearIssue(req.db, issueId);
+    if (!parent) return { status: 200, body: { skipped: 'no run for issue' } };
+
+    // Boundary receipt -> agent_run_events (mirrors handleLinearWebhook). Delivery-level dedupe.
+    const event = await createAgentRunEvent(
+      req.db,
+      {
+        projectId: parent.projectId,
+        runId: parent.id,
+        provider: 'linear',
+        eventType: 'linear.comment.created',
+        providerDeliveryId: req.deliveryId,
+        providerEntityId: issueId,
+        dedupeKey: `linear-direct:${req.deliveryId}`,
+        actorType: 'human',
+        handling: 'record_only',
+        handlingReason: 'human comment on a run issue',
+        payload,
+        occurredAt: timestamp,
+        processedAt: req.nowMs ?? Date.now(),
+      },
+      deps,
+    );
+    if (event.duplicate) return { status: 200, body: { dispatchStatus: 'deduped', reason: 'comment already processed' } };
+
+    const outcome = await createContinuationRun(
+      req.db,
+      {
+        projectId: parent.projectId,
+        parent,
+        feedback: body,
+        source: { type: 'linear', id: req.deliveryId },
+        replyTarget: { surface: 'linear', ref: issueId },
+      },
+      deps,
+    );
+
+    if (outcome.status === 'ignored') return { status: 200, body: { skipped: outcome.reason } };
+    if (outcome.status === 'deduped') return { status: 200, body: { dispatchStatus: 'deduped', reason: outcome.reason } };
+
+    await updateAgentRun(req.db, { id: outcome.run.id, lastEventId: event.event.id }, deps);
+    return { status: 200, body: { run: outcome.run, dispatchStatus: 'queued' }, dispatch: outcome.dispatch };
   } catch (e) {
     return { status: 400, body: { error: e instanceof Error ? e.message : 'bad request' } };
   }

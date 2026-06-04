@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
 import type { D1Like } from '../skills/repository';
-import { handleLinearWebhook, parseLinearAgentProjects, verifyLinearWebhook } from './linear';
+import { handleLinearComment, handleLinearWebhook, parseLinearAgentProjects, verifyLinearWebhook } from './linear';
+import { createAgentRun } from './repository';
 
 const { test, run } = createTestRunner();
 
@@ -49,6 +50,21 @@ class FakeD1 implements D1Like {
                 const [projectId, linearIssueId] = values;
                 const rows = db.agentRuns
                   .filter((r) => r.project_id === projectId && r.linear_issue_id === linearIssueId)
+                  .sort((a, b) => Number(b.created_at) - Number(a.created_at));
+                return { results: rows as T[] };
+              }
+              if (query.includes('WHERE linear_issue_id=?')) {
+                const [linearIssueId] = values;
+                const rows = db.agentRuns
+                  .filter((r) => r.linear_issue_id === linearIssueId)
+                  .sort((a, b) => Number(b.created_at) - Number(a.created_at));
+                return { results: rows as T[] };
+              }
+              if (query.includes("status IN ('queued','dispatching','running')")) {
+                const [projectId, branch] = values;
+                const activeStatuses = new Set(['queued', 'dispatching', 'running']);
+                const rows = db.agentRuns
+                  .filter((r) => r.project_id === projectId && r.branch === branch && activeStatuses.has(String(r.status)))
                   .sort((a, b) => Number(b.created_at) - Number(a.created_at));
                 return { results: rows as T[] };
               }
@@ -262,6 +278,10 @@ async function hmac(signingKey: string, raw: string): Promise<string> {
   const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(raw));
   return [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
+
+const SECRET = 'linear-secret';
+const NOW = 2_000_000;
+const sign = (secret: string, raw: string) => hmac(secret, raw);
 
 function issuePayload(stateName = 'Run Agent', previousStateName = 'Backlog') {
   return {
@@ -677,6 +697,61 @@ test('handleLinearWebhook does not create a rerun from the same Linear delivery 
   assert.equal(replay.body?.dispatchStatus, 'deduped');
   assert.equal(replay.dispatch, undefined);
   assert.equal(db.agentRuns.length, 1);
+});
+
+test('handleLinearComment records a boundary event and spawns a continuation for a human comment', async () => {
+  const db = new FakeD1();
+  await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'parent', targetRepo: 'https://github.com/o/r', linearIssueId: 'ISSUE-1', branch: 'hatchery/eng-1' }, seq());
+  // Parent must be in waiting_approval (PR open, idle) so continuation is not blocked by active-branch dedupe.
+  db.agentRuns[0].status = 'waiting_approval';
+  const raw = JSON.stringify({ action: 'create', type: 'Comment', webhookTimestamp: NOW, actor: { type: 'user', id: 'u1' }, data: { id: 'c1', body: 'use the existing helper', issueId: 'ISSUE-1' } });
+  const res = await handleLinearComment(
+    { db, signingSecret: SECRET, signature: await sign(SECRET, raw), deliveryId: 'deliv-1', event: 'Comment', rawBody: raw, projectsJson: undefined, nowMs: NOW },
+    { runnerUrl: 'https://runner', runnerToken: 't', hatcheryPublicUrl: 'https://h', fetch: async () => new Response('{}'), ...seq() },
+  );
+  assert.equal(res.status, 200);
+  assert.equal(res.body.dispatchStatus, 'queued');
+  assert.ok(res.dispatch);
+  assert.equal(db.events.filter((e) => e.event_type === 'linear.comment.created').length, 1);
+});
+
+test('handleLinearComment dedupes a redelivered comment by delivery id', async () => {
+  const db = new FakeD1();
+  await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'parent', targetRepo: 'r', linearIssueId: 'ISSUE-1', branch: 'br' }, seq());
+  db.agentRuns[0].status = 'waiting_approval';
+  const raw = JSON.stringify({ action: 'create', type: 'Comment', webhookTimestamp: NOW, actor: { type: 'user' }, data: { id: 'c1', body: 'hi', issueId: 'ISSUE-1' } });
+  const args = { db, signingSecret: SECRET, signature: await sign(SECRET, raw), deliveryId: 'dup-1', event: 'Comment', rawBody: raw, projectsJson: undefined, nowMs: NOW };
+  await handleLinearComment(args, { ...seq() });
+  const second = await handleLinearComment(args, { ...seq() }); // same delivery id
+  assert.equal(second.body.dispatchStatus, 'deduped');
+});
+
+test('handleLinearComment skips a bot comment (self-trigger guard)', async () => {
+  const db = new FakeD1();
+  await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'parent', targetRepo: 'r', linearIssueId: 'ISSUE-1', branch: 'b' }, seq());
+  const raw = JSON.stringify({ action: 'create', type: 'Comment', webhookTimestamp: NOW, actor: { type: 'app', name: 'Hatchery' }, data: { id: 'c2', body: 'auto', issueId: 'ISSUE-1' } });
+  const res = await handleLinearComment({ db, signingSecret: SECRET, signature: await sign(SECRET, raw), deliveryId: 'd2', event: 'Comment', rawBody: raw, projectsJson: undefined, nowMs: NOW }, { ...seq() });
+  assert.equal(res.body.skipped, 'non-human actor');
+});
+
+test('handleLinearComment skips (no event written) when no run exists for the issue', async () => {
+  const db = new FakeD1();
+  const raw = JSON.stringify({ action: 'create', type: 'Comment', webhookTimestamp: NOW, actor: { type: 'user' }, data: { id: 'c3', body: 'hi', issueId: 'UNKNOWN' } });
+  const res = await handleLinearComment({ db, signingSecret: SECRET, signature: await sign(SECRET, raw), deliveryId: 'd3', event: 'Comment', rawBody: raw, projectsJson: undefined, nowMs: NOW }, { ...seq() });
+  assert.equal(res.body.skipped, 'no run for issue');
+  assert.equal(db.events.length, 0);
+});
+
+test('handleLinearComment parses the provisional real-shape fixture', async () => {
+  const fixture = JSON.parse(await import('node:fs').then((fs) => fs.readFileSync('tests/fixtures/linear-comment-webhook.json', 'utf8')));
+  const ts = fixture.webhookTimestamp;
+  const db = new FakeD1();
+  await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'parent', targetRepo: 'r', linearIssueId: fixture.data.issueId, branch: 'br' }, seq());
+  // Set to waiting_approval so continuation is not blocked by active-branch dedupe.
+  db.agentRuns[0].status = 'waiting_approval';
+  const raw = JSON.stringify(fixture);
+  const res = await handleLinearComment({ db, signingSecret: SECRET, signature: await sign(SECRET, raw), deliveryId: 'fx-1', event: 'Comment', rawBody: raw, projectsJson: undefined, nowMs: ts }, { runnerUrl: 'https://r', runnerToken: 't', hatcheryPublicUrl: 'https://h', fetch: async () => new Response('{}'), ...seq() });
+  assert.equal(res.body.dispatchStatus, 'queued');
 });
 
 await run();
