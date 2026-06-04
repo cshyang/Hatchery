@@ -704,6 +704,7 @@ test('handleLinearComment records a boundary event and spawns a continuation for
   await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'parent', targetRepo: 'https://github.com/o/r', linearIssueId: 'ISSUE-1', branch: 'hatchery/eng-1' }, seq());
   // Parent must be in waiting_approval (PR open, idle) so continuation is not blocked by active-branch dedupe.
   db.agentRuns[0].status = 'waiting_approval';
+  db.agentRuns[0].pr_url = 'https://github.com/o/r/pull/5';
   const raw = JSON.stringify({ action: 'create', type: 'Comment', webhookTimestamp: NOW, actor: { type: 'user', id: 'u1' }, data: { id: 'c1', body: 'use the existing helper', issueId: 'ISSUE-1' } });
   const res = await handleLinearComment(
     { db, signingSecret: SECRET, signature: await sign(SECRET, raw), deliveryId: 'deliv-1', event: 'Comment', rawBody: raw, projectsJson: undefined, nowMs: NOW },
@@ -713,17 +714,54 @@ test('handleLinearComment records a boundary event and spawns a continuation for
   assert.equal(res.body.dispatchStatus, 'queued');
   assert.ok(res.dispatch);
   assert.equal(db.events.filter((e) => e.event_type === 'linear.comment.created').length, 1);
+  assert.equal(db.events[0].provider_entity_id, 'c1');
+  assert.equal(db.events[0].handling, 'wake_controller');
 });
 
 test('handleLinearComment dedupes a redelivered comment by delivery id', async () => {
   const db = new FakeD1();
   await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'parent', targetRepo: 'r', linearIssueId: 'ISSUE-1', branch: 'br' }, seq());
   db.agentRuns[0].status = 'waiting_approval';
+  db.agentRuns[0].pr_url = 'https://github.com/o/r/pull/5';
   const raw = JSON.stringify({ action: 'create', type: 'Comment', webhookTimestamp: NOW, actor: { type: 'user' }, data: { id: 'c1', body: 'hi', issueId: 'ISSUE-1' } });
   const args = { db, signingSecret: SECRET, signature: await sign(SECRET, raw), deliveryId: 'dup-1', event: 'Comment', rawBody: raw, projectsJson: undefined, nowMs: NOW };
   await handleLinearComment(args, { ...seq() });
   const second = await handleLinearComment(args, { ...seq() }); // same delivery id
   assert.equal(second.body.dispatchStatus, 'deduped');
+});
+
+test('handleLinearComment recovers when a duplicate delivery has an event receipt but no continuation run', async () => {
+  const db = new FakeD1();
+  await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'parent', targetRepo: 'r', linearIssueId: 'ISSUE-1', branch: 'br' }, seq());
+  db.agentRuns[0].status = 'waiting_approval';
+  db.agentRuns[0].pr_url = 'https://github.com/o/r/pull/5';
+  db.events.push({ id: 'event-existing', dedupe_key: 'linear-direct:recover-1', event_type: 'linear.comment.created' });
+  const raw = JSON.stringify({ action: 'create', type: 'Comment', webhookTimestamp: NOW, actor: { type: 'user' }, data: { id: 'c1', body: 'hi', issueId: 'ISSUE-1' } });
+
+  const result = await handleLinearComment(
+    { db, signingSecret: SECRET, signature: await sign(SECRET, raw), deliveryId: 'recover-1', event: 'Comment', rawBody: raw, projectsJson: undefined, nowMs: NOW },
+    { runnerUrl: 'https://runner', runnerToken: 't', hatcheryPublicUrl: 'https://h', fetch: async () => new Response('{}'), ...seq() },
+  );
+
+  assert.equal(result.body.dispatchStatus, 'queued');
+  assert.equal(db.agentRuns.filter((r) => r.source_id === 'recover-1').length, 1);
+});
+
+test('handleLinearComment records terminal parent comments but does not spawn continuation work', async () => {
+  const db = new FakeD1();
+  await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'parent', targetRepo: 'r', linearIssueId: 'ISSUE-1', branch: 'br' }, seq());
+  db.agentRuns[0].status = 'completed';
+  db.agentRuns[0].pr_url = 'https://github.com/o/r/pull/5';
+  const raw = JSON.stringify({ action: 'create', type: 'Comment', webhookTimestamp: NOW, actor: { type: 'user' }, data: { id: 'c-terminal', body: 'hi', issueId: 'ISSUE-1' } });
+
+  const result = await handleLinearComment(
+    { db, signingSecret: SECRET, signature: await sign(SECRET, raw), deliveryId: 'terminal-1', event: 'Comment', rawBody: raw, projectsJson: undefined, nowMs: NOW },
+    { runnerUrl: 'https://runner', runnerToken: 't', hatcheryPublicUrl: 'https://h', fetch: async () => new Response('{}'), ...seq() },
+  );
+
+  assert.equal(result.body.skipped, 'parent run is not waiting for PR approval');
+  assert.equal(db.events[0].handling, 'record_only');
+  assert.equal(db.agentRuns.length, 1);
 });
 
 test('handleLinearComment skips a bot comment (self-trigger guard)', async () => {
@@ -749,6 +787,7 @@ test('handleLinearComment parses the provisional real-shape fixture', async () =
   await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'parent', targetRepo: 'r', linearIssueId: fixture.data.issueId, branch: 'br' }, seq());
   // Set to waiting_approval so continuation is not blocked by active-branch dedupe.
   db.agentRuns[0].status = 'waiting_approval';
+  db.agentRuns[0].pr_url = 'https://github.com/o/r/pull/5';
   const raw = JSON.stringify(fixture);
   const res = await handleLinearComment({ db, signingSecret: SECRET, signature: await sign(SECRET, raw), deliveryId: 'fx-1', event: 'Comment', rawBody: raw, projectsJson: undefined, nowMs: ts }, { runnerUrl: 'https://r', runnerToken: 't', hatcheryPublicUrl: 'https://h', fetch: async () => new Response('{}'), ...seq() });
   assert.equal(res.body.dispatchStatus, 'queued');
