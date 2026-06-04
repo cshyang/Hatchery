@@ -210,6 +210,42 @@ test('Slack send uses the stored provider target, not model-supplied channel fie
   }
 });
 
+test('Slack send edits the ack message in place (chat.update) when ackMessageTs is supplied', async () => {
+  const calls: Array<{ url: string; body: Record<string, unknown>; token: string | null }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url, init) => {
+    const headers = new Headers(init?.headers);
+    calls.push({
+      url: String(url),
+      body: JSON.parse(String(init?.body)),
+      token: headers.get('authorization'),
+    });
+    return new Response(JSON.stringify({ ok: true, ts: '555.666' }), { headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+
+  try {
+    const target: ConversationTarget = {
+      projectId: 'demo',
+      agentSlug: 'default',
+      conversationId: 'slack:T1:C1:100.000',
+      provider: 'slack',
+      externalAccountId: 'T1',
+      externalSpaceId: 'C1',
+      externalConversationId: '100.000',
+      transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
+    };
+    await sendToConversationTarget({ SLACK_BOT_TOKEN_DEFAULT: 'xoxb-test' }, target, 'final answer', '555.666');
+
+    // Edits the ack (chat.update on its ts), NOT a second chat.postMessage. No thread_ts on an edit.
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://slack.com/api/chat.update');
+    assert.equal(calls[0].token, 'Bearer xoxb-test');
+    assert.deepEqual(calls[0].body, { channel: 'C1', ts: '555.666', text: 'final answer' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('top-level project posts omit provider-native thread id', async () => {
   const target = topLevelTargetFromBinding(binding);
   assert.equal(target.conversationId, '');

@@ -1,7 +1,7 @@
 import type { Binding } from './bindings';
 import { DEFAULT_AGENT_SLUG } from './bindings';
 import type { D1Like } from '../skills/repository';
-import { postMessage } from '../slack/post';
+import { postMessage, editMessage } from '../slack/post';
 
 export type Provider = 'slack';
 
@@ -130,10 +130,15 @@ export async function resolveTarget(
   return db ? loadConversationTarget(db, projectId, agentSlug, conv) : null;
 }
 
+// Deliver text to a resolved target. When ackMessageTs is supplied, EDIT that message in place
+// (the "On it…" ack becomes the reply) instead of posting a new one — so a turn reads as a single
+// evolving message. ackMessageTs is opaque to us: the gateway captured it and the model relays it
+// back in the tool args, alongside conversationId. Absent → a fresh post (heartbeats, new threads).
 export async function sendToConversationTarget(
   env: Record<string, unknown>,
   target: ConversationTarget,
   text: string,
+  ackMessageTs?: string,
 ): Promise<void> {
   const token = env[target.transportTokenRef];
   if (typeof token !== 'string' || !token) {
@@ -141,7 +146,11 @@ export async function sendToConversationTarget(
   }
 
   if (target.provider === 'slack') {
-    await postMessage(token, target.externalSpaceId, text, target.externalConversationId ?? undefined);
+    if (ackMessageTs) {
+      await editMessage(token, target.externalSpaceId, ackMessageTs, text);
+    } else {
+      await postMessage(token, target.externalSpaceId, text, target.externalConversationId ?? undefined);
+    }
     return;
   }
 

@@ -4,7 +4,7 @@ import { dispatch } from '@flue/runtime';
 import { verifySlackSignature } from '../src/slack/verify';
 import { fetchThreadReplies, renderThreadBackscroll } from '../src/slack/threads';
 import { mentionsBot, stripMention } from '../src/slack/mentions';
-import { queueWorkingAck } from '../src/slack/ack';
+import { postWorkingAck } from '../src/slack/ack';
 import { dispatchSlackTurnWithFallback } from '../src/slack/dispatch';
 import {
   parseSlackEventEnvelope,
@@ -516,10 +516,11 @@ app.post('/slack/events', async (c) => {
     return c.body(null, 200); // duplicate delivery — already handled
   }
 
-  // Queue the deterministic "I'm on it" after the idempotency claim, so Slack retries cannot
-  // double-post it and a Slack send hiccup cannot block dispatch.
-  queueWorkingAck({
-    executionCtx: c.executionCtx,
+  // Post the deterministic "I'm on it" after the idempotency claim (so retries can't double-post it)
+  // and CAPTURE its ts, so the turn edits this same message into the real reply instead of stacking
+  // ack + answer. Awaited because the dispatch input below carries the ts to the model; a Slack
+  // hiccup returns undefined and the reply degrades to a fresh post — never a blocked turn.
+  const ackMessageTs = await postWorkingAck({
     token,
     channel: msg.externalSpaceId,
     threadTs: msg.externalConversationId,
@@ -548,6 +549,9 @@ app.post('/slack/events', async (c) => {
       input: {
         message: msg.text,
         conversationId: msg.conversationId,
+        // The ack's ts — the model relays it back to reply_to_conversation/update_status so its
+        // message edits the "On it…" note in place. Omitted if the ack didn't post (no ts to edit).
+        ...(ackMessageTs ? { ackMessageTs } : {}),
         provider: msg.provider,
         accountId: msg.externalAccountId,
         senderId: msg.senderId,

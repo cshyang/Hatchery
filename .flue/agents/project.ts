@@ -67,7 +67,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   const replyToConversation = defineTool({
     name: 'reply_to_conversation',
     description:
-      "Send your reply to the current conversation. Call this with your final response text; pass conversationId for user-message replies.",
+      "Send your reply to the current conversation. Call this with your final response text; pass conversationId for user-message replies, and ackMessageTs so your reply replaces the 'On it…' note in place.",
     parameters: Type.Object({
       text: Type.String({ description: 'The message to post.' }),
       conversationId: Type.Optional(
@@ -76,14 +76,20 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
             "When replying to a user message, copy the conversationId from the [Dispatch Input] block. OMIT for a heartbeat/new top-level post.",
         }),
       ),
+      ackMessageTs: Type.Optional(
+        Type.String({
+          description:
+            "Copy ackMessageTs from the [Dispatch Input] block (alongside conversationId) so your reply edits the 'On it…' note into your answer instead of posting a second message. OMIT for heartbeat/new posts.",
+        }),
+      ),
     }),
-    async execute({ text, conversationId }) {
+    async execute({ text, conversationId, ackMessageTs }) {
       const conv = conversationId ? String(conversationId) : '';
       const target = await resolveTarget(db, binding, projectId, slug, conv);
       if (!target) {
         throw new Error(`No reply target found for conversationId "${conv}".`);
       }
-      await sendToConversationTarget(env, target, String(text));
+      await sendToConversationTarget(env, target, String(text), ackMessageTs ? String(ackMessageTs) : undefined);
       // Log the agent's own post to the transcript (the other half of the conversation reflection
       // consolidates). REM turns are told not to post, so this never logs reflection's own output.
       if (db) await logMessage(db, { projectId, conversationId: conv, senderId: 'agent', role: 'agent', text: String(text) }).catch(() => {});
@@ -97,22 +103,28 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   const updateStatus = defineTool({
     name: 'update_status',
     description:
-      "Post a one-line progress note BEFORE slow, multi-step work (several searches/API calls before " +
-      "you can answer) to show the person the SPECIFIC step you're on — a generic 'on it' is already posted " +
-      "automatically, so name the actual action. Call it ONCE, up front, and only when you expect a wait — " +
-      "skip it for quick answers and for heartbeat/scheduled runs. Lead with an emoji. This is NOT your " +
+      "Update the working note BEFORE slow, multi-step work (several searches/API calls before you can " +
+      "answer) to show the person the SPECIFIC step you're on. Pass ackMessageTs so this replaces the generic " +
+      "'On it…' note in place (don't post a duplicate ack). Call it ONCE, up front, and only when you expect a " +
+      "wait — skip it for quick answers and for heartbeat/scheduled runs. Lead with an emoji. This is NOT your " +
       "reply: always send the actual answer via reply_to_conversation.",
     parameters: Type.Object({
       text: Type.String({ description: "Short friendly note, e.g. '🔍 Checking the GitHub repo…'" }),
       conversationId: Type.Optional(
         Type.String({ description: 'Copy from the [Dispatch Input] block, same as your reply.' }),
       ),
+      ackMessageTs: Type.Optional(
+        Type.String({
+          description:
+            "Copy from the [Dispatch Input] block so this note edits the 'On it…' message in place. OMIT for heartbeat/new posts.",
+        }),
+      ),
     }),
-    async execute({ text, conversationId }) {
+    async execute({ text, conversationId, ackMessageTs }) {
       const target = await resolveTarget(db, binding, projectId, slug, conversationId ? String(conversationId) : '');
       if (!target) return 'no target — status skipped';
       try {
-        await sendToConversationTarget(env, target, String(text));
+        await sendToConversationTarget(env, target, String(text), ackMessageTs ? String(ackMessageTs) : undefined);
         return 'posted';
       } catch (e) {
         return `status not posted: ${e instanceof Error ? e.message : 'error'}`;
