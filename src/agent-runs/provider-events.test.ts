@@ -279,16 +279,15 @@ test('Nango github pull_request merged completes the correlated run', async () =
   assert.equal(db.notifications.filter((n) => n.notification_type === 'completed').length, 1);
 });
 
-test('GitHub human comments on waiting_human runs wake the controller; bot comments are record_only', async () => {
+test('GitHub comments are record_only (continuation is handled by createContinuationRun, not a wake gate)', async () => {
   const db = new FakeD1();
   seed(db);
-  db.agentRuns[0].status = 'waiting_human';
 
   const human = await handleNangoForwardWebhook({ db, rawBody: JSON.stringify(githubIssueCommentPayload('User')) }, seq());
   const bot = await handleNangoForwardWebhook({ db, rawBody: JSON.stringify(githubIssueCommentPayload('Bot')) }, seq());
 
-  assert.equal(human.body?.handling, 'wake_controller');
-  assert.equal(db.events[0].handling, 'wake_controller');
+  assert.equal(human.body?.handling, 'record_only');
+  assert.equal(db.events[0].handling, 'record_only');
   assert.equal(bot.body?.handling, 'record_only');
   assert.equal(db.events[1].handling, 'record_only');
 });
