@@ -418,6 +418,30 @@ export async function getLatestAgentRunByLinearIssue(db: D1Like, projectId: stri
   return row ? rowToAgentRun(row) : null;
 }
 
+/** Newest run for a Linear issue id, any project (a comment attaches to the run's own project). */
+export async function findLatestRunByLinearIssue(db: D1Like, linearIssueId: string): Promise<AgentRun | null> {
+  const row = await db
+    .prepare(`SELECT ${AGENT_RUN_SELECT} FROM agent_runs WHERE linear_issue_id=? ORDER BY created_at DESC LIMIT 1`)
+    .bind(linearIssueId)
+    .first<AgentRunRow>();
+  return row ? rowToAgentRun(row) : null;
+}
+
+/** Newest run ACTIVELY working a branch (a sandbox is live): queued/dispatching/running. Used to
+ *  serialize continuations - NOT isTerminalRun, because waiting_approval (PR open, idle) must allow
+ *  a new continuation. */
+export async function getActiveAgentRunByBranch(db: D1Like, projectId: string, branch: string): Promise<AgentRun | null> {
+  const row = await db
+    .prepare(
+      `SELECT ${AGENT_RUN_SELECT} FROM agent_runs
+        WHERE project_id=? AND branch=? AND status IN ('queued','dispatching','running')
+        ORDER BY created_at DESC LIMIT 1`,
+    )
+    .bind(projectId, branch)
+    .first<AgentRunRow>();
+  return row ? rowToAgentRun(row) : null;
+}
+
 export async function requeueStaleDispatchingRun(db: D1Like, id: string, leaseCutoff: number, deps: ClockAndIds = {}): Promise<AgentRun | null> {
   const t = nowMs(deps);
   const result = await db
