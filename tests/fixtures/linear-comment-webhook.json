@@ -1,0 +1,36 @@
+{
+  "_provisional": "SYNTHETIC fixture built from Linear's documented Comment webhook shape (linear.app/developers/webhooks). NOT a real capture. Verify field names against a real dev-workspace delivery before production (plan Task 1). Parser tolerates data.issueId OR data.issue.id; actor is top-level.",
+  "action": "create",
+  "type": "Comment",
+  "createdAt": "2026-06-04T12:00:00.000Z",
+  "url": "https://linear.app/acme/issue/ENG-123#comment-9f2c",
+  "data": {
+    "id": "c_9f2c1a40",
+    "createdAt": "2026-06-04T12:00:00.000Z",
+    "updatedAt": "2026-06-04T12:00:00.000Z",
+    "body": "Can you use the existing authGuard() helper here instead of re-implementing the check?",
+    "edited": false,
+    "issueId": "iss_eng123",
+    "userId": "usr_shyang",
+    "issue": {
+      "id": "iss_eng123",
+      "identifier": "ENG-123",
+      "title": "Add auth to the public API",
+      "url": "https://linear.app/acme/issue/ENG-123"
+    },
+    "user": {
+      "id": "usr_shyang",
+      "name": "Shyang",
+      "email": "shyang@example.com"
+    }
+  },
+  "actor": {
+    "id": "usr_shyang",
+    "type": "user",
+    "name": "Shyang",
+    "email": "shyang@example.com",
+    "url": "https://linear.app/acme/profiles/shyang"
+  },
+  "webhookTimestamp": 1780574400000,
+  "webhookId": "wh_comment_1"
+}
