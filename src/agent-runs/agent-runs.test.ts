@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
 import type { D1Like } from '../skills/repository';
-import { claimRunForDispatch, createAgentRun, getAgentRun, getAgentRunById, handleAgentRunCallback } from './repository';
+import { claimRunForDispatch, createAgentRun, findLatestRunByLinearIssue, getActiveAgentRunByBranch, getAgentRun, getAgentRunById, handleAgentRunCallback, updateAgentRun } from './repository';
 import { claimAndDispatchRun, DISPATCH_MAX_ATTEMPTS, reconcileAgentRuns } from './dispatch';
 
 const { test, run } = createTestRunner();
@@ -646,6 +646,16 @@ test('late running callback refreshes heartbeat without downgrading waiting_appr
   assert.equal(lateRunning.status, 200);
   assert.equal(lateRunning.body?.run.status, 'waiting_approval');
   assert.equal(lateRunning.body?.run.lastHeartbeatAt, 9_999);
+});
+
+test('createAgentRun persists an explicit branch when given', async () => {
+  const db = new FakeD1();
+  const { run } = await createAgentRun(
+    db,
+    { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'k-branch', targetRepo: 'https://github.com/o/r', branch: 'hatchery/eng-1' },
+    seq(),
+  );
+  assert.equal(run.branch, 'hatchery/eng-1');
 });
 
 await run();
