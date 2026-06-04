@@ -231,7 +231,8 @@ function normalizeGithubForward(payload: Record<string, unknown>): NormalizedPro
 function handlingFor(run: AgentRun | null, ev: NormalizedProviderEvent): { handling: AgentRunHandling; reason: string } {
   if (!run) return { handling: 'record_only', reason: 'no correlated run' };
   if (ev.actorType !== 'human') return { handling: 'record_only', reason: 'provider bot or self echo' };
-  if (ev.eventType.includes('comment.created') && run.status === 'waiting_human') return { handling: 'wake_controller', reason: 'human comment on waiting run' };
+  // Human-comment continuation is handled by createContinuationRun (see continuation.ts) - Linear in
+  // Plan A, GitHub PR in a later plan - NOT by a wake gate here. `waiting_human` is never set; dead.
   if (ev.notificationType || ev.completesRun) return { handling: 'notify', reason: 'correlated provider artifact changed' };
   return { handling: 'record_only', reason: 'correlated but no action needed' };
 }
