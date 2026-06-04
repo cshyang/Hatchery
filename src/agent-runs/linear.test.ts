@@ -780,7 +780,7 @@ test('handleLinearComment skips (no event written) when no run exists for the is
   assert.equal(db.events.length, 0);
 });
 
-test('handleLinearComment parses the provisional real-shape fixture', async () => {
+test('handleLinearComment parses the provisional documented-shape fixture', async () => {
   const fixture = JSON.parse(await import('node:fs').then((fs) => fs.readFileSync('tests/fixtures/linear-comment-webhook.json', 'utf8')));
   const ts = fixture.webhookTimestamp;
   const db = new FakeD1();
