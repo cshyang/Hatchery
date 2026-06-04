@@ -2,60 +2,65 @@
 
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
-import { queueWorkingAck, WORKING_ACK } from './ack';
+import { postWorkingAck, WORKING_ACK } from './ack';
 
 const { test, run } = createTestRunner();
 
-test('queueWorkingAck: posts the default ack through waitUntil', async () => {
-  const waits: Promise<unknown>[] = [];
+test('postWorkingAck: posts the default ack and returns its ts (for later edit-in-place)', async () => {
   const calls: Array<{ token: string; channel: string; text: string; threadTs?: string }> = [];
 
-  queueWorkingAck(
-    {
-      executionCtx: { waitUntil: (promise) => waits.push(promise) },
-      token: 'xoxb-test',
-      channel: 'C1',
-      threadTs: '111.222',
-    },
+  const ts = await postWorkingAck(
+    { token: 'xoxb-test', channel: 'C1', threadTs: '111.222' },
     {
       postMessage: async (token, channel, text, threadTs) => {
         calls.push({ token, channel, text, threadTs });
+        return '333.444';
       },
     },
   );
 
-  assert.equal(waits.length, 1);
-  await waits[0];
+  assert.equal(ts, '333.444');
   assert.deepEqual(calls, [{ token: 'xoxb-test', channel: 'C1', text: WORKING_ACK, threadTs: '111.222' }]);
 });
 
-test('queueWorkingAck: skips when no token is available', async () => {
-  let waitUntilCalls = 0;
+test('postWorkingAck: returns undefined and posts nothing when no token is available', async () => {
+  let called = 0;
 
-  queueWorkingAck({
-    executionCtx: {
-      waitUntil: () => {
-        waitUntilCalls++;
+  const ts = await postWorkingAck(
+    { channel: 'C1', threadTs: '111.222' },
+    {
+      postMessage: async () => {
+        called++;
+        return 'x';
       },
     },
-    channel: 'C1',
-    threadTs: '111.222',
-  });
+  );
 
-  assert.equal(waitUntilCalls, 0);
+  assert.equal(ts, undefined);
+  assert.equal(called, 0);
 });
 
-test('queueWorkingAck: logs send failures without throwing', async () => {
-  const waits: Promise<unknown>[] = [];
+test('postWorkingAck: times out and returns undefined so a hung Slack never blocks dispatch', async () => {
   const logs: string[] = [];
 
-  queueWorkingAck(
+  const ts = await postWorkingAck(
+    { token: 'xoxb-test', channel: 'C1', threadTs: '111.222' },
     {
-      executionCtx: { waitUntil: (promise) => waits.push(promise) },
-      token: 'xoxb-test',
-      channel: 'C1',
-      threadTs: '111.222',
+      postMessage: () => new Promise<string>(() => {}), // never resolves
+      log: (message) => logs.push(message),
+      timeoutMs: 10,
     },
+  );
+
+  assert.equal(ts, undefined);
+  assert.ok(logs.some((l) => l.includes('timed out')));
+});
+
+test('postWorkingAck: swallows send failures, logs, and returns undefined (turn never blocks)', async () => {
+  const logs: string[] = [];
+
+  const ts = await postWorkingAck(
+    { token: 'xoxb-test', channel: 'C1', threadTs: '111.222' },
     {
       postMessage: async () => {
         throw new Error('Slack down');
@@ -64,8 +69,7 @@ test('queueWorkingAck: logs send failures without throwing', async () => {
     },
   );
 
-  assert.equal(waits.length, 1);
-  await waits[0];
+  assert.equal(ts, undefined);
   assert.deepEqual(logs, ['[ack] working-ack failed to post: Slack down']);
 });
 

@@ -13,6 +13,34 @@ interface WaitUntilContext {
 
 export type SlackPostMessage = (token: string, channel: string, text: string, threadTs?: string) => Promise<void>;
 
+// Like SlackPostMessage but surfaces the posted ts, so the ack can later be edited in place.
+export type SlackPostMessageReturningTs = (
+  token: string,
+  channel: string,
+  text: string,
+  threadTs?: string,
+) => Promise<string | undefined>;
+
+export interface PostWorkingAckInput {
+  token?: string;
+  channel: string;
+  threadTs: string;
+  text?: string;
+}
+
+export interface PostWorkingAckDeps {
+  postMessage?: SlackPostMessageReturningTs;
+  log?: (message: string) => void;
+  timeoutMs?: number;
+}
+
+// Ceiling on how long we'll wait for the ack's ts before giving up and dispatching anyway. Keeps
+// the original invariant — a slow/hung Slack must NEVER block the turn from dispatching (that would
+// be the very silence the ack exists to prevent). Well under Slack's 3s event-ack budget.
+export const ACK_POST_TIMEOUT_MS = 1500;
+
+// The setup-failure fallback still fires-and-forgets via waitUntil — it's a terminal message with
+// no ts to thread anywhere, so it keeps the lightweight shape.
 export interface QueueWorkingAckInput {
   executionCtx: WaitUntilContext;
   token?: string;
@@ -26,21 +54,41 @@ export interface QueueWorkingAckDeps {
   log?: (message: string) => void;
 }
 
-export function queueWorkingAck(
-  { executionCtx, token, channel, threadTs, text = WORKING_ACK }: QueueWorkingAckInput,
-  deps: QueueWorkingAckDeps = {},
-): void {
-  if (!token) return;
+// Post the ack and return its ts so the turn can EDIT it into the real reply (one evolving message).
+// Awaited (not waitUntil): we need the ts before building the dispatch input. But the wait is bounded
+// and failure-proof — a Slack hiccup, error, or timeout returns undefined (logged), and the turn
+// dispatches anyway with the reply falling back to a fresh post. Returns undefined with no token too.
+// A redelivery after a slow post is deduped by the already-claimed event_id upstream.
+export async function postWorkingAck(
+  { token, channel, threadTs, text = WORKING_ACK }: PostWorkingAckInput,
+  deps: PostWorkingAckDeps = {},
+): Promise<string | undefined> {
+  if (!token) return undefined;
 
   const postMessage = deps.postMessage ?? defaultPostMessage;
   const log = deps.log ?? console.log;
+  const timeoutMs = deps.timeoutMs ?? ACK_POST_TIMEOUT_MS;
 
-  // waitUntil, not await: the ACK is best-effort chrome and must not spend Slack's 3s ack budget.
-  executionCtx.waitUntil(
-    postMessage(token, channel, text, threadTs).catch((e) =>
-      log(`[ack] working-ack failed to post: ${e instanceof Error ? e.message : 'error'}`),
-    ),
-  );
+  // .catch on the post itself (not a try/catch around the race) so a rejection AFTER the timeout has
+  // already won can't surface as an unhandled rejection.
+  const post = postMessage(token, channel, text, threadTs).catch((e) => {
+    log(`[ack] working-ack failed to post: ${e instanceof Error ? e.message : 'error'}`);
+    return undefined;
+  });
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => {
+      log(`[ack] working-ack timed out after ${timeoutMs}ms; dispatching without edit-in-place`);
+      resolve(undefined);
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([post, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export function queueSetupFailureFallback(
