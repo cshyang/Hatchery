@@ -52,6 +52,21 @@ class FakeD1 implements D1Like {
                   .sort((a, b) => Number(b.created_at) - Number(a.created_at));
                 return { results: rows as T[] };
               }
+              if (query.includes('WHERE linear_issue_id=?')) {
+                const [linearIssueId] = values;
+                const rows = db.agentRuns
+                  .filter((r) => r.linear_issue_id === linearIssueId)
+                  .sort((a, b) => Number(b.created_at) - Number(a.created_at));
+                return { results: rows as T[] };
+              }
+              if (query.includes("status IN ('queued'")) {
+                const [projectId, branch] = values;
+                const activeStatuses = new Set(['queued', 'dispatching', 'running']);
+                const rows = db.agentRuns
+                  .filter((r) => r.project_id === projectId && r.branch === branch && activeStatuses.has(String(r.status)))
+                  .sort((a, b) => Number(b.created_at) - Number(a.created_at));
+                return { results: rows as T[] };
+              }
               if (query.includes("WHERE status='queued'")) {
                 const [limit] = values;
                 const rows = db.agentRuns
@@ -646,6 +661,21 @@ test('late running callback refreshes heartbeat without downgrading waiting_appr
   assert.equal(lateRunning.status, 200);
   assert.equal(lateRunning.body?.run.status, 'waiting_approval');
   assert.equal(lateRunning.body?.run.lastHeartbeatAt, 9_999);
+});
+
+test('findLatestRunByLinearIssue returns the newest run for an issue across projects', async () => {
+  const db = new FakeD1();
+  await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'a', targetRepo: 'r', linearIssueId: 'ISSUE-1' }, seq());
+  const found = await findLatestRunByLinearIssue(db, 'ISSUE-1');
+  assert.equal(found?.projectId, 'p1');
+});
+
+test('getActiveAgentRunByBranch finds queued/dispatching/running, ignores terminal and waiting', async () => {
+  const db = new FakeD1();
+  const { run } = await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'b', targetRepo: 'r', branch: 'br-1' }, seq());
+  assert.equal((await getActiveAgentRunByBranch(db, 'p1', 'br-1'))?.id, run.id); // queued -> active
+  await updateAgentRun(db, { id: run.id, status: 'completed' }, seq());
+  assert.equal(await getActiveAgentRunByBranch(db, 'p1', 'br-1'), null);          // completed -> not active
 });
 
 test('createAgentRun persists an explicit branch when given', async () => {
