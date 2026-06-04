@@ -354,4 +354,28 @@ test('createContinuationRun ignores a parent with no branch yet', async () => {
   assert.equal(out.status, 'ignored');
 });
 
+test('createContinuationRun ignores terminal or not-yet-PR parent runs', async () => {
+  const db = new FakeD1();
+  const clock = seq();
+  const { run: parent0 } = await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'p', targetRepo: 'r', branch: 'br-1' }, clock);
+
+  await updateAgentRun(db, { id: parent0.id, status: 'completed', prUrl: 'https://github.com/o/r/pull/5' }, clock);
+  const completedParent = (await getAgentRunById(db, parent0.id))!;
+  const terminal = await createContinuationRun(
+    db,
+    { projectId: 'p1', parent: completedParent, feedback: 'x', source: { type: 'linear', id: 'd4' }, replyTarget: { surface: 'linear', ref: 'I' } },
+    { ...runnerDeps, ...clock },
+  );
+  assert.equal(terminal.status, 'ignored');
+
+  await updateAgentRun(db, { id: parent0.id, status: 'waiting_approval', prUrl: null }, clock);
+  const noPrParent = (await getAgentRunById(db, parent0.id))!;
+  const noPr = await createContinuationRun(
+    db,
+    { projectId: 'p1', parent: noPrParent, feedback: 'x', source: { type: 'linear', id: 'd5' }, replyTarget: { surface: 'linear', ref: 'I' } },
+    { ...runnerDeps, ...clock },
+  );
+  assert.equal(noPr.status, 'ignored');
+});
+
 await run();
