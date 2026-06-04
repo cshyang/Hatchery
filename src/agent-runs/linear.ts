@@ -2,7 +2,7 @@ import type { D1Like } from '../skills/repository';
 import { createAgentRunEvent, createAgentRunNotification, findActiveAgentRunRoute, type AgentRunRoute } from './events';
 import { createAgentRun, findLatestRunByLinearIssue, getAgentRunBySource, getLatestAgentRunByLinearIssue, updateAgentRun, type AgentRun, type AgentRunStatus, type ClockAndIds } from './repository';
 import { claimAndDispatchRun } from './dispatch';
-import { createContinuationRun } from './continuation';
+import { continuationBlockReason, createContinuationRun } from './continuation';
 
 const WEBHOOK_MAX_AGE_MS = 60_000;
 const DEFAULT_RUN_STATE_NAME = 'Run Agent';
@@ -413,6 +413,7 @@ export async function handleLinearComment(req: LinearWebhookRequest, deps: Linea
     if (!data) return { status: 400, body: { error: 'Comment data is required' } };
     const body = optionalText(data.body, 8000);
     if (!body) return { status: 200, body: { skipped: 'empty comment' } };
+    const commentId = optionalText(data.id, 256) ?? req.deliveryId;
     const issue = objectField(data, 'issue');
     const issueId = optionalText(data.issueId, 256) ?? (issue ? optionalText(issue.id, 256) : null);
     if (!issueId) return { status: 200, body: { skipped: 'no issue id on comment' } };
@@ -421,6 +422,7 @@ export async function handleLinearComment(req: LinearWebhookRequest, deps: Linea
     // record a boundary event for comments on issues Hatchery never ran (workspace-wide noise).
     const parent = await findLatestRunByLinearIssue(req.db, issueId);
     if (!parent) return { status: 200, body: { skipped: 'no run for issue' } };
+    const blocked = continuationBlockReason(parent);
 
     // Boundary receipt -> agent_run_events (mirrors handleLinearWebhook). Delivery-level dedupe.
     const event = await createAgentRunEvent(
@@ -431,18 +433,22 @@ export async function handleLinearComment(req: LinearWebhookRequest, deps: Linea
         provider: 'linear',
         eventType: 'linear.comment.created',
         providerDeliveryId: req.deliveryId,
-        providerEntityId: issueId,
+        providerEntityId: commentId,
         dedupeKey: `linear-direct:${req.deliveryId}`,
         actorType: 'human',
-        handling: 'record_only',
-        handlingReason: 'human comment on a run issue',
+        handling: blocked ? 'record_only' : 'wake_controller',
+        handlingReason: blocked ?? 'human comment creates a continuation run',
         payload,
         occurredAt: timestamp,
         processedAt: req.nowMs ?? Date.now(),
       },
       deps,
     );
-    if (event.duplicate) return { status: 200, body: { dispatchStatus: 'deduped', reason: 'comment already processed' } };
+    if (event.duplicate) {
+      const existing = await getAgentRunBySource(req.db, parent.projectId, 'linear', req.deliveryId);
+      if (existing) return { status: 200, body: { run: existing, duplicate: true, dispatchStatus: 'deduped' } };
+    }
+    if (blocked) return { status: 200, body: { skipped: blocked } };
 
     const outcome = await createContinuationRun(
       req.db,

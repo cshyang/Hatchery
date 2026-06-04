@@ -17,6 +17,13 @@ export type ContinuationOutcome =
   | { status: 'deduped'; reason: string }
   | { status: 'ignored'; reason: string };
 
+export function continuationBlockReason(parent: AgentRun): string | null {
+  if (!parent.branch) return 'parent run has no branch yet (no PR to continue)';
+  if (parent.status !== 'waiting_approval') return 'parent run is not waiting for PR approval';
+  if (!parent.prUrl) return 'parent run has no PR URL yet';
+  return null;
+}
+
 // Self-contained outbox payload for a continuation. `mode` + `targetBranch` tell the runner: clone
 // targetBranch and push to it (do NOT branch from baseBranch). runId/projectId/callback are injected
 // at send time by dispatch.ts.
@@ -48,12 +55,14 @@ export async function createContinuationRun(
   deps: RunnerDispatchDeps & ClockAndIds = {},
 ): Promise<ContinuationOutcome> {
   const { parent } = input;
-  if (!parent.branch) return { status: 'ignored', reason: 'parent run has no branch yet (no PR to continue)' };
+  const blocked = continuationBlockReason(parent);
+  if (blocked) return { status: 'ignored', reason: blocked };
+  const branch = parent.branch!;
 
   // LOSSY DEDUPE (named limitation; upgrade is a later task). A comment arriving while a sandbox is
   // actively working this branch is dropped; the running run never sees it.
-  const active = await getActiveAgentRunByBranch(db, input.projectId, parent.branch);
-  if (active) return { status: 'deduped', reason: `run ${active.id} is actively working branch ${parent.branch}` };
+  const active = await getActiveAgentRunByBranch(db, input.projectId, branch);
+  if (active) return { status: 'deduped', reason: `run ${active.id} is actively working branch ${branch}` };
 
   const created = await createAgentRun(
     db,

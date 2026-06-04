@@ -340,8 +340,11 @@ test('createContinuationRun targets the parent branch and carries the feedback',
 test('createContinuationRun dedupes when a run is actively working the branch (named lossy limitation)', async () => {
   const db = new FakeD1();
   const clock = seq();
-  const { run: parent } = await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'p', targetRepo: 'r', branch: 'br-1' }, clock);
-  // parent is 'queued' = actively working -> a second feedback is dropped
+  const { run: parent0 } = await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'p', targetRepo: 'r', branch: 'br-1' }, clock);
+  await updateAgentRun(db, { id: parent0.id, status: 'waiting_approval', prUrl: 'https://github.com/o/r/pull/5' }, clock);
+  const parent = (await getAgentRunById(db, parent0.id))!;
+  await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'active', targetRepo: 'r', branch: 'br-1' }, clock);
+  // A separate queued continuation is already working this branch -> a second feedback is dropped.
   const out = await createContinuationRun(db, { projectId: 'p1', parent, feedback: 'late comment', source: { type: 'linear', id: 'd2' }, replyTarget: { surface: 'linear', ref: 'I' } }, { ...runnerDeps, ...clock });
   assert.equal(out.status, 'deduped');
 });
@@ -368,8 +371,9 @@ test('createContinuationRun ignores terminal or not-yet-PR parent runs', async (
   );
   assert.equal(terminal.status, 'ignored');
 
-  await updateAgentRun(db, { id: parent0.id, status: 'waiting_approval', prUrl: null }, clock);
-  const noPrParent = (await getAgentRunById(db, parent0.id))!;
+  const { run: noPrParent0 } = await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'no-pr', targetRepo: 'r', branch: 'br-2' }, clock);
+  await updateAgentRun(db, { id: noPrParent0.id, status: 'waiting_approval', prUrl: null }, clock);
+  const noPrParent = (await getAgentRunById(db, noPrParent0.id))!;
   const noPr = await createContinuationRun(
     db,
     { projectId: 'p1', parent: noPrParent, feedback: 'x', source: { type: 'linear', id: 'd5' }, replyTarget: { surface: 'linear', ref: 'I' } },
