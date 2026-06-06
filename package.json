@@ -12,8 +12,8 @@
     "build": "flue build --target cloudflare",
     "predeploy": "npm run typecheck && npm test && npm run build",
     "deploy": "wrangler deploy --config dist/hatchery/wrangler.json",
-    "trigger:dev": "trigger.dev dev",
-    "trigger:deploy": "trigger.dev deploy"
+    "trigger:dev": "trigger dev",
+    "trigger:deploy": "trigger deploy"
   },
   "keywords": [],
   "author": "",
@@ -28,6 +28,7 @@
   },
   "devDependencies": {
     "@flue/cli": "^0.9.1",
+    "trigger.dev": "^4.4.6",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "wrangler": "^4.95.0"
