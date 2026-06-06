@@ -10,14 +10,17 @@
 // the immediate path and a reconciler tick can race safely — only one wins and dispatches.
 //
 // RUNNER CONTRACT (external assumptions this code can't enforce — keep the runner honest):
-//   1. start(runId) is IDEMPOTENT. A run stuck in `dispatching` (the ->running write failed after the
-//      runner accepted) is reclaimed at the lease and re-dispatched, so the runner may receive the same
-//      runId twice. It must return the existing sandbox, not start a second job.
+//   1. Dispatch is IDEMPOTENT on runId. A run stuck in `dispatching` (the ->running write failed after
+//      Trigger accepted) is reclaimed at the lease and re-dispatched, so Trigger may receive the same
+//      runId twice. We pass it as the Trigger idempotencyKey so the second trigger returns the existing
+//      run instead of starting a second job.
 //   2. The runner emits callbacks (any status) as it works. Each bumps last_heartbeat_at; a runner that
 //      goes silent past RUNNING_STALE_MS is presumed dead and failed. No callbacks → coarse liveness only.
 
+import * as v from 'valibot';
 import { fetchWithTimeout, jsonMessageOrText } from '../providers/http';
 import type { D1Like } from '../skills/repository';
+import { RUNNER_CONTRACT_VERSION, RunnerDispatchSchema, type RunnerDispatch } from './runner-contract';
 import { createAgentRunNotification } from './events';
 import {
   claimRunForDispatch,
@@ -43,9 +46,11 @@ export const RECONCILE_SWEEP_LIMIT = 50; // stale rows reclaimed/timed-out per t
 const RUNNER_FETCH_TIMEOUT_MS = 12_000;
 
 export interface RunnerDispatchDeps {
-  runnerUrl?: string;
-  runnerToken?: string;
-  hatcheryPublicUrl?: string;
+  triggerApiUrl?: string; // Trigger.dev REST base URL (e.g. https://api.trigger.dev)
+  triggerSecretKey?: string; // Trigger.dev secret key (Bearer)
+  githubToken?: string; // short-lived, repo-scoped token handed to the coding task
+  runnerToken?: string; // callback auth: the runner echoes this on its callbacks
+  hatcheryPublicUrl?: string; // absolute origin Trigger calls back to (REQUIRED — callback is external)
   fetch?: typeof fetch;
 }
 
@@ -71,58 +76,92 @@ function runnerCallbackUrl(hatcheryPublicUrl: string | undefined): string | unde
   return `${hatcheryPublicUrl.replace(/\/+$/, '')}/__internal/agent-runs`;
 }
 
-// Reconstruct the runner request from the self-contained row: the source snapshot was persisted at
-// create time; runId + callback are injected here (runId isn't known until the row exists; the callback
-// URL is env-derived so we never want a stale stored copy).
-function buildRunnerBody(run: AgentRun, callbackUrl: string | undefined): Record<string, unknown> {
+// Map the self-contained stored row into the runner CONTRACT object. The stored dispatchPayload is the
+// outbox message shaped at create time; it does NOT match the contract, so we map field-by-field here.
+// runId/projectId/callback are injected at send time (runId isn't known until the row exists; the
+// callback URL is env-derived so a stored copy could go stale). The final v.parse is the producer↔contract
+// assertion: a payload that can't satisfy the schema (e.g. a legacy `runtime: 'opencode'`) is FATAL —
+// retrying can't fix a malformed payload, so we mark it non-retryable.
+export function buildRunnerDispatch(run: AgentRun, deps: RunnerDispatchDeps): RunnerDispatch {
   const stored = run.dispatchPayload ? (JSON.parse(run.dispatchPayload) as Record<string, unknown>) : {};
-  return {
-    ...stored,
+  const mode = stored.mode === 'continuation' ? 'continuation' : 'initial';
+  const snapshot = stored.linearIssue as Record<string, unknown> | undefined;
+  const issue =
+    mode === 'initial' && snapshot
+      ? {
+          id: snapshot.id,
+          identifier: snapshot.identifier,
+          url: snapshot.url,
+          title: snapshot.title,
+          description: snapshot.description ?? null,
+        }
+      : null;
+  const obj = {
+    contractVersion: RUNNER_CONTRACT_VERSION,
     runId: run.id,
     projectId: run.projectId,
-    callback: {
-      ...(callbackUrl ? { url: callbackUrl } : { path: '/__internal/agent-runs' }),
-      authHeader: 'x-hatchery-agent-runner-token',
-    },
+    mode,
+    targetRepo: stored.targetRepo,
+    baseBranch: stored.baseBranch,
+    targetBranch: stored.targetBranch ?? null,
+    kit: stored.kit,
+    runtime: stored.runtime,
+    sandboxProvider: stored.sandboxProvider,
+    issue,
+    feedback: stored.feedback ?? null,
+    prUrl: stored.prUrl ?? null,
+    replyTarget: stored.replyTarget ?? null,
+    githubToken: deps.githubToken,
+    callback: { url: runnerCallbackUrl(deps.hatcheryPublicUrl), token: deps.runnerToken },
   };
+  try {
+    return v.parse(RunnerDispatchSchema, obj);
+  } catch (e) {
+    // A malformed payload can't be fixed by retrying — fail it terminally rather than requeue forever.
+    const message = e instanceof v.ValiError ? `invalid runner dispatch: ${e.message}` : 'invalid runner dispatch';
+    throw new RunnerDispatchError(message, { retryable: false });
+  }
 }
 
-async function postToRunner(deps: RunnerDispatchDeps, body: unknown): Promise<{ sandboxId?: string | null }> {
+async function triggerCodingTask(deps: RunnerDispatchDeps, dispatch: RunnerDispatch): Promise<{ triggerRunId: string }> {
   let res: Response;
   try {
     res = await fetchWithTimeout(
-      deps.runnerUrl!,
+      `${deps.triggerApiUrl!.replace(/\/+$/, '')}/api/v1/tasks/run-coding-task/trigger`,
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-hatchery-agent-runner-token': deps.runnerToken! },
-        body: JSON.stringify(body),
+        headers: { authorization: `Bearer ${deps.triggerSecretKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ payload: dispatch, options: { idempotencyKey: dispatch.runId } }),
       },
       {
         timeoutMs: RUNNER_FETCH_TIMEOUT_MS,
-        timeoutMessage: `agent runner timed out after ${RUNNER_FETCH_TIMEOUT_MS}ms`,
-        failurePrefix: 'agent runner dispatch failed',
+        timeoutMessage: `trigger dispatch timed out after ${RUNNER_FETCH_TIMEOUT_MS}ms`,
+        failurePrefix: 'trigger dispatch failed',
         fetchImpl: deps.fetch,
       },
     );
   } catch (e) {
     // timeout / network — retrying may well succeed
-    throw new RunnerDispatchError(e instanceof Error ? e.message : 'agent runner dispatch failed', { retryable: true });
+    throw new RunnerDispatchError(e instanceof Error ? e.message : 'trigger dispatch failed', { retryable: true });
   }
   const textBody = await res.text();
   if (!res.ok) {
-    const retryable = res.status >= 500 || res.status === 429;
-    throw new RunnerDispatchError(`agent runner ${res.status}: ${jsonMessageOrText(textBody, 160)}`, { retryable });
+    const retryable = res.status >= 500 || res.status === 429; // 5xx/429 retry; 4xx fatal
+    throw new RunnerDispatchError(`trigger ${res.status}: ${jsonMessageOrText(textBody, 160)}`, { retryable });
   }
+  let parsed: { id?: unknown };
   try {
-    const parsed = JSON.parse(textBody) as { sandboxId?: unknown };
-    return { sandboxId: typeof parsed.sandboxId === 'string' ? parsed.sandboxId : null };
+    parsed = JSON.parse(textBody) as { id?: unknown };
   } catch {
-    return {};
+    // A 2xx with a non-JSON body is a malformed response, not a transient fault — fatal, don't requeue.
+    throw new RunnerDispatchError('trigger response was not JSON', { retryable: false });
   }
+  if (typeof parsed.id !== 'string') throw new RunnerDispatchError('trigger response missing run id', { retryable: false });
+  return { triggerRunId: parsed.id }; // Trigger REST response run id is top-level `id`
 }
 
-// Send a CLAIMED run (already in `dispatching`) to the runner and record the outcome:
-//   success            -> running (+ sandbox)
+// Send a CLAIMED run (already in `dispatching`) to the Trigger.dev coding task and record the outcome:
+//   success            -> running (+ trigger run id)
 //   transient failure  -> requeue, until attempts hit the cap, then fail
 //   permanent failure  -> failed
 async function dispatchClaimedRun(
@@ -131,13 +170,12 @@ async function dispatchClaimedRun(
   deps: RunnerDispatchDeps,
   clock: ClockAndIds,
 ): Promise<DispatchResult> {
-  const callbackUrl = runnerCallbackUrl(deps.hatcheryPublicUrl);
   try {
-    const result = await postToRunner(deps, buildRunnerBody(run, callbackUrl));
-    await updateAgentRun(db, { id: run.id, status: 'running', sandboxId: result.sandboxId ?? null }, clock);
+    const { triggerRunId } = await triggerCodingTask(deps, buildRunnerDispatch(run, deps));
+    await updateAgentRun(db, { id: run.id, status: 'running', triggerRunId }, clock);
     return { dispatched: true, status: 'running' };
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'agent runner dispatch failed';
+    const message = e instanceof Error ? e.message : 'trigger dispatch failed';
     const retryable = e instanceof RunnerDispatchError ? e.retryable : true;
     const overCap = run.dispatchAttempts >= DISPATCH_MAX_ATTEMPTS;
     if (!retryable || overCap) {
@@ -163,8 +201,8 @@ export async function claimAndDispatchRun(
   deps: RunnerDispatchDeps,
   clock: ClockAndIds = {},
 ): Promise<DispatchResult> {
-  if (!deps.runnerUrl || !deps.runnerToken) {
-    return { dispatched: false, status: 'skipped', reason: 'agent runner is not configured' };
+  if (!deps.triggerApiUrl || !deps.triggerSecretKey || !deps.runnerToken || !deps.githubToken || !deps.hatcheryPublicUrl) {
+    return { dispatched: false, status: 'skipped', reason: 'trigger dispatch not fully configured' };
   }
   const claimed = await claimRunForDispatch(db, runId, clock);
   if (!claimed) return { dispatched: false, status: 'skipped', reason: 'run was not claimable (already dispatching/terminal)' };
@@ -220,7 +258,7 @@ export async function reconcileAgentRuns(
   }
 
   // 3. Dispatch the queued backlog (including anything just reclaimed in step 1). Run the batch in
-  // PARALLEL: each dispatch is a runner HTTP call with a 12s timeout, so doing 10 sequentially could
+  // PARALLEL: each dispatch is a Trigger HTTP call with a 12s timeout, so doing 10 sequentially could
   // blow the Worker request budget. Claims are atomic (CAS), so parallel dispatch is safe.
   const outcomes = await Promise.all(
     (await listDispatchableRuns(db, RECONCILE_DISPATCH_LIMIT)).map(async (run): Promise<'dispatched' | 'failed' | 'skipped'> => {

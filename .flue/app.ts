@@ -48,9 +48,12 @@ interface Env {
   LINEAR_WEBHOOK_SECRET?: string; // Linear raw-body HMAC signing secret for /linear/webhook
   LINEAR_AGENT_PROJECTS?: string; // legacy one-release fallback; prefer agent_run_routes
   LINEAR_API_KEY?: string; // reserved for gateway-owned Linear status comments; never exposed to the model
-  AGENT_RUNNER_URL?: string; // generic E2B-backed coding runner dispatch endpoint
+  AGENT_RUNNER_URL?: string; // generic E2B-backed coding runner dispatch endpoint (legacy; superseded by Trigger.dev)
   AGENT_RUNNER_TOKEN?: string; // dedicated secret for agent-run dispatch and callbacks
-  HATCHERY_PUBLIC_URL?: string; // optional absolute origin used in runner callback payloads
+  HATCHERY_PUBLIC_URL?: string; // absolute origin Trigger.dev calls back to (REQUIRED for coding dispatch)
+  TRIGGER_SECRET_KEY?: string; // Trigger.dev secret key (Bearer) for the coding-task dispatch
+  TRIGGER_API_URL?: string; // Trigger.dev REST base URL; defaults to https://api.trigger.dev
+  RUNNER_GITHUB_PAT_TEMP?: string; // temporary GitHub PAT handed to the coding task (M0a stopgap; short-lived tokens later)
   LINEAR_BOT_ACTOR_ID?: string; // Hatchery's own Linear actor id; its transitions never self-trigger a run
   ADMIN_CONNECTIONS_TOKEN?: string; // OWN secret guarding /__admin/connections (ADR D11 — NOT the heartbeat token)
   NANGO_SECRET_KEY?: string; // platform Bearer for the Nango API (create session / fetch token)
@@ -198,7 +201,9 @@ app.post('/linear/webhook', async (c) => {
     nowMs: Date.now(),
   };
   const linearDeps = {
-    runnerUrl: c.env.AGENT_RUNNER_URL,
+    triggerApiUrl: c.env.TRIGGER_API_URL ?? 'https://api.trigger.dev',
+    triggerSecretKey: c.env.TRIGGER_SECRET_KEY,
+    githubToken: c.env.RUNNER_GITHUB_PAT_TEMP,
     runnerToken: c.env.AGENT_RUNNER_TOKEN,
     hatcheryPublicUrl: c.env.HATCHERY_PUBLIC_URL,
     botActorId: c.env.LINEAR_BOT_ACTOR_ID,
@@ -235,7 +240,9 @@ app.post('/__internal/agent-runs/reconcile', async (c) => {
   const db = c.env.DB;
   if (!db) return c.json({ reconciled: false, reason: 'no DB binding' });
   const summary = await reconcileAgentRuns(db, {
-    runnerUrl: c.env.AGENT_RUNNER_URL,
+    triggerApiUrl: c.env.TRIGGER_API_URL ?? 'https://api.trigger.dev',
+    triggerSecretKey: c.env.TRIGGER_SECRET_KEY,
+    githubToken: c.env.RUNNER_GITHUB_PAT_TEMP,
     runnerToken: c.env.AGENT_RUNNER_TOKEN,
     hatcheryPublicUrl: c.env.HATCHERY_PUBLIC_URL,
     fetch,

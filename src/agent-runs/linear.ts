@@ -1,7 +1,7 @@
 import type { D1Like } from '../skills/repository';
 import { createAgentRunEvent, createAgentRunNotification, findActiveAgentRunRoute, type AgentRunRoute } from './events';
 import { createAgentRun, findLatestRunByLinearIssue, getAgentRunBySource, getLatestAgentRunByLinearIssue, updateAgentRun, type AgentRun, type AgentRunStatus, type ClockAndIds } from './repository';
-import { claimAndDispatchRun } from './dispatch';
+import { claimAndDispatchRun, type RunnerDispatchDeps } from './dispatch';
 import { continuationBlockReason, createContinuationRun } from './continuation';
 
 const WEBHOOK_MAX_AGE_MS = 60_000;
@@ -31,11 +31,7 @@ export interface LinearWebhookRequest {
   nowMs?: number;
 }
 
-export interface LinearWebhookDeps extends ClockAndIds {
-  runnerUrl?: string;
-  runnerToken?: string;
-  hatcheryPublicUrl?: string;
-  fetch?: typeof fetch;
+export interface LinearWebhookDeps extends RunnerDispatchDeps, ClockAndIds {
   // Linear actor id of Hatchery's own integration. When set, a transition performed by that actor is
   // recorded but never triggers a run — closes the self-trigger loop if the bot ever moves an issue.
   botActorId?: string;
