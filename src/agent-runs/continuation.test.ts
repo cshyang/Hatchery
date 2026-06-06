@@ -315,7 +315,7 @@ function seq() {
   };
 }
 
-const runnerDeps = { runnerUrl: 'https://runner', runnerToken: 't', hatcheryPublicUrl: 'https://hatchery', fetch: async () => new Response('{}') };
+const runnerDeps = { triggerApiUrl: 'https://trigger', triggerSecretKey: 'tr_secret', githubToken: 'ghp_x', runnerToken: 't', hatcheryPublicUrl: 'https://hatchery', fetch: async () => new Response('{}') };
 
 test('createContinuationRun targets the parent branch and carries the feedback', async () => {
   const db = new FakeD1();

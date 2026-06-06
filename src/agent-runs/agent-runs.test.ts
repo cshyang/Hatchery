@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
 import type { D1Like } from '../skills/repository';
 import { claimRunForDispatch, createAgentRun, findLatestRunByLinearIssue, getActiveAgentRunByBranch, getAgentRun, getAgentRunById, handleAgentRunCallback, updateAgentRun } from './repository';
-import { claimAndDispatchRun, DISPATCH_MAX_ATTEMPTS, reconcileAgentRuns } from './dispatch';
+import { buildRunnerDispatch, claimAndDispatchRun, DISPATCH_MAX_ATTEMPTS, reconcileAgentRuns } from './dispatch';
+import type { AgentRun } from './repository';
 
 const { test, run } = createTestRunner();
 
@@ -462,11 +463,28 @@ test('terminal agent runs cannot move back to running', async () => {
 });
 
 // ── Outbox: atomic claim ─────────────────────────────────────────────────────
-const dispatchableInput = { ...runInput, dispatchPayload: JSON.stringify({ linearIssue: { id: 'issue-1' }, targetRepo: 'github.com/acme/repo' }) };
-const okFetch = (async () => new Response(JSON.stringify({ sandboxId: 'sbx_1' }), { status: 200 })) as unknown as typeof fetch;
+// A contract-valid INITIAL stored payload: full linearIssue snapshot + repo/branch/kit/runtime/provider.
+// buildRunnerDispatch maps this to the runner contract and v.parses it, so the snapshot must be complete.
+const initialDispatchPayload = JSON.stringify({
+  source: { type: 'linear', id: 'LIN-42' },
+  linearIssue: { id: 'issue-1', identifier: 'LIN-42', title: 'Fix it', description: 'do the thing', url: 'https://linear.app/acme/issue/LIN-42/fix-it' },
+  targetRepo: 'https://github.com/acme/repo',
+  baseBranch: 'main',
+  kit: 'coding-default',
+  runtime: 'pi',
+  sandboxProvider: 'e2b',
+});
+const dispatchableInput = { ...runInput, dispatchPayload: initialDispatchPayload };
+const okFetch = (async () => new Response(JSON.stringify({ id: 'run_x' }), { status: 200 })) as unknown as typeof fetch;
 const retryableFetch = (async () => new Response('upstream boom', { status: 503 })) as unknown as typeof fetch;
 const fatalFetch = (async () => new Response('bad request', { status: 400 })) as unknown as typeof fetch;
-const runnerDeps = { runnerUrl: 'https://runner.test/run', runnerToken: 'rt', hatcheryPublicUrl: 'https://hatchery.test' };
+const runnerDeps = {
+  triggerApiUrl: 'https://trigger.test',
+  triggerSecretKey: 'tr_secret',
+  githubToken: 'ghp_x',
+  runnerToken: 'rt',
+  hatcheryPublicUrl: 'https://hatchery.test',
+};
 
 test('claimRunForDispatch is compare-and-set: only the first claim wins', async () => {
   const db = new FakeD1();
@@ -481,7 +499,7 @@ test('claimRunForDispatch is compare-and-set: only the first claim wins', async 
   assert.equal(second, null, 'a row already claimed cannot be claimed again');
 });
 
-test('immediate dispatch: success moves queued -> running with sandbox', async () => {
+test('immediate dispatch: success moves queued -> running with trigger run id', async () => {
   const db = new FakeD1();
   const deps = seq();
   const created = await createAgentRun(db, dispatchableInput, deps);
@@ -491,7 +509,7 @@ test('immediate dispatch: success moves queued -> running with sandbox', async (
   assert.equal(result.dispatched, true);
   const run = await getAgentRunById(db, created.run.id);
   assert.equal(run?.status, 'running');
-  assert.equal(run?.sandboxId, 'sbx_1');
+  assert.equal(run?.triggerRunId, 'run_x');
 });
 
 test('immediate dispatch: an unconfigured runner leaves the run queued for the ticker (self-heals)', async () => {
@@ -539,6 +557,69 @@ test('a 4xx runner response fails immediately (not retryable)', async () => {
   const run = await getAgentRunById(db, created.run.id);
   assert.equal(run?.status, 'failed');
   assert.equal(run?.dispatchAttempts, 1, 'one attempt, no pointless retries');
+});
+
+// ── Outbox: payload → contract mapping ───────────────────────────────────────
+const mappingDeps = { triggerApiUrl: 'https://trigger.test', triggerSecretKey: 'tr_secret', githubToken: 'ghp_x', runnerToken: 'rt', hatcheryPublicUrl: 'https://hatchery.test' };
+const runWith = (dispatchPayload: string): AgentRun => ({ id: 'run-1', projectId: 'P', dispatchPayload } as unknown as AgentRun);
+
+const continuationDispatchPayload = JSON.stringify({
+  source: { type: 'linear', id: 'd2' },
+  mode: 'continuation',
+  parentRunId: 'run-parent',
+  targetRepo: 'https://github.com/acme/repo',
+  baseBranch: 'main',
+  targetBranch: 'hatchery/lin-42',
+  prUrl: 'https://github.com/acme/repo/pull/7',
+  kit: 'coding-default',
+  runtime: 'pi',
+  sandboxProvider: 'e2b',
+  feedback: 'use the existing helper',
+  replyTarget: { surface: 'linear', ref: 'issue-1' },
+  linearIssue: { id: 'issue-1', identifier: 'LIN-42', url: 'https://linear.app/acme/issue/LIN-42/fix-it' },
+});
+
+test('buildRunnerDispatch maps an initial payload to a contract object (issue populated, mode initial, workspacePolicy defaults fresh)', () => {
+  const dispatch = buildRunnerDispatch(runWith(initialDispatchPayload), mappingDeps);
+
+  assert.equal(dispatch.mode, 'initial');
+  assert.equal(dispatch.workspacePolicy, 'fresh');
+  assert.deepEqual(dispatch.issue, { id: 'issue-1', identifier: 'LIN-42', url: 'https://linear.app/acme/issue/LIN-42/fix-it', title: 'Fix it', description: 'do the thing' });
+  assert.equal(dispatch.targetBranch, null);
+  assert.equal(dispatch.githubToken, 'ghp_x');
+  assert.deepEqual(dispatch.callback, { url: 'https://hatchery.test/__internal/agent-runs', token: 'rt' });
+});
+
+test('buildRunnerDispatch maps a continuation payload with issue null and carries feedback/targetBranch/prUrl', () => {
+  const dispatch = buildRunnerDispatch(runWith(continuationDispatchPayload), mappingDeps);
+
+  assert.equal(dispatch.mode, 'continuation');
+  assert.equal(dispatch.issue, null);
+  assert.equal(dispatch.feedback, 'use the existing helper');
+  assert.equal(dispatch.targetBranch, 'hatchery/lin-42');
+  assert.equal(dispatch.prUrl, 'https://github.com/acme/repo/pull/7');
+});
+
+test('buildRunnerDispatch on a payload with an unsupported runtime fails terminally (not retryable → run failed, no requeue)', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const legacyPayload = JSON.stringify({
+    source: { type: 'linear', id: 'LIN-99' },
+    linearIssue: { id: 'issue-9', identifier: 'LIN-99', title: 'Legacy', description: null, url: 'https://linear.app/acme/issue/LIN-99' },
+    targetRepo: 'https://github.com/acme/repo',
+    baseBranch: 'main',
+    kit: 'coding-default',
+    runtime: 'opencode', // rejected by the contract's v.literal('pi')
+    sandboxProvider: 'e2b',
+  });
+  const created = await createAgentRun(db, { ...runInput, idempotencyKey: 'legacy-runtime', dispatchPayload: legacyPayload }, deps);
+
+  const result = await claimAndDispatchRun(db, created.run.id, { ...runnerDeps, fetch: okFetch }, deps);
+
+  assert.equal(result.status, 'failed', 'a malformed payload is fatal — retrying cannot fix it');
+  const run = await getAgentRunById(db, created.run.id);
+  assert.equal(run?.status, 'failed');
+  assert.equal(run?.dispatchAttempts, 1, 'one attempt, no pointless requeue');
 });
 
 // ── Reconciler ───────────────────────────────────────────────────────────────

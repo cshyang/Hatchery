@@ -286,6 +286,17 @@ const SECRET = 'linear-secret';
 const NOW = 2_000_000;
 const sign = (secret: string, raw: string) => hmac(secret, raw);
 
+// Fully-configured Trigger.dev dispatch deps (all five fields the config guard requires). Spread this and
+// override `fetch` per test. The dispatch mechanism (URL/body/run id) is unit-tested in agent-runs.test.ts;
+// here we only assert the webhook behavior (deferred dispatch, run reaches running, transient requeues).
+const triggerDeps = {
+  triggerApiUrl: 'https://trigger.example',
+  triggerSecretKey: 'tr_secret',
+  githubToken: 'ghp_x',
+  runnerToken: 'runner-secret',
+  hatcheryPublicUrl: 'https://hatchery.example',
+};
+
 function issuePayload(stateName = 'Run Agent', previousStateName = 'Backlog') {
   return {
     action: 'update',
@@ -392,39 +403,37 @@ test('handleLinearWebhook rejects missing/wrong signature and stale timestamps',
 
   const missing = await handleLinearWebhook(
     { db: new FakeD1(), signingSecret: 'linear-secret', signature: undefined, deliveryId: 'delivery-1', event: 'Issue', rawBody: raw, projectsJson, nowMs: 2_000_000 },
-    { fetch: async () => new Response('{}'), runnerUrl: 'https://runner.example/run', runnerToken: 'runner-secret', ...seq() },
+    { ...triggerDeps, fetch: async () => new Response('{}'), ...seq() },
   );
   assert.equal(missing.status, 404);
 
   const bad = await handleLinearWebhook(
     { db: new FakeD1(), signingSecret: 'linear-secret', signature: 'wrong', deliveryId: 'delivery-1', event: 'Issue', rawBody: raw, projectsJson, nowMs: 2_000_000 },
-    { fetch: async () => new Response('{}'), runnerUrl: 'https://runner.example/run', runnerToken: 'runner-secret', ...seq() },
+    { ...triggerDeps, fetch: async () => new Response('{}'), ...seq() },
   );
   assert.equal(bad.status, 404);
 
   const old = await handleLinearWebhook(
     { db: new FakeD1(), signingSecret: 'linear-secret', signature: staleSig, deliveryId: 'delivery-1', event: 'Issue', rawBody: stale, projectsJson, nowMs: 2_000_000 },
-    { fetch: async () => new Response('{}'), runnerUrl: 'https://runner.example/run', runnerToken: 'runner-secret', ...seq() },
+    { ...triggerDeps, fetch: async () => new Response('{}'), ...seq() },
   );
   assert.equal(old.status, 400);
   assert.match(String(old.body?.error), /stale/i);
 });
 
-test('handleLinearWebhook creates one agent_run and dispatches expected E2B Pi payload', async () => {
+test('handleLinearWebhook creates one agent_run and triggers the coding task', async () => {
   const db = new FakeD1();
   const raw = JSON.stringify(issuePayload());
   const signature = await hmac('linear-secret', raw);
-  const sent: { url: string; init: RequestInit; body: Record<string, unknown> }[] = [];
+  const sent: { url: string; init: RequestInit; body: Record<string, any> }[] = [];
 
   const result = await handleLinearWebhook(
     { db, signingSecret: 'linear-secret', signature, deliveryId: 'delivery-1', event: 'Issue', rawBody: raw, projectsJson, nowMs: 2_000_000 },
     {
-      runnerUrl: 'https://runner.example/run',
-      runnerToken: 'runner-secret',
-      hatcheryPublicUrl: 'https://hatchery.example',
+      ...triggerDeps,
       fetch: (async (url: unknown, init: unknown) => {
         sent.push({ url: String(url), init: init as RequestInit, body: JSON.parse(String((init as RequestInit).body)) });
-        return new Response(JSON.stringify({ sandboxId: 'sbx_1' }), { status: 202 });
+        return new Response(JSON.stringify({ id: 'run_x' }), { status: 200 });
       }) as typeof fetch,
       ...seq(),
     },
@@ -438,20 +447,18 @@ test('handleLinearWebhook creates one agent_run and dispatches expected E2B Pi p
 
   await result.dispatch?.();
 
+  // Behavior: run reaches running with the Trigger run id; the deep payload mapping is unit-tested in
+  // agent-runs.test.ts (buildRunnerDispatch). Here we only confirm the call hit the trigger endpoint.
   assert.equal(db.agentRuns[0].status, 'running');
-  assert.equal(db.agentRuns[0].sandbox_id, 'sbx_1');
+  assert.equal(db.agentRuns[0].trigger_run_id, 'run_x');
   assert.equal(sent.length, 1);
-  assert.equal(sent[0].url, 'https://runner.example/run');
-  assert.equal((sent[0].init.headers as Record<string, string>)['x-hatchery-agent-runner-token'], 'runner-secret');
-  assert.equal(JSON.stringify(sent[0].body).includes('runner-secret'), false);
-  assert.deepEqual(sent[0].body.callback, {
-    url: 'https://hatchery.example/__internal/agent-runs',
-    authHeader: 'x-hatchery-agent-runner-token',
-  });
-  assert.equal(sent[0].body.runtime, 'pi');
-  assert.equal(sent[0].body.kit, 'coding-default');
-  assert.equal(sent[0].body.sandboxProvider, 'e2b');
-  assert.equal((sent[0].body.linearIssue as Record<string, unknown>).identifier, 'LIN-42');
+  assert.equal(sent[0].url, 'https://trigger.example/api/v1/tasks/run-coding-task/trigger');
+  assert.equal((sent[0].init.headers as Record<string, string>).authorization, 'Bearer tr_secret');
+  assert.equal(sent[0].body.options.idempotencyKey, db.agentRuns[0].id);
+  // Callback auth now travels in the body (callback.token), not as a header — the runner echoes it back.
+  assert.deepEqual(sent[0].body.payload.callback, { url: 'https://hatchery.example/__internal/agent-runs', token: 'runner-secret' });
+  assert.equal(sent[0].body.payload.runtime, 'pi');
+  assert.equal(sent[0].body.payload.issue.identifier, 'LIN-42');
 });
 
 test('handleLinearWebhook matches active route config and writes event before dispatching run', async () => {
@@ -459,16 +466,15 @@ test('handleLinearWebhook matches active route config and writes event before di
   addActiveRoute(db);
   const raw = JSON.stringify(issuePayload());
   const signature = await hmac('linear-secret', raw);
-  const sent: { body: Record<string, unknown> }[] = [];
+  const sent: { body: Record<string, any> }[] = [];
 
   const result = await handleLinearWebhook(
     { db, signingSecret: 'linear-secret', signature, deliveryId: 'delivery-route-1', event: 'Issue', rawBody: raw, projectsJson: undefined, nowMs: 2_000_000 },
     {
-      runnerUrl: 'https://runner.example/run',
-      runnerToken: 'runner-secret',
+      ...triggerDeps,
       fetch: (async (_url: unknown, init: unknown) => {
         sent.push({ body: JSON.parse(String((init as RequestInit).body)) });
-        return new Response(JSON.stringify({ sandboxId: 'sbx_route' }), { status: 202 });
+        return new Response(JSON.stringify({ id: 'run_route' }), { status: 200 });
       }) as typeof fetch,
       ...seq(),
     },
@@ -485,7 +491,7 @@ test('handleLinearWebhook matches active route config and writes event before di
   assert.equal(db.ops.indexOf('event') < db.ops.indexOf('agent_run'), true, 'event receipt is written before run lease');
 
   await result.dispatch?.();
-  assert.equal(sent[0].body.targetRepo, 'https://github.com/acme/repo');
+  assert.equal(sent[0].body.payload.targetRepo, 'https://github.com/acme/repo');
   assert.equal(db.agentRuns[0].status, 'running');
 });
 
@@ -499,11 +505,10 @@ test('handleLinearWebhook clearly fails legacy active route runtime before dispa
   const result = await handleLinearWebhook(
     { db, signingSecret: 'linear-secret', signature, deliveryId: 'delivery-legacy-route', event: 'Issue', rawBody: raw, projectsJson: undefined, nowMs: 2_000_000 },
     {
-      runnerUrl: 'https://runner.example/run',
-      runnerToken: 'runner-secret',
+      ...triggerDeps,
       fetch: (async () => {
         calls++;
-        return new Response('{}', { status: 202 });
+        return new Response('{}', { status: 200 });
       }) as typeof fetch,
       ...seq(),
     },
@@ -521,11 +526,10 @@ test('handleLinearWebhook dedupes duplicate deliveries and repeated issue payloa
   const signature = await hmac('linear-secret', raw);
   let calls = 0;
   const deps = {
-    runnerUrl: 'https://runner.example/run',
-    runnerToken: 'runner-secret',
+    ...triggerDeps,
     fetch: (async () => {
       calls++;
-      return new Response('{}', { status: 202 });
+      return new Response(JSON.stringify({ id: 'run_x' }), { status: 200 });
     }) as typeof fetch,
     ...seq(),
   };
@@ -563,11 +567,10 @@ test('handleLinearWebhook treats Linear stateId updates as state transitions', a
   const result = await handleLinearWebhook(
     { db, signingSecret: 'linear-secret', signature, deliveryId: 'delivery-state-id', event: 'Issue', rawBody: raw, projectsJson, nowMs: 2_000_000 },
     {
-      runnerUrl: 'https://runner.example/run',
-      runnerToken: 'runner-secret',
+      ...triggerDeps,
       fetch: (async () => {
         calls++;
-        return new Response(JSON.stringify({ sandboxId: 'sandbox-1' }), { status: 202 });
+        return new Response(JSON.stringify({ id: 'run_state' }), { status: 200 });
       }) as typeof fetch,
       ...seq(),
     },
@@ -584,7 +587,7 @@ test('handleLinearWebhook ignores non-Run-Agent state changes and requeues a tra
   const ignoredSig = await hmac('linear-secret', ignoredRaw);
   const ignored = await handleLinearWebhook(
     { db: new FakeD1(), signingSecret: 'linear-secret', signature: ignoredSig, deliveryId: 'delivery-ignored', event: 'Issue', rawBody: ignoredRaw, projectsJson, nowMs: 2_000_000 },
-    { fetch: async () => new Response('{}'), runnerUrl: 'https://runner.example/run', runnerToken: 'runner-secret', ...seq() },
+    { ...triggerDeps, fetch: async () => new Response('{}'), ...seq() },
   );
   assert.deepEqual(ignored.body, { skipped: 'not a Run Agent transition' });
 
@@ -594,9 +597,8 @@ test('handleLinearWebhook ignores non-Run-Agent state changes and requeues a tra
   const failed = await handleLinearWebhook(
     { db, signingSecret: 'linear-secret', signature, deliveryId: 'delivery-fail', event: 'Issue', rawBody: raw, projectsJson, nowMs: 2_000_000 },
     {
+      ...triggerDeps,
       fetch: async () => new Response(JSON.stringify({ error: 'down' }), { status: 503 }),
-      runnerUrl: 'https://runner.example/run',
-      runnerToken: 'runner-secret',
       ...seq(),
     },
   );
@@ -617,11 +619,10 @@ test('handleLinearWebhook records a non-human actor transition but never dispatc
   const result = await handleLinearWebhook(
     { db, signingSecret: 'linear-secret', signature, deliveryId: 'delivery-bot', event: 'Issue', rawBody: raw, projectsJson, nowMs: 2_000_000 },
     {
-      runnerUrl: 'https://runner.example/run',
-      runnerToken: 'runner-secret',
+      ...triggerDeps,
       fetch: (async () => {
         calls++;
-        return new Response('{}', { status: 202 });
+        return new Response('{}', { status: 200 });
       }) as typeof fetch,
       ...seq(),
     },
@@ -641,9 +642,8 @@ test('handleLinearWebhook re-runs an issue once the prior run is terminal, but d
   const raw = JSON.stringify(issuePayload());
   const signature = await hmac('linear-secret', raw);
   const deps = {
-    runnerUrl: 'https://runner.example/run',
-    runnerToken: 'runner-secret',
-    fetch: (async () => new Response(JSON.stringify({ sandboxId: 'sbx' }), { status: 202 })) as typeof fetch,
+    ...triggerDeps,
+    fetch: (async () => new Response(JSON.stringify({ id: 'run_x' }), { status: 200 })) as typeof fetch,
     ...seq(),
   };
 
@@ -679,9 +679,8 @@ test('handleLinearWebhook does not create a rerun from the same Linear delivery 
   const raw = JSON.stringify(issuePayload());
   const signature = await hmac('linear-secret', raw);
   const deps = {
-    runnerUrl: 'https://runner.example/run',
-    runnerToken: 'runner-secret',
-    fetch: (async () => new Response(JSON.stringify({ sandboxId: 'sbx' }), { status: 202 })) as typeof fetch,
+    ...triggerDeps,
+    fetch: (async () => new Response(JSON.stringify({ id: 'run_x' }), { status: 200 })) as typeof fetch,
     ...seq(),
   };
 
@@ -711,7 +710,7 @@ test('handleLinearComment records a boundary event and spawns a continuation for
   const raw = JSON.stringify({ action: 'create', type: 'Comment', webhookTimestamp: NOW, actor: { type: 'user', id: 'u1' }, data: { id: 'c1', body: 'use the existing helper', issueId: 'ISSUE-1' } });
   const res = await handleLinearComment(
     { db, signingSecret: SECRET, signature: await sign(SECRET, raw), deliveryId: 'deliv-1', event: 'Comment', rawBody: raw, projectsJson: undefined, nowMs: NOW },
-    { runnerUrl: 'https://runner', runnerToken: 't', hatcheryPublicUrl: 'https://h', fetch: async () => new Response('{}'), ...seq() },
+    { ...triggerDeps, fetch: async () => new Response('{}'), ...seq() },
   );
   assert.equal(res.status, 200);
   assert.equal(res.body.dispatchStatus, 'queued');
@@ -743,7 +742,7 @@ test('handleLinearComment recovers when a duplicate delivery has an event receip
 
   const result = await handleLinearComment(
     { db, signingSecret: SECRET, signature: await sign(SECRET, raw), deliveryId: 'recover-1', event: 'Comment', rawBody: raw, projectsJson: undefined, nowMs: NOW },
-    { runnerUrl: 'https://runner', runnerToken: 't', hatcheryPublicUrl: 'https://h', fetch: async () => new Response('{}'), ...seq() },
+    { ...triggerDeps, fetch: async () => new Response('{}'), ...seq() },
   );
 
   assert.equal(result.body.dispatchStatus, 'queued');
@@ -759,7 +758,7 @@ test('handleLinearComment records terminal parent comments but does not spawn co
 
   const result = await handleLinearComment(
     { db, signingSecret: SECRET, signature: await sign(SECRET, raw), deliveryId: 'terminal-1', event: 'Comment', rawBody: raw, projectsJson: undefined, nowMs: NOW },
-    { runnerUrl: 'https://runner', runnerToken: 't', hatcheryPublicUrl: 'https://h', fetch: async () => new Response('{}'), ...seq() },
+    { ...triggerDeps, fetch: async () => new Response('{}'), ...seq() },
   );
 
   assert.equal(result.body.skipped, 'parent run is not waiting for PR approval');
@@ -792,7 +791,7 @@ test('handleLinearComment parses the provisional documented-shape fixture', asyn
   db.agentRuns[0].status = 'waiting_approval';
   db.agentRuns[0].pr_url = 'https://github.com/o/r/pull/5';
   const raw = JSON.stringify(fixture);
-  const res = await handleLinearComment({ db, signingSecret: SECRET, signature: await sign(SECRET, raw), deliveryId: 'fx-1', event: 'Comment', rawBody: raw, projectsJson: undefined, nowMs: ts }, { runnerUrl: 'https://r', runnerToken: 't', hatcheryPublicUrl: 'https://h', fetch: async () => new Response('{}'), ...seq() });
+  const res = await handleLinearComment({ db, signingSecret: SECRET, signature: await sign(SECRET, raw), deliveryId: 'fx-1', event: 'Comment', rawBody: raw, projectsJson: undefined, nowMs: ts }, { ...triggerDeps, fetch: async () => new Response('{}'), ...seq() });
   assert.equal(res.body.dispatchStatus, 'queued');
 });
 
