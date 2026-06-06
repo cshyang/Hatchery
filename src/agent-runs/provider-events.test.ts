@@ -106,12 +106,13 @@ class FakeD1 implements D1Like {
               return { meta: { changes: 1 } };
             }
             if (query.startsWith('UPDATE agent_runs')) {
-              const [status, sandboxId, branch, commitSha, prUrl, ciUrl, summary, error, statusNote, lastEventId, lastHeartbeatAt, lastDispatchError, completedAt, updatedAt, id] = values;
+              const [status, sandboxId, triggerRunId, branch, commitSha, prUrl, ciUrl, summary, error, statusNote, lastEventId, lastHeartbeatAt, lastDispatchError, completedAt, updatedAt, id] = values;
               const row = db.agentRuns.find((r) => r.id === id);
               if (!row) return { meta: { changes: 0 } };
               Object.assign(row, {
                 status,
                 sandbox_id: sandboxId,
+                trigger_run_id: triggerRunId,
                 branch,
                 commit_sha: commitSha,
                 pr_url: prUrl,
@@ -166,6 +167,7 @@ function seed(db: FakeD1) {
     runtime: 'opencode',
     sandbox_provider: 'e2b',
     sandbox_id: 'sbx_1',
+    trigger_run_id: null,
     status: 'waiting_approval',
     branch: 'agent/EDK-1',
     commit_sha: 'abc123',

@@ -130,6 +130,7 @@ class FakeD1 implements D1Like {
                 runtime,
                 sandboxProvider,
                 sandboxId,
+                triggerRunId,
                 status,
                 branch,
                 commitSha,
@@ -166,6 +167,7 @@ class FakeD1 implements D1Like {
                 runtime,
                 sandbox_provider: sandboxProvider,
                 sandbox_id: sandboxId,
+                trigger_run_id: triggerRunId,
                 status,
                 branch,
                 commit_sha: commitSha,
@@ -230,13 +232,14 @@ class FakeD1 implements D1Like {
               return { meta: { changes: 1 } };
             }
             if (query.startsWith('UPDATE agent_runs')) {
-              const [status, sandboxId, branch, commitSha, prUrl, ciUrl, summary, error, statusNote, lastEventId, lastHeartbeatAt, lastDispatchError, completedAt, updatedAt, id] = values;
+              const [status, sandboxId, triggerRunId, branch, commitSha, prUrl, ciUrl, summary, error, statusNote, lastEventId, lastHeartbeatAt, lastDispatchError, completedAt, updatedAt, id] = values;
               const row = db.agentRuns.find((r) => r.id === id);
               if (!row) return { meta: { changes: 0 } };
               db.beforeUpdateAgentRun?.(row, status);
               Object.assign(row, {
                 status,
                 sandbox_id: sandboxId,
+                trigger_run_id: triggerRunId,
                 branch,
                 commit_sha: commitSha,
                 pr_url: prUrl,
@@ -686,6 +689,15 @@ test('createAgentRun persists an explicit branch when given', async () => {
     seq(),
   );
   assert.equal(run.branch, 'hatchery/eng-1');
+});
+
+test('updateAgentRun round-trips triggerRunId', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const { run } = await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'k-trigger', targetRepo: 'r' }, deps);
+  await updateAgentRun(db, { id: run.id, triggerRunId: 'run_abc' }, deps);
+  const readBack = await getAgentRunById(db, run.id);
+  assert.equal(readBack?.triggerRunId, 'run_abc');
 });
 
 await run();
