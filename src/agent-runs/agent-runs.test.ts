@@ -747,6 +747,67 @@ test('late running callback refreshes heartbeat without downgrading waiting_appr
   assert.equal(lateRunning.body?.run.lastHeartbeatAt, 9_999);
 });
 
+// ── handleAgentRunCallback reply field ───────────────────────────────────────
+
+test('handleAgentRunCallback pr_opened sets reply with type/issueId/prUrl when linearIssueId is set', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const created = await createAgentRun(db, runInput, deps);
+
+  const result = await handleAgentRunCallback(
+    {
+      db,
+      expectedToken: 'runner-secret',
+      actualToken: 'runner-secret',
+      body: { runId: created.run.id, status: 'pr_opened', prUrl: 'https://github.com/acme/repo/pull/99' },
+    },
+    deps,
+  );
+
+  assert.equal(result.status, 200);
+  assert.ok(result.reply, 'reply should be present for a new pr_opened notification with linearIssueId');
+  assert.equal(result.reply!.type, 'pr_opened');
+  assert.equal(result.reply!.issueId, 'issue-1');
+  assert.equal(result.reply!.prUrl, 'https://github.com/acme/repo/pull/99');
+});
+
+test('handleAgentRunCallback duplicate pr_opened redelivery does not set reply (no double-post)', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const created = await createAgentRun(db, runInput, deps);
+
+  const callbackArgs = {
+    db,
+    expectedToken: 'runner-secret',
+    actualToken: 'runner-secret',
+    body: { runId: created.run.id, status: 'pr_opened', prUrl: 'https://github.com/acme/repo/pull/99' },
+  };
+
+  const first = await handleAgentRunCallback(callbackArgs, deps);
+  assert.ok(first.reply, 'first delivery should have reply');
+
+  const second = await handleAgentRunCallback(callbackArgs, deps);
+  assert.equal(second.reply, undefined, 'duplicate redelivery must not carry reply (prevents double-post)');
+});
+
+test('handleAgentRunCallback no reply when linearIssueId is null', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const created = await createAgentRun(db, { ...runInput, linearIssueId: null }, deps);
+
+  const result = await handleAgentRunCallback(
+    {
+      db,
+      expectedToken: 'runner-secret',
+      actualToken: 'runner-secret',
+      body: { runId: created.run.id, status: 'pr_opened', prUrl: 'https://github.com/acme/repo/pull/1' },
+    },
+    deps,
+  );
+
+  assert.equal(result.reply, undefined, 'no reply when run has no linearIssueId');
+});
+
 test('findLatestRunByLinearIssue returns the newest run for an issue across projects', async () => {
   const db = new FakeD1();
   await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'a', targetRepo: 'r', linearIssueId: 'ISSUE-1' }, seq());

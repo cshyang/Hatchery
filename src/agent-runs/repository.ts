@@ -95,9 +95,17 @@ interface AgentRunRow {
   completed_at: number | null;
 }
 
+export interface AgentRunCallbackReply {
+  type: string;
+  issueId: string;
+  prUrl: string | null;
+  error: string | null;
+}
+
 export interface AgentRunCallbackResult {
   status: number;
   body?: any;
+  reply?: AgentRunCallbackReply;
 }
 
 function makeId(deps: ClockAndIds = {}): string {
@@ -616,8 +624,9 @@ export async function handleAgentRunCallback(
       deps,
     );
     const notificationType = notificationTypeForCallback(status);
+    let reply: AgentRunCallbackReply | undefined;
     if (notificationType) {
-      await createAgentRunNotification(
+      const { duplicate } = await createAgentRunNotification(
         req.db,
         {
           projectId: run.projectId,
@@ -630,8 +639,16 @@ export async function handleAgentRunCallback(
         },
         deps,
       );
+      if (!duplicate && run.linearIssueId) {
+        reply = {
+          type: notificationType,
+          issueId: run.linearIssueId,
+          prUrl: normalizeText(body.prUrl) ?? run.prUrl ?? null,
+          error: normalizeText(body.error) ?? run.error ?? null,
+        };
+      }
     }
-    return { status: 200, body: { run } };
+    return { status: 200, body: { run }, ...(reply ? { reply } : {}) };
   } catch (e) {
     return { status: 400, body: { error: e instanceof Error ? e.message : 'bad request' } };
   }

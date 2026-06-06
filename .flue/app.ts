@@ -30,7 +30,9 @@ import { handleInternalWorkItemRequest } from '../src/workbench/gateway';
 import { handleSourceChangeRunCallback } from '../src/workbench/source-change';
 import { handleLinearComment, handleLinearWebhook } from '../src/agent-runs/linear';
 import { handleAgentRunCallback } from '../src/agent-runs/repository';
+import { postLinearComment, replyTextForCallback } from '../src/agent-runs/linear-reply';
 import { reconcileAgentRuns } from '../src/agent-runs/dispatch';
+import { loadConnectionSpecs, resolveConnection } from '../src/connections/repository';
 import { activateAgentRunRoute, disableAgentRunRoute } from '../src/agent-runs/events';
 import { handleNangoForwardWebhook } from '../src/agent-runs/provider-events';
 
@@ -229,6 +231,33 @@ app.post('/__internal/agent-runs', async (c) => {
     body: await readJsonOrNull(() => c.req.json()),
   });
   if (result.status === 404) return c.body(null, 404);
+
+  // Best-effort Linear comment. A failure here must NEVER change the HTTP response or throw.
+  if (result.reply) {
+    const reply = result.reply;
+    const text = replyTextForCallback(reply.type, reply);
+    if (text) {
+      // waitUntil (not a floating promise) so the Worker keeps the isolate alive until the post
+      // finishes — a bare async IIFE can be cancelled when the response returns. Matches the
+      // dispatch pattern above. Still best-effort: the inner try/catch swallows all failures.
+      c.executionCtx.waitUntil((async () => {
+        try {
+          const projectId = result.body?.run?.projectId;
+          if (!projectId) return;
+          const binding = await bindingByProject(projectId, c.env.DB);
+          if (!binding) return;
+          const specs = await loadConnectionSpecs(c.env.DB, binding);
+          const resolved = resolveConnection(specs, c.env as Record<string, unknown>, 'linear');
+          if (!resolved) return;
+          const token = typeof resolved.secret === 'string' ? resolved.secret : await resolved.secret();
+          await postLinearComment({ issueId: reply.issueId, body: text, token, fetchImpl: fetch });
+        } catch (e) {
+          console.error('[agent-runs] Linear comment post failed (best-effort):', e instanceof Error ? e.message : e);
+        }
+      })());
+    }
+  }
+
   return c.json(result.body ?? {}, result.status as 200 | 400 | 500);
 });
 
