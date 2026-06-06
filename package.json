@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "build": "flue build --target cloudflare",
     "predeploy": "npm run typecheck && npm test && npm run build",
-    "deploy": "wrangler deploy --config dist/hatchery/wrangler.json"
+    "deploy": "wrangler deploy --config dist/hatchery/wrangler.json",
+    "trigger:dev": "trigger.dev dev",
+    "trigger:deploy": "trigger.dev deploy"
   },
   "keywords": [],
   "author": "",
@@ -19,6 +21,7 @@
   "dependencies": {
     "@flue/runtime": "^0.9.1",
     "@flue/sdk": "^0.9.1",
+    "@trigger.dev/sdk": "^4.4.6",
     "agents": "^0.13.3",
     "hono": "^4.12.23",
     "valibot": "^1.4.1"
