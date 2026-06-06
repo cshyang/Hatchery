@@ -34,6 +34,7 @@ export interface AgentRun {
   runtime: string;
   sandboxProvider: string;
   sandboxId: string | null;
+  triggerRunId: string | null;
   status: AgentRunStatus;
   branch: string | null;
   commitSha: string | null;
@@ -74,6 +75,7 @@ interface AgentRunRow {
   runtime: string;
   sandbox_provider: string;
   sandbox_id: string | null;
+  trigger_run_id: string | null;
   status: AgentRunStatus;
   branch: string | null;
   commit_sha: string | null;
@@ -161,6 +163,7 @@ function rowToAgentRun(r: AgentRunRow): AgentRun {
     runtime: r.runtime,
     sandboxProvider: r.sandbox_provider,
     sandboxId: r.sandbox_id ?? null,
+    triggerRunId: r.trigger_run_id ?? null,
     status: r.status,
     branch: r.branch ?? null,
     commitSha: r.commit_sha ?? null,
@@ -184,7 +187,7 @@ function rowToAgentRun(r: AgentRunRow): AgentRun {
 const AGENT_RUN_SELECT = `id, project_id, route_id, source_type, source_id, idempotency_key, linear_issue_id,
                          linear_identifier, linear_url, slack_team_id, slack_channel_id, slack_thread_ts,
                          github_owner, github_repo, target_repo, base_branch, kit, runtime, sandbox_provider,
-                         sandbox_id, status, branch, commit_sha, pr_url, ci_url, summary, error, status_note,
+                         sandbox_id, trigger_run_id, status, branch, commit_sha, pr_url, ci_url, summary, error, status_note,
                          last_event_id, last_heartbeat_at, dispatch_attempts, last_dispatch_error, dispatched_at,
                          dispatch_payload, created_at, updated_at, completed_at`;
 
@@ -273,9 +276,9 @@ export async function createAgentRun(
       `INSERT INTO agent_runs(id, project_id, route_id, source_type, source_id, idempotency_key, linear_issue_id,
                               linear_identifier, linear_url, slack_team_id, slack_channel_id, slack_thread_ts,
                               github_owner, github_repo, target_repo, base_branch, kit, runtime, sandbox_provider,
-                              sandbox_id, status, branch, commit_sha, pr_url, ci_url, summary, error,
+                              sandbox_id, trigger_run_id, status, branch, commit_sha, pr_url, ci_url, summary, error,
                               status_note, last_event_id, last_heartbeat_at, dispatch_payload, created_at, updated_at, completed_at)
-       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
     .bind(
       id,
@@ -297,6 +300,7 @@ export async function createAgentRun(
       normalizeText(input.kit) ?? 'coding-default',
       normalizeText(input.runtime) ?? 'pi',
       normalizeText(input.sandboxProvider) ?? 'e2b',
+      null,
       null,
       'queued',
       normalizeText(input.branch),
@@ -326,6 +330,7 @@ export async function updateAgentRun(
     id: string;
     status?: string | null;
     sandboxId?: string | null;
+    triggerRunId?: string | null;
     branch?: string | null;
     commitSha?: string | null;
     prUrl?: string | null;
@@ -355,13 +360,14 @@ export async function updateAgentRun(
   const result = await db
     .prepare(
       `UPDATE agent_runs
-          SET status=?, sandbox_id=?, branch=?, commit_sha=?, pr_url=?, ci_url=?, summary=?, error=?,
+          SET status=?, sandbox_id=?, trigger_run_id=?, branch=?, commit_sha=?, pr_url=?, ci_url=?, summary=?, error=?,
               status_note=?, last_event_id=?, last_heartbeat_at=?, last_dispatch_error=?, completed_at=?, updated_at=?
         WHERE id=?`,
     )
     .bind(
       status,
       input.sandboxId === undefined ? current.sandboxId : normalizeText(input.sandboxId),
+      input.triggerRunId === undefined ? current.triggerRunId : normalizeText(input.triggerRunId),
       input.branch === undefined ? current.branch : normalizeText(input.branch),
       input.commitSha === undefined ? current.commitSha : normalizeText(input.commitSha),
       input.prUrl === undefined ? current.prUrl : normalizeText(input.prUrl),
