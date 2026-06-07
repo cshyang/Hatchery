@@ -48,7 +48,11 @@ const RUNNER_FETCH_TIMEOUT_MS = 12_000;
 export interface RunnerDispatchDeps {
   triggerApiUrl?: string; // Trigger.dev REST base URL (e.g. https://api.trigger.dev)
   triggerSecretKey?: string; // Trigger.dev secret key (Bearer)
-  githubToken?: string; // short-lived, repo-scoped token handed to the coding task
+  githubToken?: string; // short-lived, repo-scoped token handed to the coding task (transition fallback)
+  /** Per-run, freshly-minted GitHub token (App installation token via the connection broker). Preferred
+   *  over the static githubToken — resolved on every dispatch attempt, so retries/continuations get a
+   *  fresh token. githubToken stays as the transition fallback (RUNNER_GITHUB_PAT_TEMP). */
+  resolveGithubToken?: (run: AgentRun) => Promise<string | null>;
   runnerToken?: string; // callback auth: the runner echoes this on its callbacks
   hatcheryPublicUrl?: string; // absolute origin Trigger calls back to (REQUIRED — callback is external)
   fetch?: typeof fetch;
@@ -123,6 +127,12 @@ export function buildRunnerDispatch(run: AgentRun, deps: RunnerDispatchDeps): Ru
   }
 }
 
+/** Pick the GitHub token for a dispatch: the per-run connection token (App installation token via the
+ *  broker), else the transition PAT. Resolved fresh on every attempt — the token is never persisted. */
+export async function resolveDispatchGithubToken(run: AgentRun, deps: RunnerDispatchDeps): Promise<string | null> {
+  return (await deps.resolveGithubToken?.(run)) ?? deps.githubToken ?? null;
+}
+
 async function triggerCodingTask(deps: RunnerDispatchDeps, dispatch: RunnerDispatch): Promise<{ triggerRunId: string }> {
   let res: Response;
   try {
@@ -171,7 +181,16 @@ async function dispatchClaimedRun(
   clock: ClockAndIds,
 ): Promise<DispatchResult> {
   try {
-    const { triggerRunId } = await triggerCodingTask(deps, buildRunnerDispatch(run, deps));
+    // Resolve the GitHub token here (post-claim → only the claim winner pays the Nango round-trip; not
+    // persisted, so each attempt mints fresh). buildRunnerDispatch stays a sync pure mapping — we just
+    // override its githubToken with the resolved one.
+    const githubToken = await resolveDispatchGithubToken(run, deps);
+    if (!githubToken) {
+      // No connection token and no PAT. Retryable so it self-heals once the project connects a GitHub
+      // App; the attempt cap eventually fails it with this clear reason instead of queuing forever.
+      throw new RunnerDispatchError(`no github credential for project ${run.projectId}`, { retryable: true });
+    }
+    const { triggerRunId } = await triggerCodingTask(deps, buildRunnerDispatch(run, { ...deps, githubToken }));
     await updateAgentRun(db, { id: run.id, status: 'running', triggerRunId }, clock);
     return { dispatched: true, status: 'running' };
   } catch (e) {
@@ -201,7 +220,7 @@ export async function claimAndDispatchRun(
   deps: RunnerDispatchDeps,
   clock: ClockAndIds = {},
 ): Promise<DispatchResult> {
-  if (!deps.triggerApiUrl || !deps.triggerSecretKey || !deps.runnerToken || !deps.githubToken || !deps.hatcheryPublicUrl) {
+  if (!deps.triggerApiUrl || !deps.triggerSecretKey || !deps.runnerToken || !(deps.githubToken || deps.resolveGithubToken) || !deps.hatcheryPublicUrl) {
     return { dispatched: false, status: 'skipped', reason: 'trigger dispatch not fully configured' };
   }
   const claimed = await claimRunForDispatch(db, runId, clock);
