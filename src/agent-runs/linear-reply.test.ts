@@ -1,7 +1,7 @@
 // Linear reply invariants — run: npx tsx src/agent-runs/linear-reply.test.ts
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
-import { postLinearComment, replyTextForCallback } from './linear-reply';
+import { moveLinearIssueState, postLinearComment, replyTextForCallback } from './linear-reply';
 
 const { test, run } = createTestRunner();
 
@@ -112,6 +112,68 @@ test('postLinearComment does not include token in error thrown for HTTP 500', as
     () => postLinearComment({ issueId: ISSUE_ID, body: BODY_TEXT, token: TOKEN, fetchImpl: stubFetch as typeof fetch }),
     (e: Error) => {
       assert.ok(!e.message.includes(TOKEN), 'token must not appear in error message for 500');
+      return true;
+    },
+  );
+});
+
+// ── moveLinearIssueState ─────────────────────────────────────────────────────
+
+function statesResponse(states: Array<{ id: string; name: string }>): Response {
+  return new Response(JSON.stringify({ data: { issue: { team: { states: { nodes: states } } } } }), { status: 200 });
+}
+
+test('moveLinearIssueState resolves the state by name then issueUpdates with its id', async () => {
+  const bodies: Array<{ query: string; variables: Record<string, unknown> }> = [];
+  const stubFetch = async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init!.body));
+    bodies.push(body);
+    if (body.query.includes('issueUpdate')) {
+      return new Response(JSON.stringify({ data: { issueUpdate: { success: true } } }), { status: 200 });
+    }
+    return statesResponse([{ id: 'st-todo', name: 'Todo' }, { id: 'st-rev', name: 'In Review' }]);
+  };
+
+  const res = await moveLinearIssueState({ issueId: ISSUE_ID, stateName: 'In Review', token: TOKEN, fetchImpl: stubFetch as typeof fetch });
+
+  assert.equal(res.moved, true);
+  assert.equal(bodies.length, 2, 'one lookup + one update');
+  assert.ok(bodies[0].query.includes('states'), 'first call looks up the team states');
+  assert.equal(bodies[0].variables.id, ISSUE_ID);
+  assert.ok(bodies[1].query.includes('issueUpdate'), 'second call issueUpdates');
+  assert.equal(bodies[1].variables.id, ISSUE_ID);
+  assert.equal(bodies[1].variables.stateId, 'st-rev', 'issueUpdate targets the resolved state id');
+});
+
+test('moveLinearIssueState matches the state name case-insensitively', async () => {
+  const stubFetch = async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init!.body));
+    if (body.query.includes('issueUpdate')) {
+      return new Response(JSON.stringify({ data: { issueUpdate: { success: true } } }), { status: 200 });
+    }
+    return statesResponse([{ id: 'st-rev', name: 'In Review' }]);
+  };
+  const res = await moveLinearIssueState({ issueId: ISSUE_ID, stateName: 'in review', token: TOKEN, fetchImpl: stubFetch as typeof fetch });
+  assert.equal(res.moved, true);
+});
+
+test('moveLinearIssueState returns moved:false and does NOT issueUpdate when the state is absent', async () => {
+  const bodies: unknown[] = [];
+  const stubFetch = async (_url: string | URL | Request, init?: RequestInit) => {
+    bodies.push(JSON.parse(String(init!.body)));
+    return statesResponse([{ id: 'st-todo', name: 'Todo' }]); // no "In Review"
+  };
+  const res = await moveLinearIssueState({ issueId: ISSUE_ID, stateName: 'In Review', token: TOKEN, fetchImpl: stubFetch as typeof fetch });
+  assert.equal(res.moved, false);
+  assert.equal(bodies.length, 1, 'must not call issueUpdate when the state is not found');
+});
+
+test('moveLinearIssueState does not leak the token on HTTP error', async () => {
+  const stubFetch = async () => new Response('Forbidden', { status: 403 });
+  await assert.rejects(
+    () => moveLinearIssueState({ issueId: ISSUE_ID, stateName: 'In Review', token: TOKEN, fetchImpl: stubFetch as typeof fetch }),
+    (e: Error) => {
+      assert.ok(!e.message.includes(TOKEN), 'token must not appear in error message');
       return true;
     },
   );
