@@ -96,6 +96,23 @@ export function resolveConnection(
   return null;
 }
 
+/** One-call convenience over the broker: load a project's specs, resolve `provider`, and return a live
+ *  token string (awaiting the Nango thunk when present), or null if not connected. The dispatch path
+ *  (provider 'github') and the Linear reply path both use this so neither re-implements the
+ *  specs→resolve→await-thunk dance. Auth-mode-agnostic: oauth/pat/app all surface as a token string. */
+export async function resolveProviderToken(
+  db: D1Like | undefined,
+  binding: Binding,
+  env: Record<string, unknown>,
+  provider: string,
+  deps: { fetchToken?: typeof fetchToken } = {},
+): Promise<string | null> {
+  const specs = await loadConnectionSpecs(db, binding);
+  const resolved = resolveConnection(specs, env, provider, deps);
+  if (!resolved) return null;
+  return typeof resolved.secret === 'string' ? resolved.secret : await resolved.secret();
+}
+
 // ── D1 metadata layer (operator-provisioned, no redeploy) ───────────────────────────────────────
 
 export interface ConnectionRecord {
