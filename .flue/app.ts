@@ -29,10 +29,10 @@ import { postConnectionNotice } from '../src/connections/notices';
 import { handleInternalWorkItemRequest } from '../src/workbench/gateway';
 import { handleSourceChangeRunCallback } from '../src/workbench/source-change';
 import { handleLinearComment, handleLinearWebhook } from '../src/agent-runs/linear';
-import { handleAgentRunCallback } from '../src/agent-runs/repository';
+import { handleAgentRunCallback, type AgentRun } from '../src/agent-runs/repository';
 import { moveLinearIssueState, postLinearComment, replyTextForCallback } from '../src/agent-runs/linear-reply';
 import { reconcileAgentRuns } from '../src/agent-runs/dispatch';
-import { loadConnectionSpecs, resolveConnection } from '../src/connections/repository';
+import { resolveProviderToken } from '../src/connections/repository';
 import { activateAgentRunRoute, disableAgentRunRoute } from '../src/agent-runs/events';
 import { handleNangoForwardWebhook } from '../src/agent-runs/provider-events';
 
@@ -184,6 +184,23 @@ app.post('/__internal/source-change-runs', async (c) => {
   return c.json(result.body ?? {}, result.status as 200 | 400 | 500);
 });
 
+// Per-run GitHub token for dispatch: resolve the run's project binding, then its 'github' connection
+// (App installation token via the broker — see M0c plan). Preferred over RUNNER_GITHUB_PAT_TEMP; a null
+// (no connection) falls back to the PAT in resolveDispatchGithubToken. Fresh per attempt (not persisted).
+const makeGithubTokenResolver = (env: Env) => async (run: AgentRun): Promise<string | null> => {
+  try {
+    const binding = await bindingByProject(run.projectId, env.DB);
+    if (!binding) return null;
+    // `await` so a rejected Nango thunk (e.g. a stale/dead connectionRef) is caught here, not thrown
+    // up into the dispatch. A broken connection must NOT fail the run — fall back to the transition
+    // PAT (resolveDispatchGithubToken treats null as "use deps.githubToken").
+    return await resolveProviderToken(env.DB, binding, env as unknown as Record<string, unknown>, 'github');
+  } catch (e) {
+    console.error('[agent-runs] github token resolution failed, falling back to PAT (best-effort):', e instanceof Error ? e.message : e);
+    return null;
+  }
+};
+
 // Linear is the team-facing baton for coding-agent work. The gateway verifies Linear's raw-body
 // HMAC and turns only "Issue transitioned into Run Agent" into an agent_run lease. The external
 // runner owns coding-agent/E2B/PR behavior; Hatchery only records dispatch and callback metadata.
@@ -206,7 +223,8 @@ app.post('/linear/webhook', async (c) => {
   const linearDeps = {
     triggerApiUrl: c.env.TRIGGER_API_URL ?? 'https://api.trigger.dev',
     triggerSecretKey: c.env.TRIGGER_SECRET_KEY,
-    githubToken: c.env.RUNNER_GITHUB_PAT_TEMP,
+    githubToken: c.env.RUNNER_GITHUB_PAT_TEMP, // transition fallback; resolveGithubToken is preferred
+    resolveGithubToken: makeGithubTokenResolver(c.env),
     runnerToken: c.env.AGENT_RUNNER_TOKEN,
     hatcheryPublicUrl: c.env.HATCHERY_PUBLIC_URL,
     botActorId: c.env.LINEAR_BOT_ACTOR_ID,
@@ -252,10 +270,9 @@ app.post('/__internal/agent-runs', async (c) => {
           if (!projectId) return;
           const binding = await bindingByProject(projectId, c.env.DB);
           if (!binding) return;
-          const specs = await loadConnectionSpecs(c.env.DB, binding);
-          const resolved = resolveConnection(specs, c.env as Record<string, unknown>, 'linear');
-          if (!resolved) return;
-          token = typeof resolved.secret === 'string' ? resolved.secret : await resolved.secret();
+          const resolvedToken = await resolveProviderToken(c.env.DB, binding, c.env as Record<string, unknown>, 'linear');
+          if (!resolvedToken) return;
+          token = resolvedToken;
         } catch (e) {
           console.error('[agent-runs] Linear token resolution failed (best-effort):', e instanceof Error ? e.message : e);
           return;
@@ -290,7 +307,8 @@ app.post('/__internal/agent-runs/reconcile', async (c) => {
   const summary = await reconcileAgentRuns(db, {
     triggerApiUrl: c.env.TRIGGER_API_URL ?? 'https://api.trigger.dev',
     triggerSecretKey: c.env.TRIGGER_SECRET_KEY,
-    githubToken: c.env.RUNNER_GITHUB_PAT_TEMP,
+    githubToken: c.env.RUNNER_GITHUB_PAT_TEMP, // transition fallback; resolveGithubToken is preferred
+    resolveGithubToken: makeGithubTokenResolver(c.env),
     runnerToken: c.env.AGENT_RUNNER_TOKEN,
     hatcheryPublicUrl: c.env.HATCHERY_PUBLIC_URL,
     fetch,
