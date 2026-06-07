@@ -176,6 +176,10 @@ export const runCodingTask = task({
         return { ok: true };
       }
 
+      // The cloud container has no git identity (local `trigger dev` inherits ~/.gitconfig), so set a
+      // deterministic one on the clone — otherwise `git commit` fails with "Please tell me who you are".
+      await execFile('git', ['-C', ws.dir, 'config', 'user.email', 'runner@hatchery.dev']);
+      await execFile('git', ['-C', ws.dir, 'config', 'user.name', 'Hatchery Runner']);
       const commitMsg = d.issue?.title ?? ('Hatchery run ' + d.runId);
       await execFile('git', ['-C', ws.dir, 'commit', '-m', commitMsg]);
       const { stdout: shaOut } = await execFile('git', ['-C', ws.dir, 'rev-parse', 'HEAD']);
