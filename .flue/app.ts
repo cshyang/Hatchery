@@ -188,9 +188,17 @@ app.post('/__internal/source-change-runs', async (c) => {
 // (App installation token via the broker — see M0c plan). Preferred over RUNNER_GITHUB_PAT_TEMP; a null
 // (no connection) falls back to the PAT in resolveDispatchGithubToken. Fresh per attempt (not persisted).
 const makeGithubTokenResolver = (env: Env) => async (run: AgentRun): Promise<string | null> => {
-  const binding = await bindingByProject(run.projectId, env.DB);
-  if (!binding) return null;
-  return resolveProviderToken(env.DB, binding, env as unknown as Record<string, unknown>, 'github');
+  try {
+    const binding = await bindingByProject(run.projectId, env.DB);
+    if (!binding) return null;
+    // `await` so a rejected Nango thunk (e.g. a stale/dead connectionRef) is caught here, not thrown
+    // up into the dispatch. A broken connection must NOT fail the run — fall back to the transition
+    // PAT (resolveDispatchGithubToken treats null as "use deps.githubToken").
+    return await resolveProviderToken(env.DB, binding, env as unknown as Record<string, unknown>, 'github');
+  } catch (e) {
+    console.error('[agent-runs] github token resolution failed, falling back to PAT (best-effort):', e instanceof Error ? e.message : e);
+    return null;
+  }
 };
 
 // Linear is the team-facing baton for coding-agent work. The gateway verifies Linear's raw-body
