@@ -97,6 +97,9 @@ async function fileExists(p: string): Promise<boolean> {
 
 export const runCodingTask = task({
   id: 'run-coding-task',
+  // pi/GLM coding runs OOM the default small-1x (0.5GB) — confirmed TASK_PROCESS_OOM_KILLED on a
+  // blogpost task. Trying small-2x (1GB); bump to medium-2x (4GB) if a real task still OOMs.
+  machine: 'small-2x',
   maxDuration: 2700, // matches the config default; a maxDuration kill skips cleanup — Hatchery's reaper closes the run.
   run: async (raw) => {
     const d = v.parse(RunnerDispatchSchema, raw);                 // consumer↔contract assertion
