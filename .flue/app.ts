@@ -30,7 +30,7 @@ import { handleInternalWorkItemRequest } from '../src/workbench/gateway';
 import { handleSourceChangeRunCallback } from '../src/workbench/source-change';
 import { handleLinearComment, handleLinearWebhook } from '../src/agent-runs/linear';
 import { handleAgentRunCallback } from '../src/agent-runs/repository';
-import { postLinearComment, replyTextForCallback } from '../src/agent-runs/linear-reply';
+import { moveLinearIssueState, postLinearComment, replyTextForCallback } from '../src/agent-runs/linear-reply';
 import { reconcileAgentRuns } from '../src/agent-runs/dispatch';
 import { loadConnectionSpecs, resolveConnection } from '../src/connections/repository';
 import { activateAgentRunRoute, disableAgentRunRoute } from '../src/agent-runs/events';
@@ -49,6 +49,7 @@ interface Env {
   CODING_RUNNER_URL?: string; // generic source-change runner dispatch endpoint
   LINEAR_WEBHOOK_SECRET?: string; // Linear raw-body HMAC signing secret for /linear/webhook
   LINEAR_AGENT_PROJECTS?: string; // legacy one-release fallback; prefer agent_run_routes
+  LINEAR_PR_OPENED_STATE?: string; // workflow state to move the issue to on PR-opened (default "In Review"); needs Linear write scope
   LINEAR_API_KEY?: string; // reserved for gateway-owned Linear status comments; never exposed to the model
   AGENT_RUNNER_URL?: string; // generic E2B-backed coding runner dispatch endpoint (legacy; superseded by Trigger.dev)
   AGENT_RUNNER_TOKEN?: string; // dedicated secret for agent-run dispatch and callbacks
@@ -241,6 +242,11 @@ app.post('/__internal/agent-runs', async (c) => {
       // finishes — a bare async IIFE can be cancelled when the response returns. Matches the
       // dispatch pattern above. Still best-effort: the inner try/catch swallows all failures.
       c.executionCtx.waitUntil((async () => {
+        // Resolve the project's Linear token once, then run the comment and (on pr_opened) the
+        // status move as INDEPENDENT best-effort writes: they need different scopes (comments:create
+        // vs write), so a comment that works under comments:create must not be blocked by a status
+        // move that needs write. A Linear failure never changes the HTTP response (already sent).
+        let token: string;
         try {
           const projectId = result.body?.run?.projectId;
           if (!projectId) return;
@@ -249,10 +255,23 @@ app.post('/__internal/agent-runs', async (c) => {
           const specs = await loadConnectionSpecs(c.env.DB, binding);
           const resolved = resolveConnection(specs, c.env as Record<string, unknown>, 'linear');
           if (!resolved) return;
-          const token = typeof resolved.secret === 'string' ? resolved.secret : await resolved.secret();
+          token = typeof resolved.secret === 'string' ? resolved.secret : await resolved.secret();
+        } catch (e) {
+          console.error('[agent-runs] Linear token resolution failed (best-effort):', e instanceof Error ? e.message : e);
+          return;
+        }
+        try {
           await postLinearComment({ issueId: reply.issueId, body: text, token, fetchImpl: fetch });
         } catch (e) {
           console.error('[agent-runs] Linear comment post failed (best-effort):', e instanceof Error ? e.message : e);
+        }
+        if (reply.type === 'pr_opened') {
+          const stateName = (typeof c.env.LINEAR_PR_OPENED_STATE === 'string' && c.env.LINEAR_PR_OPENED_STATE.trim()) || 'In Review';
+          try {
+            await moveLinearIssueState({ issueId: reply.issueId, stateName, token, fetchImpl: fetch });
+          } catch (e) {
+            console.error('[agent-runs] Linear status move failed (best-effort):', e instanceof Error ? e.message : e);
+          }
         }
       })());
     }
