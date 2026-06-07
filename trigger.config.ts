@@ -4,6 +4,7 @@ import { aptGet, additionalPackages, additionalFiles } from '@trigger.dev/build/
 export default defineConfig({
   project: 'proj_vmlezgoianzbhanptfog',
   dirs: ['./trigger'],
+  runtime: 'node-22', // pi-coding-agent requires node >=22.19; Trigger's default "node" image is 21.x → pi crashes on require(ESM).
   maxDuration: 2700, // seconds; 45 min. Hatchery's 3h reaper is the backstop (a maxDuration kill skips cleanup hooks).
   build: {
     // Cloud runner (`trigger deploy` → Debian 12 container). `trigger dev` ignores these — locally
