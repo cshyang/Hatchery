@@ -137,8 +137,10 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   const model = resolveModel(binding.model);
   const codingRunnerUrl = typeof env.CODING_RUNNER_URL === 'string' ? env.CODING_RUNNER_URL : '';
   const workbenchRunnerToken = typeof env.WORKBENCH_RUNNER_TOKEN === 'string' ? env.WORKBENCH_RUNNER_TOKEN : '';
-  const agentRunnerUrl = typeof env.AGENT_RUNNER_URL === 'string' ? env.AGENT_RUNNER_URL : '';
   const agentRunnerToken = typeof env.AGENT_RUNNER_TOKEN === 'string' ? env.AGENT_RUNNER_TOKEN : '';
+  const triggerSecretKey = typeof env.TRIGGER_SECRET_KEY === 'string' ? env.TRIGGER_SECRET_KEY : '';
+  const runnerGithubToken = typeof env.RUNNER_GITHUB_PAT_TEMP === 'string' ? env.RUNNER_GITHUB_PAT_TEMP : '';
+  const hatcheryPublicUrl = typeof env.HATCHERY_PUBLIC_URL === 'string' ? env.HATCHERY_PUBLIC_URL : '';
 
   const tools: ToolDefinition[] = [
     replyToConversation,
@@ -152,7 +154,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       hasHeartbeatToken: !!heartbeatToken,
       hasBotToken: !!botToken,
       hasCodingRunner: !!codingRunnerUrl && !!workbenchRunnerToken,
-      hasAgentRunner: !!agentRunnerUrl && !!agentRunnerToken,
+      hasAgentRunner: !!triggerSecretKey && !!agentRunnerToken && !!runnerGithubToken && !!hatcheryPublicUrl,
       hasLinearAgentIngress: typeof env.LINEAR_WEBHOOK_SECRET === 'string',
       canRequestConnections: connectionRuntime.canRequestConnections,
       providerCatalog: connectionRuntime.providerCatalog,
