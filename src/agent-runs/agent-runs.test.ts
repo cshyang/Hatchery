@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
 import type { D1Like } from '../skills/repository';
 import { claimRunForDispatch, createAgentRun, findLatestRunByLinearIssue, getActiveAgentRunByBranch, getAgentRun, getAgentRunById, handleAgentRunCallback, updateAgentRun } from './repository';
-import { buildRunnerDispatch, claimAndDispatchRun, DISPATCH_MAX_ATTEMPTS, reconcileAgentRuns } from './dispatch';
+import { buildRunnerDispatch, claimAndDispatchRun, DISPATCH_MAX_ATTEMPTS, reconcileAgentRuns, resolveDispatchGithubToken } from './dispatch';
 import type { AgentRun } from './repository';
 
 const { test, run } = createTestRunner();
@@ -620,6 +620,55 @@ test('buildRunnerDispatch on a payload with an unsupported runtime fails termina
   const run = await getAgentRunById(db, created.run.id);
   assert.equal(run?.status, 'failed');
   assert.equal(run?.dispatchAttempts, 1, 'one attempt, no pointless requeue');
+});
+
+// ── GitHub token resolution at dispatch (M0c) ────────────────────────────────
+// The github token is a send-time injection (never persisted): resolveDispatchGithubToken prefers the
+// per-run connection token (App installation token via the broker), falling back to the transition PAT.
+
+test('resolveDispatchGithubToken: the per-run connection token wins over the PAT fallback', async () => {
+  const token = await resolveDispatchGithubToken(runWith(initialDispatchPayload), { githubToken: 'pat_fallback', resolveGithubToken: async () => 'ghs_app' });
+  assert.equal(token, 'ghs_app');
+});
+
+test('resolveDispatchGithubToken: falls back to the PAT when the resolver yields null', async () => {
+  const token = await resolveDispatchGithubToken(runWith(initialDispatchPayload), { githubToken: 'pat_fallback', resolveGithubToken: async () => null });
+  assert.equal(token, 'pat_fallback');
+});
+
+test('resolveDispatchGithubToken: null when neither a connection token nor a PAT is available', async () => {
+  const token = await resolveDispatchGithubToken(runWith(initialDispatchPayload), { resolveGithubToken: async () => null });
+  assert.equal(token, null);
+});
+
+test('claimAndDispatchRun: a resolver counts as configured and its token reaches the dispatch payload (no PAT)', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const created = await createAgentRun(db, dispatchableInput, deps);
+  let sentToken: string | undefined;
+  const capturingFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    sentToken = (JSON.parse(String(init?.body)) as { payload: { githubToken: string } }).payload.githubToken;
+    return new Response(JSON.stringify({ id: 'run_x' }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const noPatWithResolver = { triggerApiUrl: 'https://trigger.test', triggerSecretKey: 'tr_secret', runnerToken: 'rt', hatcheryPublicUrl: 'https://hatchery.test', resolveGithubToken: async () => 'ghs_app', fetch: capturingFetch };
+
+  const result = await claimAndDispatchRun(db, created.run.id, noPatWithResolver, deps);
+
+  assert.equal(result.dispatched, true, 'a configured resolver is enough — no RUNNER_GITHUB_PAT_TEMP needed');
+  assert.equal(sentToken, 'ghs_app', 'the resolved connection token is what the runner receives');
+});
+
+test('claimAndDispatchRun: no connection token and no PAT → requeued with a clear "no github credential" error', async () => {
+  const db = new FakeD1();
+  const deps = seq();
+  const created = await createAgentRun(db, dispatchableInput, deps);
+  const noCred = { triggerApiUrl: 'https://trigger.test', triggerSecretKey: 'tr_secret', runnerToken: 'rt', hatcheryPublicUrl: 'https://hatchery.test', resolveGithubToken: async () => null, fetch: okFetch };
+
+  const result = await claimAndDispatchRun(db, created.run.id, noCred, deps);
+
+  assert.equal(result.status, 'queued', 'retryable — self-heals when the project connects a GitHub App');
+  const run = await getAgentRunById(db, created.run.id);
+  assert.match(String(run?.lastDispatchError), /no github credential/);
 });
 
 // ── Reconciler ───────────────────────────────────────────────────────────────
