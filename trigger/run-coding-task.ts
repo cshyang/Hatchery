@@ -54,7 +54,15 @@ function runPi(opts: { args: string[]; cwd: string; prompt: string }): Promise<{
   return new Promise((resolve, reject) => {
     const child = spawn('pi', opts.args, {
       cwd: opts.cwd,
-      env: { ...process.env, PI_OFFLINE: '1', PI_SKIP_VERSION_CHECK: '1' },
+      // Deploy: pi is installed via additionalPackages into the bundle's node_modules/.bin, which
+      // isn't guaranteed on PATH — a bare spawn('pi') would ENOENT in the container. Prepend it.
+      // (Local `trigger dev` still resolves the global pi via the inherited PATH appended after.)
+      env: {
+        ...process.env,
+        PATH: `${path.join(process.cwd(), 'node_modules/.bin')}:${process.env.PATH ?? ''}`,
+        PI_OFFLINE: '1',
+        PI_SKIP_VERSION_CHECK: '1',
+      },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 

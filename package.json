@@ -28,6 +28,7 @@
   },
   "devDependencies": {
     "@flue/cli": "^0.9.1",
+    "@trigger.dev/build": "^4.4.6",
     "trigger.dev": "^4.4.6",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
