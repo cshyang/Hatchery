@@ -10,3 +10,6 @@ dist/
 
 # Trigger.dev CLI build/cache dir
 .trigger/
+
+# scratch verification probes
+/verify-*.ts
