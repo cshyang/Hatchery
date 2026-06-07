@@ -51,8 +51,8 @@ interface Env {
   LINEAR_AGENT_PROJECTS?: string; // legacy one-release fallback; prefer agent_run_routes
   LINEAR_PR_OPENED_STATE?: string; // workflow state to move the issue to on PR-opened (default "In Review"); needs Linear write scope
   LINEAR_API_KEY?: string; // reserved for gateway-owned Linear status comments; never exposed to the model
-  AGENT_RUNNER_URL?: string; // generic E2B-backed coding runner dispatch endpoint (legacy; superseded by Trigger.dev)
-  AGENT_RUNNER_TOKEN?: string; // dedicated secret for agent-run dispatch and callbacks
+  AGENT_RUNNER_URL?: string; // legacy generic runner dispatch endpoint; superseded by Trigger.dev
+  AGENT_RUNNER_TOKEN?: string; // dedicated secret for agent-run callbacks
   HATCHERY_PUBLIC_URL?: string; // absolute origin Trigger.dev calls back to (REQUIRED for coding dispatch)
   TRIGGER_SECRET_KEY?: string; // Trigger.dev secret key (Bearer) for the coding-task dispatch
   TRIGGER_API_URL?: string; // Trigger.dev REST base URL; defaults to https://api.trigger.dev

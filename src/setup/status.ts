@@ -252,7 +252,11 @@ function routeMatches(
 
 function runnerSummary(env: Record<string, unknown>): SetupRunnerSummary {
   return {
-    configured: hasEnvString(env, 'AGENT_RUNNER_URL') && hasEnvString(env, 'AGENT_RUNNER_TOKEN'),
+    configured:
+      hasEnvString(env, 'TRIGGER_SECRET_KEY') &&
+      hasEnvString(env, 'AGENT_RUNNER_TOKEN') &&
+      hasEnvString(env, 'RUNNER_GITHUB_PAT_TEMP') &&
+      hasEnvString(env, 'HATCHERY_PUBLIC_URL'),
     runtime: DEFAULT_RUNNER_RUNTIME,
     sandboxProvider: DEFAULT_SANDBOX_PROVIDER,
   };

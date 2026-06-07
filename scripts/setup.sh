@@ -80,7 +80,7 @@ secrets() {
   fi
   # Bulk file holds only the keys that are actually set (blanks skipped → feature stays inert).
   HEARTBEAT_TOKEN="$HEARTBEAT_TOKEN" node -e '
-    const keys=["ZAI_API_KEY","HEARTBEAT_TOKEN","SLACK_SIGNING_SECRET","SLACK_BOT_TOKEN_DEFAULT","KNOWN_TEAM_IDS","SLACK_BOT_ID","SLACK_DEFAULT_TOKEN_REF","ADMIN_CONNECTIONS_TOKEN","NANGO_SECRET_KEY","NANGO_WEBHOOK_SECRET","LINEAR_WEBHOOK_SECRET","AGENT_RUNNER_URL","AGENT_RUNNER_TOKEN","HATCHERY_PUBLIC_URL","LINEAR_AGENT_PROJECTS","WORKBENCH_RUNNER_TOKEN","CODING_RUNNER_URL"];
+    const keys=["ZAI_API_KEY","HEARTBEAT_TOKEN","SLACK_SIGNING_SECRET","SLACK_BOT_TOKEN_DEFAULT","KNOWN_TEAM_IDS","SLACK_BOT_ID","SLACK_DEFAULT_TOKEN_REF","ADMIN_CONNECTIONS_TOKEN","NANGO_SECRET_KEY","NANGO_WEBHOOK_SECRET","LINEAR_WEBHOOK_SECRET","TRIGGER_SECRET_KEY","TRIGGER_API_URL","AGENT_RUNNER_TOKEN","HATCHERY_PUBLIC_URL","RUNNER_GITHUB_PAT_TEMP","LINEAR_AGENT_PROJECTS","WORKBENCH_RUNNER_TOKEN","CODING_RUNNER_URL"];
     const out={}; for(const k of keys){const v=process.env[k]; if(v&&String(v).trim()) out[k]=String(v);}
     require("fs").writeFileSync(process.env.BULK_FILE, JSON.stringify(out));
   ' BULK_FILE="$BULK_FILE"
@@ -109,8 +109,9 @@ checklist() {
               then: ./scripts/setup.sh secrets
   [ ] Nango   create integrations named EXACTLY  github  linear  notion
               webhook URL → <URL>/nango/webhook
-  [ ] Linear  webhook URL → <URL>/linear/webhook ; enable Issue events
-  [ ] Runner  point AGENT_RUNNER_URL at your E2B/OpenCode runner ; re-run secrets
+	  [ ] Linear  webhook URL → <URL>/linear/webhook ; enable Issue + Comment events
+	  [ ] Runner  create/deploy the Trigger.dev run-coding-task ; set TRIGGER_SECRET_KEY,
+	              AGENT_RUNNER_TOKEN, HATCHERY_PUBLIC_URL, RUNNER_GITHUB_PAT_TEMP ; re-run secrets
 ──────────────────────────────────────────────────────────────────────────
 EOF
 }
