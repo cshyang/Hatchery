@@ -10,6 +10,7 @@ import { createTestRunner } from '../shared/test-utils';
 import {
   connectionState,
   resolveConnection,
+  resolveProviderToken,
   loadConnections,
   loadConnectionSpecs,
   upsertConnection,
@@ -330,6 +331,25 @@ test('resolveConnection: Nango connectionRef uses config.nangoIntegrationKey whe
 
 test('resolveConnection: connectionRef but NO platform key → null (no broken tool)', async () => {
   assert.equal(resolveConnection(NANGO_REF, {}, 'notion'), null);
+});
+
+// ── resolveProviderToken (one-call convenience: loadConnectionSpecs → resolveConnection → token) ──
+// Used by the dispatch path (github) and the Linear reply path: resolve a provider's live token in one
+// await, awaiting the Nango thunk when present. Auth-mode-agnostic (oauth/pat/app all return a string).
+
+test('resolveProviderToken: returns a literal Worker-secret token (no db → binding seed)', async () => {
+  const token = await resolveProviderToken(undefined, binding(GH), { GITHUB_PAT_DEMO: 'ghp_lit' }, 'github');
+  assert.equal(token, 'ghp_lit');
+});
+
+test('resolveProviderToken: awaits the Nango thunk and returns the live token', async () => {
+  const fakeFetchToken = async () => 'live_at_777';
+  const token = await resolveProviderToken(undefined, binding(NANGO_REF), { NANGO_SECRET_KEY: 'nk' }, 'notion', { fetchToken: fakeFetchToken });
+  assert.equal(token, 'live_at_777');
+});
+
+test('resolveProviderToken: null when the provider is not connected', async () => {
+  assert.equal(await resolveProviderToken(undefined, binding([]), {}, 'github'), null);
 });
 
 test('a Nango-backed notion connection builds notion_call_api whose execute resolves the lazy token', async () => {
