@@ -1,15 +1,15 @@
-export type ConnectionAuthMode = 'oauth' | 'pat';
+export type ConnectionAuthMode = 'oauth' | 'pat' | 'app';
 
 export type NangoIntegrationKeys = Record<string, string | Partial<Record<ConnectionAuthMode, string>>>;
 
 const DEFAULT_KEYS: Record<string, Partial<Record<ConnectionAuthMode, string>>> = {
-  github: { oauth: 'github', pat: 'github-pat' },
+  github: { oauth: 'github', pat: 'github-pat', app: 'github-app' },
   linear: { oauth: 'linear' },
   notion: { oauth: 'notion' },
 };
 
 const AUTH_MODES: Record<string, ConnectionAuthMode[]> = {
-  github: ['oauth', 'pat'],
+  github: ['oauth', 'pat', 'app'],
   linear: ['oauth'],
   notion: ['oauth'],
 };
@@ -43,7 +43,7 @@ export function parseNangoIntegrationKeys(raw: unknown): NangoIntegrationKeys {
     }
     if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
     const modes: Partial<Record<ConnectionAuthMode, string>> = {};
-    for (const mode of ['oauth', 'pat'] as const) {
+    for (const mode of ['oauth', 'pat', 'app'] as const) {
       const key = clean((value as Record<string, unknown>)[mode]);
       if (key) modes[mode] = key;
     }
@@ -58,7 +58,7 @@ export function supportedAuthModes(provider: string): ConnectionAuthMode[] {
 
 export function normalizeAuthMode(provider: string, value: unknown): ConnectionAuthMode | null {
   const mode = (clean(value) ?? 'oauth').toLowerCase();
-  if (mode !== 'oauth' && mode !== 'pat') return null;
+  if (mode !== 'oauth' && mode !== 'pat' && mode !== 'app') return null;
   return supportedAuthModes(provider).includes(mode) ? mode : null;
 }
 
