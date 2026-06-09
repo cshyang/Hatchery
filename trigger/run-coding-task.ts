@@ -1,13 +1,17 @@
 import { spawn, execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
-import { readFile, access } from 'node:fs/promises';
+import { readFile, access, mkdir, cp, appendFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { task } from '@trigger.dev/sdk';
 import * as v from 'valibot';
 import { RunnerDispatchSchema, RUNNER_CONTRACT_VERSION, type RunnerDispatch, type RunnerCallback } from '../src/agent-runs/runner-contract';
 import { localWorkspace, type Workspace } from './workspace/provider';
 import { parseOwnerRepo, pushBranch, openOrUpdatePullRequest } from './github';
+import { PiRpcClient, parsePiStream, type PiOutcome } from './pi-rpc-client';
+
+// parsePiStream lives in pi-rpc-client (shared by both runtimes); re-export keeps existing importers working.
+export { parsePiStream };
 
 const execFile = promisify(execFileCb);
 
@@ -43,8 +47,85 @@ export function runBranchName(d: Pick<RunnerDispatch, 'targetBranch' | 'issue' |
 }
 
 // ---------------------------------------------------------------------------
+// Capability extensions
+// ---------------------------------------------------------------------------
+
+/**
+ * pi packages loaded into the runner (bundled at deploy via trigger.config additionalPackages).
+ * ask-user is intentionally absent: it blocks on human input and would hang a `pi -p` run.
+ * web-access/mcp-adapter need network — runPi no longer sets PI_OFFLINE.
+ */
+const RUNNER_PI_EXTENSIONS = ['pi-subagents', 'pi-web-access', 'pi-mcp-adapter', '@jerryan/pi-todo-lite'] as const;
+
+/** Absolute extension entry paths declared by a package manifest's `pi.extensions`. */
+export function extensionEntriesFromManifest(pkgDir: string, pi: { extensions?: string[] } | undefined): string[] {
+  return (pi?.extensions ?? []).map((rel) => path.resolve(pkgDir, rel));
+}
+
+/** Turn resolved extension entry paths into pi `-e <path>` CLI args. */
+export function extensionFlags(entryPaths: string[]): string[] {
+  return entryPaths.flatMap((p) => ['-e', p]);
+}
+
+/**
+ * Resolve `-e` flags for the bundled extensions from the container's `node_modules` (where
+ * additionalPackages installs them — same root the spawn PATH already assumes). Unresolvable
+ * packages are skipped with a warning: under `trigger dev` additionalPackages is ignored, so the
+ * dev-machine pi falls back to its own ~/.pi settings.json packages instead.
+ */
+async function resolveExtensionFlags(): Promise<string[]> {
+  const root = path.join(process.cwd(), 'node_modules');
+  const entries: string[] = [];
+  for (const pkg of RUNNER_PI_EXTENSIONS) {
+    try {
+      const pkgDir = path.join(root, pkg);
+      const manifest = JSON.parse(await readFile(path.join(pkgDir, 'package.json'), 'utf8')) as {
+        pi?: { extensions?: string[] };
+      };
+      entries.push(...extensionEntriesFromManifest(pkgDir, manifest.pi));
+    } catch {
+      console.warn(`[runner] extension ${pkg} not resolvable under ${root} (expected with \`trigger dev\`); skipping -e`);
+    }
+  }
+  return extensionFlags(entries);
+}
+
+/**
+ * Make the kit's subagents discoverable by pi-subagents. Discovery is project-scoped from pi's cwd
+ * (the clone) → `<clone>/.pi/agents`. Since the runner does `git add -A`, `.pi/` is added to the
+ * clone's local git exclude so the kit never leaks into the PR (the repo's tracked .gitignore is untouched).
+ */
+async function installKitAgents(wsDir: string, kitDir: string): Promise<void> {
+  const agentsSrc = path.join(kitDir, 'agents');
+  if (!(await fileExists(agentsSrc))) {
+    console.warn(`[runner] kit has no agents/ dir at ${agentsSrc}; subagent delegation will use builtins only`);
+    return;
+  }
+  await mkdir(path.join(wsDir, '.pi'), { recursive: true });
+  await cp(agentsSrc, path.join(wsDir, '.pi', 'agents'), { recursive: true });
+  await appendFile(
+    path.join(wsDir, '.git', 'info', 'exclude'),
+    '\n# Hatchery runner kit — not part of the change\n.pi/\n',
+  );
+}
+
+// ---------------------------------------------------------------------------
 // pi invocation
 // ---------------------------------------------------------------------------
+
+/**
+ * Env overrides shared by both runtimes (CLI spawn + RPC client).
+ * - PATH: deploy installs pi via additionalPackages into the bundle's node_modules/.bin, not guaranteed
+ *   on PATH; prepend it. (Local `trigger dev` falls through to the global pi.)
+ * - Offline is intentionally NOT set: web-access/mcp-adapter need the network. This widens the runner's
+ *   network surface (SSRF/exfil from untrusted repo content) — see threat-model TODO.
+ */
+function piEnvOverrides(): Record<string, string> {
+  return {
+    PATH: `${path.join(process.cwd(), 'node_modules/.bin')}:${process.env.PATH ?? ''}`,
+    PI_SKIP_VERSION_CHECK: '1',
+  };
+}
 
 /**
  * Run `pi -p` as a child process. Prompt is written to stdin (ending stdin avoids a no-input login hang).
@@ -54,15 +135,7 @@ function runPi(opts: { args: string[]; cwd: string; prompt: string }): Promise<{
   return new Promise((resolve, reject) => {
     const child = spawn('pi', opts.args, {
       cwd: opts.cwd,
-      // Deploy: pi is installed via additionalPackages into the bundle's node_modules/.bin, which
-      // isn't guaranteed on PATH — a bare spawn('pi') would ENOENT in the container. Prepend it.
-      // (Local `trigger dev` still resolves the global pi via the inherited PATH appended after.)
-      env: {
-        ...process.env,
-        PATH: `${path.join(process.cwd(), 'node_modules/.bin')}:${process.env.PATH ?? ''}`,
-        PI_OFFLINE: '1',
-        PI_SKIP_VERSION_CHECK: '1',
-      },
+      env: { ...process.env, ...piEnvOverrides() },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -93,6 +166,67 @@ async function fileExists(p: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Runtime selection: CLI (-p, default, prod-proven) vs RPC (opt-in, being proven in-container)
+// ---------------------------------------------------------------------------
+
+export type PiRuntime = 'cli' | 'rpc';
+
+/**
+ * Which pi runtime to drive. Default 'cli' (the prod-proven path); set HATCHERY_PI_RUNTIME=rpc to A/B
+ * the RPC client on real runs before promoting it. Env-based so it flips per deploy without a contract change.
+ */
+export function piRuntime(env: NodeJS.ProcessEnv = process.env): PiRuntime {
+  return env.HATCHERY_PI_RUNTIME === 'rpc' ? 'rpc' : 'cli';
+}
+
+export interface AgentRun {
+  outcome: PiOutcome;
+  exitCode: number; // CLI exit code; 0 for RPC (death/timeout reject inside runPrompt instead)
+  stderr: string;
+}
+
+export interface AgentRunOpts {
+  cwd: string;
+  prompt: string;
+  provider: string;
+  model: string;
+  /** Shared startup flags after provider/model: --thinking, --no-session, -e <ext>, --skill, --append-system-prompt. */
+  commonArgs: string[];
+  timeoutMs: number;
+}
+
+/** CLI path: one-shot `pi -p --mode json`; outcome parsed from the buffered JSON stream. */
+async function runAgentViaCli(o: AgentRunOpts): Promise<AgentRun> {
+  const args = ['-p', '--mode', 'json', '--provider', o.provider, '--model', o.model, ...o.commonArgs];
+  const r = await runPi({ args, cwd: o.cwd, prompt: o.prompt });
+  return { outcome: parsePiStream(r.stdout), exitCode: r.code, stderr: r.stderr };
+}
+
+/** RPC path: long-lived `pi --mode rpc` session; runPrompt rejects on process death/timeout. */
+async function runAgentViaRpc(o: AgentRunOpts): Promise<AgentRun> {
+  const client = new PiRpcClient({
+    command: 'pi',
+    cwd: o.cwd,
+    env: piEnvOverrides(),
+    provider: o.provider,
+    model: o.model,
+    args: o.commonArgs,
+  });
+  await client.start();
+  try {
+    const outcome = await client.runPrompt(o.prompt, { timeoutMs: o.timeoutMs });
+    return { outcome, exitCode: 0, stderr: client.getStderr() };
+  } finally {
+    await client.stop().catch(() => {});
+  }
+}
+
+/** Run the coding agent via the selected runtime. */
+export function runAgent(runtime: PiRuntime, opts: AgentRunOpts): Promise<AgentRun> {
+  return runtime === 'rpc' ? runAgentViaRpc(opts) : runAgentViaCli(opts);
 }
 
 export const runCodingTask = task({
@@ -141,28 +275,39 @@ export const runCodingTask = task({
       }
       // continuation: the clone is already on d.targetBranch — nothing to do.
 
+      // --- Kit subagents (project-scope discovery from pi's cwd; excluded from the commit) ---
+      await installKitAgents(ws.dir, kitDir);
+
       // --- Prompt ---
       const prompt = d.targetBranch
         ? (d.feedback ?? '')
         : `${d.issue?.title ?? ''}\n\n${d.issue?.description ?? ''}`.trim();
 
-      // --- Run pi (single pass: policy + the two skills + the task prompt) ---
-      const piArgs = [
-        '-p',
-        '--mode', 'json',
-        '--provider', 'zai',
-        '--model', 'glm-5.1',
-        '--thinking', 'high',
-        '--no-session',
-        '--skill', testEvidenceSkill,
-        '--skill', prSummarySkill,
-        '--append-system-prompt', policyText,
-      ];
-      const piResult = await runPi({ args: piArgs, cwd: ws.dir, prompt });
-      if (piResult.code !== 0) {
-        // LIVE-UNVERIFIED: relies on pi -p exiting non-zero on failure; if it exits 0 on error,
-        // switch to parsing the --mode json event stream.
-        throw new Error(`pi exited with code ${piResult.code}: ${piResult.stderr.slice(-500)}`);
+      // --- Run the agent via the selected runtime (single pass: extensions + skills + policy + prompt) ---
+      const runtime = piRuntime();
+      const run = await runAgent(runtime, {
+        cwd: ws.dir,
+        prompt,
+        provider: 'zai',
+        model: 'glm-5.1',
+        commonArgs: [
+          '--thinking', 'high',
+          '--no-session',
+          ...(await resolveExtensionFlags()),
+          '--skill', testEvidenceSkill,
+          '--skill', prSummarySkill,
+          '--append-system-prompt', policyText,
+        ],
+        timeoutMs: 1_500_000, // 25 min, under the task maxDuration so a stuck RPC run fails cleanly
+      });
+      // Exit code is not trustworthy — pi exits 0 even when the model call errored (verified: a bad
+      // model id returns HTTP 400, stopReason "error", exit 0). Require positive evidence of a clean
+      // finish: a terminal agent_end whose final assistant turn did not stop with an error.
+      if (run.exitCode !== 0 || !run.outcome.completed || run.outcome.errored) {
+        const detail = run.outcome.errorMessage ?? run.outcome.finalText ?? run.stderr.slice(-500);
+        throw new Error(
+          `pi run failed (runtime=${runtime}, exit=${run.exitCode}, completed=${run.outcome.completed}, errored=${run.outcome.errored}): ${detail}`.slice(0, 800),
+        );
       }
 
       // --- Commit ---
