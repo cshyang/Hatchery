@@ -14,16 +14,17 @@
 
 ---
 
-## Status — SHIPPED ON OAUTH (2026-06-08)
+## Status — DONE, ON THE GITHUB APP (2026-06-09)
 
-Phase 1 code is **merged (`main` `f773a5b`) and deployed** (Worker `3bf7bbc8`). **Verified in prod:** EDK-1 (project `C0B7B03441X`) ran through the new path → resolved its **OAuth** GitHub connection (`c9074ec0`, push-verified) → PR #14 → completed → "In Review" + "🤖 PR opened" comment, opened as `cshyang`. The runner no longer uses the global `RUNNER_GITHUB_PAT_TEMP`; it resolves the project's connection (PAT remains the fallback). Extra hardening shipped: a broken/dead connectionRef falls back to the PAT instead of failing the dispatch.
+Phase 1 code is **merged to `main`, deployed via push-to-deploy CI** (`.github/workflows/deploy.yml`). **Verified in prod, twice:**
+- First on the project's **OAuth** connection (PR #14, opened as `cshyang`) — proved the runner resolves the project *connection* instead of the global `RUNNER_GITHUB_PAT_TEMP`.
+- Then on the **GitHub App** (the goal): EDK's D1 row repointed to the `github-app` connection (`6f159da3`, `nangoIntegrationKey: github-app`) → run → **PR #15 opened as `hatchery-runner[bot]`** via a short-lived (~1h) installation token (`contents:write`, `pull_requests:write`) scoped to `ecodarklabs/website`. No redeploy — D1-driven.
 
-**Deviation from plan:** shipped on the existing **OAuth** connection, not the GitHub **App**. The App path (Task 1.4) was abandoned after repeated setup friction — private-app install scope → made public → org install → the Nango connect flow never recorded a connection even after adding the Callback (`https://api.nango.dev/oauth/callback`) + Setup URLs. The `github-app` Nango integration EXISTS; it just has **no recorded connection** yet.
+**The App-connect saga (resolved, for future reference):** private-app → **Make public** (Advanced tab) → install on the org → Callback URL `https://api.nango.dev/oauth/callback` + the **Setup URL from the Nango integration page** → and the real unlock: the connect flow only records on a **fresh install**, so an already-installed app hangs on "Connecting…" forever. Fix = **uninstall → reconnect through the Nango link** (NOT GitHub's own Install button — Nango's link carries the `state`). Then bump the App's repo perms to `Contents`/`Pull requests: Read & write` + approve. ⚠️ `GET /repos.permissions.push` is a **false-negative for App tokens** — verify via the credential's `permissions` field or an actual write (create+delete a ref).
 
 **Still open:**
-- **App connect (resume Task 1.4):** get the `github-app` connection to actually record in Nango, then upsert it over the OAuth row for `C0B7B03441X` (`config {nangoIntegrationKey:'github-app'}`). Swaps in with **no redeploy** → bot identity + 1h scoped tokens.
-- **Task 1.5 (retire the PAT):** after the App lands (or once comfortable on OAuth). **Rotate `RUNNER_GITHUB_PAT_TEMP` regardless** (shared in chat).
-- **Phase 2 (self-serve `request_connection` app mode):** unbuilt.
+- **Task 1.5 (retire the PAT):** the App works, so `RUNNER_GITHUB_PAT_TEMP` is now pure fallback. Retire when comfortable; **rotate it regardless** (shared in chat). Projects `20168`/`demo` still reference their own (stale/PAT) github connections — they never run, but tidy them before fully removing the PAT.
+- **Phase 2 (self-serve `request_connection` app mode):** still unbuilt — the Slack agent can't yet *offer* "GitHub App" (only oauth/pat). Build Tasks 2.1+2.2 when you want self-serve onboarding.
 
 ## Verification findings (load-bearing facts — already confirmed, do not re-litigate)
 
