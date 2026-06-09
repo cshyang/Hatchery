@@ -423,6 +423,52 @@ export async function createAgentRunNotification(
   return { notification, duplicate: false };
 }
 
+export async function createAgentRunChannelNotifications(
+  db: D1Like,
+  input: {
+    projectId: string;
+    runId: string;
+    notificationType: string;
+    linearTargetRef?: string | null;
+    slackTargetRef?: string | null;
+  },
+  deps: ClockAndIds = {},
+): Promise<{
+  linear: { notification: AgentRunNotification; duplicate: boolean };
+  slack: { notification: AgentRunNotification; duplicate: boolean };
+}> {
+  const projectId = requireText(input.projectId, 'projectId', 256);
+  const runId = requireText(input.runId, 'runId', 256);
+  const notificationType = requireText(input.notificationType, 'notificationType', 128);
+  const linear = await createAgentRunNotification(
+    db,
+    {
+      projectId,
+      runId,
+      channel: 'linear',
+      notificationType,
+      dedupeKey: `notify:${runId}:${notificationType}:linear`,
+      targetRef: input.linearTargetRef ?? null,
+      status: 'pending',
+    },
+    deps,
+  );
+  const slack = await createAgentRunNotification(
+    db,
+    {
+      projectId,
+      runId,
+      channel: 'slack',
+      notificationType,
+      dedupeKey: `notify:${runId}:${notificationType}:slack`,
+      targetRef: input.slackTargetRef ?? null,
+      status: 'pending',
+    },
+    deps,
+  );
+  return { linear, slack };
+}
+
 async function activeConnection(db: D1Like, projectId: string, provider: string): Promise<ConnectionRow | null> {
   return db
     .prepare('SELECT provider, config_json FROM connections WHERE project_id=? AND provider=? AND status=\'active\'')

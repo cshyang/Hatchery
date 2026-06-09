@@ -105,8 +105,9 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     description:
       "Update the working note BEFORE slow, multi-step work (several searches/API calls before you can " +
       "answer) to show the person the SPECIFIC step you're on. Pass ackMessageTs so this replaces the generic " +
-      "'On it…' note in place (don't post a duplicate ack). Call it ONCE, up front, and only when you expect a " +
-      "wait — skip it for quick answers and for heartbeat/scheduled runs. Lead with an emoji. This is NOT your " +
+      "'On it…' note in place (don't post a duplicate ack). Use up to 3 meaningful phase updates for long turns, " +
+      "with human-readable activity like Checking the repo or Running tests; do not list raw tool names or argument dumps. " +
+      "Skip it for quick answers and for heartbeat/scheduled runs. Lead with an emoji. This is NOT your " +
       "reply: always send the actual answer via reply_to_conversation.",
     parameters: Type.Object({
       text: Type.String({ description: "Short friendly note, e.g. '🔍 Checking the GitHub repo…'" }),

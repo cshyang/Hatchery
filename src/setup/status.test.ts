@@ -106,6 +106,9 @@ test('setup_status reports missing GitHub and Linear for a project with no activ
   assert.ok(status.missing.some((m) => m.provider === 'linear'));
   assert.equal(status.nextAction?.type, 'request_connection');
   assert.equal(status.nextAction?.provider, 'github');
+  assert.match(status.slackText, /Run Agent setup/);
+  assert.match(status.slackText, /GitHub/);
+  assert.match(status.slackText, /Linear/);
   assert.doesNotMatch(JSON.stringify(status), /SECRET|TOKEN|NANGO/i);
 });
 
@@ -168,6 +171,8 @@ test('setup_status reports ready when GitHub, Linear, active route, and runner c
   assert.equal(status.routes[0].targetRepo, 'Calibrax-ai/autoship');
   assert.deepEqual(status.runner, { configured: true, runtime: 'pi', sandboxProvider: 'e2b' });
   assert.equal(status.nextAction?.type, 'none');
+  assert.match(status.slackText, /Ready/);
+  assert.match(status.slackText, /Calibrax-ai\/autoship/);
 });
 
 test('setup_status flags legacy opencode active routes before Pi readiness', async () => {
@@ -207,11 +212,12 @@ test('setup_status tool returns structured JSON without exposing configured valu
     linearTeamKey: 'EDK',
     intent: 'run_agent',
   });
-  const parsed = JSON.parse(out) as { ready: boolean; connected: unknown[]; nextAction: { type: string } };
+  const parsed = JSON.parse(out) as { ready: boolean; connected: unknown[]; nextAction: { type: string }; slackText: string };
 
   assert.equal(parsed.ready, true);
   assert.equal(parsed.nextAction.type, 'none');
   assert.equal(parsed.connected.length, 2);
+  assert.match(parsed.slackText, /Run Agent setup/);
   assert.doesNotMatch(out, /runner_secret|trigger_secret|github_secret|https:\/\/hatchery\.example|NANGO_SECRET_KEY|AGENT_RUNNER_TOKEN|TRIGGER_SECRET_KEY|RUNNER_GITHUB_PAT_TEMP|HATCHERY_PUBLIC_URL/);
 });
 

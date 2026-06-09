@@ -94,7 +94,7 @@ test('full-budget refusal: over-limit save is refused, not inserted', async () =
   const db = new FakeD1();
   const save = byName(memoryTools(db, 'A'), 'save_memory');
   const big = (i: number) => 'x'.repeat(580) + i; // ~588 rendered each; 3 fit under 2000, 4th overflows
-  for (let i = 0; i < 3; i++) assert.match(await save.execute({ fact: big(i) }), /Saved to memory/);
+  for (let i = 0; i < 3; i++) assert.match(await save.execute({ fact: big(i) }), /^Remembered:/);
   const refused = await save.execute({ fact: big(99) });
   assert.match(refused, /full/i);
   assert.equal((await loadProjectMemory(db, 'A')).length, 3, 'no 4th row inserted');
@@ -104,7 +104,7 @@ test('full-budget refusal: over-limit save is refused, not inserted', async () =
 test('duplicate rejection: identical fact saved once', async () => {
   const db = new FakeD1();
   const save = byName(memoryTools(db, 'A'), 'save_memory');
-  await save.execute({ fact: 'same fact' });
+  assert.equal(await save.execute({ fact: 'same fact' }), 'Remembered: same fact');
   assert.match(await save.execute({ fact: 'same fact' }), /[Aa]lready/);
   assert.equal((await loadProjectMemory(db, 'A')).length, 1);
 });
@@ -120,7 +120,7 @@ test('id-scoped update/forget, and a cross-project id cannot touch another proje
   assert.equal((await loadProjectMemory(db, 'A'))[0].fact, 'original', 'A row survived B-scoped ops');
 
   // A can update + forget its own id
-  await byName(memoryTools(db, 'A'), 'update_memory').execute({ id, fact: 'revised' });
+  assert.equal(await byName(memoryTools(db, 'A'), 'update_memory').execute({ id, fact: 'revised' }), 'Memory updated: revised');
   assert.equal((await loadProjectMemory(db, 'A'))[0].fact, 'revised');
   await byName(memoryTools(db, 'A'), 'forget_memory').execute({ id });
   assert.equal((await loadProjectMemory(db, 'A')).length, 0);

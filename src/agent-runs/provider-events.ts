@@ -1,5 +1,5 @@
 import type { D1Like } from '../skills/repository';
-import { createAgentRunEvent, createAgentRunNotification, type AgentRunActorType, type AgentRunHandling } from './events';
+import { createAgentRunChannelNotifications, createAgentRunEvent, type AgentRunActorType, type AgentRunHandling } from './events';
 import { getAgentRunById, updateAgentRun, type AgentRun } from './repository';
 
 export interface ProviderEventResult {
@@ -238,16 +238,13 @@ function handlingFor(run: AgentRun | null, ev: NormalizedProviderEvent): { handl
 }
 
 async function registerNotification(db: D1Like, run: AgentRun, notificationType: string, deps: ClockAndIds) {
-  await createAgentRunNotification(
+  await createAgentRunChannelNotifications(
     db,
     {
       projectId: run.projectId,
       runId: run.id,
-      channel: 'linear',
       notificationType,
-      dedupeKey: `notify:${run.id}:${notificationType}:linear`,
-      targetRef: run.linearIssueId ?? run.linearIdentifier ?? null,
-      status: 'pending',
+      linearTargetRef: run.linearIssueId ?? run.linearIdentifier ?? null,
     },
     deps,
   );

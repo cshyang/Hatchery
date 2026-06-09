@@ -246,6 +246,77 @@ test('Slack send edits the ack message in place (chat.update) when ackMessageTs 
   }
 });
 
+test('Slack send formats Markdown before posting', async () => {
+  const calls: Array<{ body: Record<string, unknown> }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_url, init) => {
+    calls.push({ body: JSON.parse(String(init?.body)) });
+    return new Response(JSON.stringify({ ok: true, ts: '555.666' }), { headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+
+  try {
+    const target: ConversationTarget = {
+      projectId: 'demo',
+      agentSlug: 'default',
+      conversationId: 'slack:T1:C1:100.000',
+      provider: 'slack',
+      externalAccountId: 'T1',
+      externalSpaceId: 'C1',
+      externalConversationId: '100.000',
+      transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
+    };
+    await sendToConversationTarget(
+      { SLACK_BOT_TOKEN_DEFAULT: 'xoxb-test' },
+      target,
+      '# Result\n\n**Ready**: [PR](https://github.com/acme/repo/pull/1)',
+    );
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].body.text, '*Result*\n\n*Ready*: <https://github.com/acme/repo/pull/1|PR>');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Slack send chunks oversized replies and edits the ack for part 1', async () => {
+  const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url, init) => {
+    calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+    return new Response(JSON.stringify({ ok: true, ts: `posted-${calls.length}` }), { headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+
+  try {
+    const target: ConversationTarget = {
+      projectId: 'demo',
+      agentSlug: 'default',
+      conversationId: 'slack:T1:C1:100.000',
+      provider: 'slack',
+      externalAccountId: 'T1',
+      externalSpaceId: 'C1',
+      externalConversationId: '100.000',
+      transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
+    };
+    await sendToConversationTarget(
+      { SLACK_BOT_TOKEN_DEFAULT: 'xoxb-test', SLACK_REPLY_MAX_CHARS: 24 },
+      target,
+      'Alpha paragraph.\n\nBeta paragraph.\n\nGamma paragraph.',
+      '555.666',
+    );
+
+    assert.equal(calls.length, 3);
+    assert.equal(calls[0].url, 'https://slack.com/api/chat.update');
+    assert.equal(calls[0].body.ts, '555.666');
+    assert.match(String(calls[0].body.text), /^Part 1\/3/);
+    assert.equal(calls[1].url, 'https://slack.com/api/chat.postMessage');
+    assert.equal(calls[1].body.thread_ts, '100.000');
+    assert.match(String(calls[1].body.text), /^Part 2\/3/);
+    assert.match(String(calls[2].body.text), /^Part 3\/3/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('top-level project posts omit provider-native thread id', async () => {
   const target = topLevelTargetFromBinding(binding);
   assert.equal(target.conversationId, '');

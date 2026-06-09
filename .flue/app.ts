@@ -35,6 +35,7 @@ import { reconcileAgentRuns } from '../src/agent-runs/dispatch';
 import { resolveProviderToken } from '../src/connections/repository';
 import { activateAgentRunRoute, disableAgentRunRoute } from '../src/agent-runs/events';
 import { handleNangoForwardWebhook } from '../src/agent-runs/provider-events';
+import { deliverPendingSlackRunNotifications } from '../src/agent-runs/notifications';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -313,7 +314,8 @@ app.post('/__internal/agent-runs/reconcile', async (c) => {
     hatcheryPublicUrl: c.env.HATCHERY_PUBLIC_URL,
     fetch,
   });
-  return c.json(summary);
+  const notifications = await deliverPendingSlackRunNotifications({ db, env: c.env as Record<string, unknown> });
+  return c.json({ ...summary, notifications });
 });
 
 // Nightly REM: the ticker's nightly cron pokes this. The GATE is cheap SQL (projects with

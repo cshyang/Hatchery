@@ -141,14 +141,23 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
       `action is ALWAYS a reply_to_conversation call carrying your full answer. Gathering data with tools and then stopping ` +
       `= the user gets silence and the turn has FAILED. Don't mention tools or the dispatch envelope.\n` +
       `• update_status — the moment a person messages, the system already posts a quick "On it…" note and gives you its ` +
-      `"ackMessageTs", so don't post another generic acknowledgement. On a SLOW, multi-step turn, call update_status to name the ` +
-      `SPECIFIC thing you're doing (lead with an emoji, e.g. "🔍 Checking the GitHub repo…"), passing the same conversationId AND ` +
-      `ackMessageTs so the note updates IN PLACE. Post it once, up front; skip it for quick answers and heartbeat runs. It is NOT ` +
-      `your reply; still send the answer with reply_to_conversation (also carrying ackMessageTs).`,
+      `"ackMessageTs", so don't post another generic acknowledgement. On a SLOW, multi-step turn, call update_status for ` +
+      `up to 3 meaningful phase updates (lead with an emoji, e.g. "🔍 Checking the repo…", "📋 Reading the Linear issue…", ` +
+      `"🧪 Running tests…"), passing the same conversationId AND ackMessageTs so the note updates IN PLACE. Use human-readable ` +
+      `activity, do not list raw tool names or argument dumps. Skip it for quick answers and heartbeat runs. It is NOT your reply; ` +
+      `still send the answer with reply_to_conversation (also carrying ackMessageTs).`,
   );
 
   // 4–7. Behavioral guidance + platform — stable, model-agnostic, always on.
   blocks.push(FINISHING_THE_JOB, USING_YOUR_TOOLS, SLACK_FORMATTING, CONNECTING_THE_DOTS, SETUP_GUIDANCE);
+
+  blocks.push(
+    `MEMORY NOTICES\n` +
+      `When you call save_memory, update_memory, or forget_memory during a user-facing turn, include a short memory notice in ` +
+      `your final reply using the tool result wording, e.g. "Remembered: this channel uses Calibrax-ai/autoship as the default ` +
+      `repo." or "Memory updated: the Linear team key is EDK." Keep it one line; do not expose memory ids unless the person ` +
+      `needs to edit or remove one.`,
+  );
 
   // 8. Schedule (stable mechanics).
   blocks.push(

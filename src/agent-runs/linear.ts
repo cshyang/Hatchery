@@ -1,5 +1,5 @@
 import type { D1Like } from '../skills/repository';
-import { createAgentRunEvent, createAgentRunNotification, findActiveAgentRunRoute, type AgentRunRoute } from './events';
+import { createAgentRunChannelNotifications, createAgentRunEvent, findActiveAgentRunRoute, type AgentRunRoute } from './events';
 import { createAgentRun, findLatestRunByLinearIssue, getAgentRunBySource, getLatestAgentRunByLinearIssue, updateAgentRun, type AgentRun, type AgentRunStatus, type ClockAndIds } from './repository';
 import { claimAndDispatchRun, type RunnerDispatchDeps } from './dispatch';
 import { continuationBlockReason, createContinuationRun } from './continuation';
@@ -249,16 +249,13 @@ function buildDispatchPayload(cfg: LinearAgentProjectConfig, issue: LinearIssueS
 }
 
 async function recordStartedNotification(db: D1Like, run: AgentRun, deps: ClockAndIds) {
-  await createAgentRunNotification(
+  await createAgentRunChannelNotifications(
     db,
     {
       projectId: run.projectId,
       runId: run.id,
-      channel: 'linear',
       notificationType: 'run_started',
-      dedupeKey: `notify:${run.id}:run_started:linear`,
-      targetRef: run.linearIssueId ?? run.linearIdentifier ?? null,
-      status: 'pending',
+      linearTargetRef: run.linearIssueId ?? run.linearIdentifier ?? null,
     },
     deps,
   );

@@ -329,6 +329,15 @@ const runInput = {
   sandboxProvider: 'e2b',
 };
 
+function countNotification(db: FakeD1, type: string, channel?: string, runId?: string): number {
+  return db.notifications.filter(
+    (n) =>
+      n.notification_type === type &&
+      (!channel || n.channel === channel) &&
+      (!runId || n.run_id === runId),
+  ).length;
+}
+
 test('createAgentRun stores a project-scoped lease and dedupes by idempotency key', async () => {
   const db = new FakeD1();
   const deps = seq();
@@ -385,7 +394,8 @@ test('handleAgentRunCallback maps running, pr_opened, completed, and failed into
   assert.equal(pr.body?.run.status, 'waiting_approval');
   assert.equal(pr.body?.run.prUrl, 'https://github.com/acme/repo/pull/7');
   assert.equal(db.events.some((e) => e.event_type === 'runner.pr_opened'), true);
-  assert.equal(db.notifications.filter((n) => n.notification_type === 'pr_opened').length, 1);
+  assert.equal(countNotification(db, 'pr_opened', 'linear'), 1);
+  assert.equal(countNotification(db, 'pr_opened', 'slack'), 1);
 
   const duplicatePr = await handleAgentRunCallback(
     {
@@ -397,7 +407,8 @@ test('handleAgentRunCallback maps running, pr_opened, completed, and failed into
     deps,
   );
   assert.equal(duplicatePr.body?.run.status, 'waiting_approval');
-  assert.equal(db.notifications.filter((n) => n.notification_type === 'pr_opened').length, 1, 'duplicate runner echo does not double-notify');
+  assert.equal(countNotification(db, 'pr_opened', 'linear'), 1, 'duplicate runner echo does not double-notify Linear');
+  assert.equal(countNotification(db, 'pr_opened', 'slack'), 1, 'duplicate runner echo does not double-notify Slack');
 
   const completed = await handleAgentRunCallback(
     {
@@ -412,7 +423,8 @@ test('handleAgentRunCallback maps running, pr_opened, completed, and failed into
   assert.equal(completed.body?.run.ciUrl, 'https://github.com/acme/repo/actions/runs/1');
   assert.equal(completed.body?.run.prUrl, 'https://github.com/acme/repo/pull/7');
   assert.equal(completed.body?.run.branch, 'agent/LIN-42');
-  assert.equal(db.notifications.filter((n) => n.notification_type === 'completed').length, 1);
+  assert.equal(countNotification(db, 'completed', 'linear'), 1);
+  assert.equal(countNotification(db, 'completed', 'slack'), 1);
 
   const failedRun = await createAgentRun(db, { ...runInput, idempotencyKey: 'linear:issue:issue-2:run-agent', linearIssueId: 'issue-2' }, deps);
   const failed = await handleAgentRunCallback(
@@ -729,7 +741,8 @@ test('reconciler times out a running run whose heartbeat went stale, and notifie
   const run = await getAgentRunById(db, created.run.id);
   assert.equal(run?.status, 'failed');
   assert.match(String(run?.error), /heartbeat stale/);
-  assert.equal(db.notifications.filter((n) => n.run_id === created.run.id && n.notification_type === 'failed').length, 1);
+  assert.equal(countNotification(db, 'failed', 'linear', created.run.id), 1);
+  assert.equal(countNotification(db, 'failed', 'slack', created.run.id), 1);
 });
 
 test('reconciler does not fail a stale running run after a fresh callback updates it', async () => {

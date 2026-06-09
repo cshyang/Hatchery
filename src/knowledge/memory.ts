@@ -85,7 +85,7 @@ export function memoryTools(db: D1Like, projectId: string): ToolDefinition[] {
         )
         .bind(projectId, 'project', '', f, 'agent', 'agent', now, now)
         .run();
-      return 'Saved to memory.';
+      return `Remembered: ${f}`;
     },
   });
 
@@ -117,7 +117,7 @@ export function memoryTools(db: D1Like, projectId: string): ToolDefinition[] {
         .prepare('UPDATE memories SET fact=?, updated_by=?, updated_at=? WHERE project_id=? AND id=?')
         .bind(f, 'agent', Date.now(), projectId, id)
         .run();
-      return `Updated memory [${id}].`;
+      return `Memory updated: ${f}`;
     },
   });
 

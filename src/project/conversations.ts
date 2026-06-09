@@ -2,6 +2,7 @@ import type { Binding } from './bindings';
 import { DEFAULT_AGENT_SLUG } from './bindings';
 import type { D1Like } from '../skills/repository';
 import { postMessage, editMessage } from '../slack/post';
+import { chunkSlackText, formatSlackText, SLACK_TEXT_LIMIT } from '../slack/format';
 
 export type Provider = 'slack';
 
@@ -146,10 +147,30 @@ export async function sendToConversationTarget(
   }
 
   if (target.provider === 'slack') {
+    const maxChars =
+      typeof env.SLACK_REPLY_MAX_CHARS === 'number'
+        ? env.SLACK_REPLY_MAX_CHARS
+        : typeof env.SLACK_REPLY_MAX_CHARS === 'string' && env.SLACK_REPLY_MAX_CHARS.trim()
+          ? Number(env.SLACK_REPLY_MAX_CHARS)
+          : SLACK_TEXT_LIMIT;
+    const formatted = formatSlackText(text);
+    const parts = chunkSlackText(formatted, {
+      maxChars: Number.isFinite(maxChars) && maxChars > 0 ? maxChars : SLACK_TEXT_LIMIT,
+      label: true,
+    });
+
     if (ackMessageTs) {
-      await editMessage(token, target.externalSpaceId, ackMessageTs, text);
+      await editMessage(token, target.externalSpaceId, ackMessageTs, parts[0] ?? '', { format: false });
+      for (const part of parts.slice(1)) {
+        await postMessage(token, target.externalSpaceId, part, target.externalConversationId ?? undefined, { format: false });
+      }
     } else {
-      await postMessage(token, target.externalSpaceId, text, target.externalConversationId ?? undefined);
+      let threadTs = target.externalConversationId ?? undefined;
+      const firstTs = await postMessage(token, target.externalSpaceId, parts[0] ?? '', threadTs, { format: false });
+      if (!threadTs) threadTs = firstTs;
+      for (const part of parts.slice(1)) {
+        await postMessage(token, target.externalSpaceId, part, threadTs, { format: false });
+      }
     }
     return;
   }

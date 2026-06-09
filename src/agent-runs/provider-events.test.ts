@@ -136,6 +136,10 @@ class FakeD1 implements D1Like {
   }
 }
 
+function countNotification(db: FakeD1, type: string, channel?: string): number {
+  return db.notifications.filter((n) => n.notification_type === type && (!channel || n.channel === channel)).length;
+}
+
 function seq() {
   let n = 0;
   return {
@@ -251,7 +255,8 @@ test('Nango github forward resolves connection_ref, records event, correlates ru
   assert.equal(db.events[0].run_id, 'run-1');
   assert.equal(db.events[0].handling, 'notify');
   assert.equal(duplicate.body?.duplicate, true);
-  assert.equal(db.notifications.filter((n) => n.notification_type === 'pr_opened').length, 1, 'GitHub echo does not double notify after runner callback');
+  assert.equal(countNotification(db, 'pr_opened', 'linear'), 1, 'GitHub echo does not double notify Linear after runner callback');
+  assert.equal(countNotification(db, 'pr_opened', 'slack'), 1, 'GitHub echo records one Slack notification after runner callback');
 });
 
 test('Nango github forward treats github-pat as an integration key, not the provider', async () => {
@@ -278,7 +283,8 @@ test('Nango github pull_request merged completes the correlated run', async () =
   assert.equal(db.events[0].event_type, 'github.pull_request.merged');
   assert.equal(db.agentRuns[0].status, 'completed');
   assert.equal(db.agentRuns[0].last_event_id, db.events[0].id);
-  assert.equal(db.notifications.filter((n) => n.notification_type === 'completed').length, 1);
+  assert.equal(countNotification(db, 'completed', 'linear'), 1);
+  assert.equal(countNotification(db, 'completed', 'slack'), 1);
 });
 
 test('GitHub comments are record_only (continuation is handled by createContinuationRun, not a wake gate)', async () => {
