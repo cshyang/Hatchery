@@ -35,8 +35,8 @@ export function connectionsBlock(
     ? 'External services you can reach. Connected ones expose tools you can call now. For one that is NOT ' +
       'connected, call request_connection with the provider name — you get a secure link to share; the ' +
       'person authorizes off-Slack (you never see the credential) and that provider\'s tools appear ' +
-      'automatically once they finish. For GitHub, use authMode "oauth" for normal workspace setup or ' +
-      'authMode "pat" plus repo "owner/name" for a repo-scoped PAT connection.'
+      'automatically once they finish. For GitHub, prefer authMode "app" (a bot install with short-lived, ' +
+      'repo-scoped tokens); "oauth" (workspace-wide) or "pat" plus repo "owner/name" (single repo) also work.'
     : 'External services you can reach. Connected ones expose tools you can call now; the rest must be ' +
       'wired by an operator first (mention that you need it — you cannot connect it yourself).';
   return (
@@ -121,10 +121,10 @@ export function requestConnectionTool(
       'Start connecting an external service for THIS channel. Pass the provider name; you get back a ' +
       'secure authorization link to share with the person. They click it and authorize off-Slack — you ' +
       "NEVER receive or handle the credential. Once they finish, that provider's tools appear " +
-      `automatically. For GitHub, use authMode "oauth" or authMode "pat" with repo "owner/name". Connectable providers: ${allowed.join(', ')}.`,
+      `automatically. For GitHub, prefer authMode "app" (a bot install with short-lived, repo-scoped tokens); "oauth" and "pat" (with repo "owner/name") also work. Connectable providers: ${allowed.join(', ')}.`,
     parameters: Type.Object({
       provider: Type.String({ description: `The provider to connect. One of: ${allowed.join(', ')}.` }),
-      authMode: Type.Optional(Type.String({ description: 'Optional auth mode. For GitHub: "oauth" (default) or "pat". Other providers use "oauth".' })),
+      authMode: Type.Optional(Type.String({ description: 'Optional auth mode. For GitHub: "app" (bot install, recommended), "oauth" (default), or "pat". Other providers use "oauth".' })),
       repo: Type.Optional(Type.String({ description: 'Optional GitHub owner/name. Required when provider="github" and authMode="pat".' })),
     }),
     async execute({ provider, authMode, repo }) {
@@ -157,6 +157,13 @@ function connectionRequestCopy(provider: string, mode: ConnectionAuthMode, conne
     return (
       `Connect GitHub PAT for repo ${repo}:\n${connectLink}\n\n` +
       'Use this when access should stay limited to that repo. Paste the PAT only on the secure connection page; I never see it.'
+    );
+  }
+  if (provider === 'github' && mode === 'app') {
+    return (
+      `Install the Hatchery GitHub App:\n${connectLink}\n\n` +
+      'On the install screen, pick the repos to grant. This gives a bot identity with short-lived, ' +
+      'repo-scoped tokens — the cleanest option (no personal token, no broad OAuth grant).'
     );
   }
   if (provider === 'github') {

@@ -21,6 +21,7 @@ import {
 import { connectionTools, connectionsBlock, requestConnectionTool, disconnectConnectionTool } from './tools';
 import { buildConnectionRuntime } from './runtime';
 import { PROVIDER_CATALOG } from './catalog';
+import { nangoIntegrationKey, normalizeAuthMode, supportedAuthModes } from './integrations';
 import { GITHUB_READ_TOOL_NAMES } from '../providers/github';
 import type { D1Like } from '../skills/repository';
 import type { Binding, ConnectionSpec } from '../project/bindings';
@@ -397,6 +398,34 @@ test('request_connection: starts a session bound to the channel (end_user_id = p
     integrationId: 'notion',
     tags: { provider: 'notion', auth_mode: 'oauth' },
   });
+});
+
+// ── GitHub App auth mode (Phase 2: the agent can offer it) ───────────────────
+
+test('integrations: github supports the app auth mode → github-app integration key', () => {
+  assert.ok(supportedAuthModes('github').includes('app'), 'github offers oauth, pat, AND app');
+  assert.equal(normalizeAuthMode('github', 'app'), 'app');
+  assert.equal(nangoIntegrationKey('github', 'app'), 'github-app');
+});
+
+test('integrations: app is github-only — linear/notion reject it', () => {
+  assert.equal(normalizeAuthMode('linear', 'app'), null);
+  assert.equal(normalizeAuthMode('notion', 'app'), null);
+});
+
+test('request_connection: GitHub App mints a github-app session, needs no repo, returns install copy', async () => {
+  const calls: { integrationId: string; tags?: Record<string, string> }[] = [];
+  const fakeStart = async (a: { secretKey: string; endUserId: string; integrationId: string; tags?: Record<string, string> }) => {
+    calls.push({ integrationId: a.integrationId, tags: a.tags });
+    return { connectLink: 'https://connect.nango.dev/app', token: 't', expiresAt: 'e' };
+  };
+  const tool = requestConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123' }, { startConnectSession: fakeStart });
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'github', authMode: 'app' });
+  assert.equal(calls.length, 1, 'app does NOT require a repo (unlike pat)');
+  assert.equal(calls[0].integrationId, 'github-app');
+  assert.deepEqual(calls[0].tags, { provider: 'github', auth_mode: 'app' });
+  assert.match(out, /https:\/\/connect\.nango\.dev\/app/);
+  assert.match(out, /install/i, 'copy explains it is an app install');
 });
 
 test('request_connection: GitHub OAuth can use an operator-configured Nango integration key', async () => {
