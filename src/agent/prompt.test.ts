@@ -32,6 +32,8 @@ test('prompt allows a few meaningful status updates but rejects raw tool traces'
   assert.match(prompt, /up to 3 meaningful phase updates/i);
   assert.match(prompt, /Checking the repo/i);
   assert.match(prompt, /do not list raw tool names/i);
+  assert.match(prompt, /Automatic activity receipts/i);
+  assert.match(prompt, /do not duplicate automatic tool activity/i);
 });
 
 test('prompt tells the agent to include concise memory notices after memory changes', async () => {

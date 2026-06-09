@@ -3,6 +3,7 @@ import { DEFAULT_AGENT_SLUG } from './bindings';
 import type { D1Like } from '../skills/repository';
 import { postMessage, editMessage } from '../slack/post';
 import { chunkSlackText, formatSlackText, SLACK_TEXT_LIMIT } from '../slack/format';
+import { completeSlackTurnActivity, renderSlackActivityReceipt, shouldPostFinalBelowActivity } from '../slack/activity';
 
 export type Provider = 'slack';
 
@@ -177,4 +178,39 @@ export async function sendToConversationTarget(
 
   const provider: never = target.provider;
   throw new Error(`Unsupported provider "${provider}".`);
+}
+
+export async function sendFinalToConversationTarget(
+  env: Record<string, unknown>,
+  target: ConversationTarget,
+  text: string,
+  opts: {
+    db?: D1Like;
+    projectId: string;
+    sessionId: string;
+    ackMessageTs?: string;
+  },
+): Promise<void> {
+  const ackMessageTs = opts.ackMessageTs;
+  const shouldPreserveReceipt =
+    ackMessageTs && (await shouldPostFinalBelowActivity(opts.db, opts.projectId, opts.sessionId));
+
+  if (!shouldPreserveReceipt) {
+    await sendToConversationTarget(env, target, text, ackMessageTs);
+    return;
+  }
+
+  const token = env[target.transportTokenRef];
+  if (typeof token !== 'string' || !token) {
+    throw new Error(`Missing transport token env "${target.transportTokenRef}".`);
+  }
+
+  const completed = opts.db ? await completeSlackTurnActivity(opts.db, opts.projectId, opts.sessionId).catch(() => null) : null;
+  if (completed) {
+    await editMessage(token, target.externalSpaceId, ackMessageTs, renderSlackActivityReceipt(completed), { format: false }).catch(
+      (e) => console.log(`[activity] final receipt update failed: ${e instanceof Error ? e.message : 'error'}`),
+    );
+  }
+
+  await sendToConversationTarget(env, target, text);
 }

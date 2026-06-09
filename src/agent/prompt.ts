@@ -154,7 +154,9 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
       `"ackMessageTs", so don't post another generic acknowledgement. On a SLOW, multi-step turn, call update_status for ` +
       `up to 3 meaningful phase updates (lead with an emoji, e.g. "🔍 Checking the repo…", "📋 Reading the Linear issue…", ` +
       `"🧪 Running tests…"), passing the same conversationId AND ackMessageTs so the note updates IN PLACE. Use human-readable ` +
-      `activity, do not list raw tool names or argument dumps. Skip it for quick answers and heartbeat runs. It is NOT your reply; ` +
+      `activity, do not list raw tool names or argument dumps. Automatic activity receipts may already show routine tool work, ` +
+      `so use update_status only for meaningful non-tool phases or long stretches; do not duplicate automatic tool activity. ` +
+      `Skip it for quick answers and heartbeat runs. It is NOT your reply; ` +
       `still send the answer with reply_to_conversation (also carrying ackMessageTs).`,
   );
 

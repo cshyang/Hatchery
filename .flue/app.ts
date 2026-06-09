@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
 import { flue } from '@flue/runtime/routing';
-import { dispatch } from '@flue/runtime';
+import { dispatch, observe } from '@flue/runtime';
 import { verifySlackSignature } from '../src/slack/verify';
 import { fetchThreadReplies, renderThreadBackscroll } from '../src/slack/threads';
 import { mentionsBot, stripMention } from '../src/slack/mentions';
 import { postWorkingAck } from '../src/slack/ack';
+import { createSlackTurnActivity, handleObservedSlackActivity } from '../src/slack/activity';
 import { dispatchSlackTurnWithFallback } from '../src/slack/dispatch';
 import {
   parseSlackEventEnvelope,
@@ -73,6 +74,10 @@ interface Env {
   DB?: D1Like; // D1 skill catalog, transcript, memory, and conversation targets
   [binding: string]: unknown;
 }
+
+observe((event, ctx) => {
+  void handleObservedSlackActivity(event, ctx);
+});
 
 // Workspace-level transport identity for gateway auto-provisioning (same-workspace Milestone 1:
 // one bot install, reused across all channels of the known team) is account-coupled config, resolved
@@ -624,6 +629,18 @@ app.post('/slack/events', async (c) => {
     channel: msg.externalSpaceId,
     threadTs: msg.externalConversationId,
   });
+
+  if (c.env.DB && ackMessageTs) {
+    await createSlackTurnActivity(c.env.DB, {
+      projectId: msg.projectId,
+      sessionId: `conv:${msg.conversationId}`,
+      conversationId: msg.conversationId,
+      slackChannelId: msg.externalSpaceId,
+      slackThreadTs: msg.externalConversationId,
+      ackMessageTs,
+      transportTokenRef: binding.transportTokenRef,
+    }).catch((e) => console.log(`[activity] create receipt failed: ${e instanceof Error ? e.message : 'error'}`));
+  }
 
   // Log the engaged turn to the transcript (ambient defaults to 0, so nightly REM consolidates it).
   // Best-effort — a logging hiccup must never block the reply.
