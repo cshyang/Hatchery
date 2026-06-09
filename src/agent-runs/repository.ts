@@ -1,6 +1,6 @@
 import { hasMatchingSecretHeader } from '../gateway/auth';
 import type { D1Like } from '../skills/repository';
-import { createAgentRunEvent, createAgentRunNotification } from './events';
+import { createAgentRunChannelNotifications, createAgentRunEvent } from './events';
 
 export const AGENT_RUN_STATUSES = ['queued', 'dispatching', 'running', 'waiting_human', 'waiting_approval', 'completed', 'failed', 'cancelled'] as const;
 export type AgentRunStatus = (typeof AGENT_RUN_STATUSES)[number];
@@ -626,20 +626,17 @@ export async function handleAgentRunCallback(
     const notificationType = notificationTypeForCallback(status);
     let reply: AgentRunCallbackReply | undefined;
     if (notificationType) {
-      const { duplicate } = await createAgentRunNotification(
+      const { linear } = await createAgentRunChannelNotifications(
         req.db,
         {
           projectId: run.projectId,
           runId: run.id,
-          channel: 'linear',
           notificationType,
-          dedupeKey: `notify:${run.id}:${notificationType}:linear`,
-          targetRef: run.linearIssueId ?? run.linearIdentifier ?? null,
-          status: 'pending',
+          linearTargetRef: run.linearIssueId ?? run.linearIdentifier ?? null,
         },
         deps,
       );
-      if (!duplicate && run.linearIssueId) {
+      if (!linear.duplicate && run.linearIssueId) {
         reply = {
           type: notificationType,
           issueId: run.linearIssueId,

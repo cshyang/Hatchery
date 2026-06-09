@@ -58,6 +58,7 @@ export interface SetupStatus {
   slack: { bound: boolean; teamId?: string; channelId?: string };
   githubRecommendation: { authMode: 'oauth' | 'pat'; repo?: string; reason: string };
   nextAction: SetupNextAction;
+  slackText: string;
   summary: string;
 }
 
@@ -150,6 +151,7 @@ export async function buildSetupStatus(args: {
 
   const nextAction = chooseNextAction(missing, githubRecommendation);
   const ready = missing.length === 0;
+  const summary = ready ? 'Run Agent setup is ready for this project.' : setupSummary(missing);
 
   return {
     ready,
@@ -164,7 +166,8 @@ export async function buildSetupStatus(args: {
     },
     githubRecommendation,
     nextAction,
-    summary: ready ? 'Run Agent setup is ready for this project.' : setupSummary(missing),
+    slackText: renderSetupSlackText({ ready, connected, missing, routes, runner, nextAction, summary }),
+    summary,
   };
 }
 
@@ -321,6 +324,47 @@ function setupSummary(missing: SetupMissingItem[]): string {
     return 'agent runner';
   });
   return `Run Agent setup is not ready. Missing: ${labels.join(', ')}.`;
+}
+
+function renderSetupSlackText(input: {
+  ready: boolean;
+  connected: SetupConnectedProvider[];
+  missing: SetupMissingItem[];
+  routes: SetupRouteSummary[];
+  runner: SetupRunnerSummary;
+  nextAction: SetupNextAction;
+  summary: string;
+}): string {
+  const lines = [`*Run Agent setup*`, input.ready ? `✅ Ready — ${input.summary}` : `⚠️ ${input.summary}`];
+  const connected = input.connected.length
+    ? input.connected
+        .map((c) => {
+          const extra =
+            c.provider === 'github' && c.repo
+              ? ` (${c.authMode ?? 'connected'}: ${c.repo})`
+              : c.authMode
+                ? ` (${c.authMode})`
+                : '';
+          return `${c.provider}${extra}`;
+        })
+        .join(', ')
+    : 'none';
+  const activeRoutes = input.routes.filter((r) => r.status === 'active');
+  lines.push(`Connected: ${connected}`);
+  lines.push(`Runner: ${input.runner.configured ? 'ready' : 'missing'} (${input.runner.runtime}/${input.runner.sandboxProvider})`);
+  lines.push(
+    `Route: ${
+      activeRoutes.length
+        ? activeRoutes.map((r) => `${r.externalKey} ${r.triggerValue} -> ${r.targetRepo}`).join(', ')
+        : 'missing active Linear Run Agent route'
+    }`,
+  );
+  if (input.missing.length) {
+    lines.push('', '*Missing*');
+    for (const item of input.missing) lines.push(`• ${item.reason}`);
+  }
+  lines.push('', `Next: ${input.nextAction.instruction}`);
+  return lines.join('\n');
 }
 
 function routeMissingReason(opts: { targetRepo: string | null; linearTeamKey: string | null }): string {

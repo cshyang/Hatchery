@@ -21,7 +21,7 @@ import * as v from 'valibot';
 import { fetchWithTimeout, jsonMessageOrText } from '../providers/http';
 import type { D1Like } from '../skills/repository';
 import { RUNNER_CONTRACT_VERSION, RunnerDispatchSchema, type RunnerDispatch } from './runner-contract';
-import { createAgentRunNotification } from './events';
+import { createAgentRunChannelNotifications } from './events';
 import {
   claimRunForDispatch,
   failStaleRunningRun,
@@ -260,16 +260,13 @@ export async function reconcileAgentRuns(
   for (const run of await listStaleRunningRuns(db, heartbeatCutoff, RECONCILE_SWEEP_LIMIT)) {
     const failed = await failStaleRunningRun(db, run.id, heartbeatCutoff, clock);
     if (!failed) continue;
-    await createAgentRunNotification(
+    await createAgentRunChannelNotifications(
       db,
       {
         projectId: failed.projectId,
         runId: failed.id,
-        channel: 'linear',
         notificationType: 'failed',
-        dedupeKey: `notify:${failed.id}:failed:linear`,
-        targetRef: failed.linearIssueId ?? failed.linearIdentifier ?? null,
-        status: 'pending',
+        linearTargetRef: failed.linearIssueId ?? failed.linearIdentifier ?? null,
       },
       clock,
     ).catch(() => {});
