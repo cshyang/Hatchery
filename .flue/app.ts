@@ -36,6 +36,7 @@ import { resolveProviderToken } from '../src/connections/repository';
 import { activateAgentRunRoute, disableAgentRunRoute } from '../src/agent-runs/events';
 import { handleNangoForwardWebhook } from '../src/agent-runs/provider-events';
 import { deliverPendingSlackRunNotifications } from '../src/agent-runs/notifications';
+import { listCodeExecutionAudits } from '../src/code-mode/code-mode';
 
 // Custom front-controller. Flue mounts this app.ts as the Worker entry; we add
 // the Slack ingress, then hand everything else to flue() (the /agents, /workflows,
@@ -63,6 +64,12 @@ interface Env {
   NANGO_SECRET_KEY?: string; // platform Bearer for the Nango API (create session / fetch token)
   NANGO_WEBHOOK_SECRET?: string; // HMAC signing key to verify inbound Nango auth webhooks
   NANGO_INTEGRATION_KEYS?: string; // optional JSON mapping provider/authMode to Nango integration keys
+  DYNAMIC_WORKER_LOADER?: unknown; // Cloudflare Worker Loader binding for coordinator execute_code
+  CODE_EXEC_MAX_CODE_BYTES?: string;
+  CODE_EXEC_MAX_INPUT_BYTES?: string;
+  CODE_EXEC_MAX_OUTPUT_BYTES?: string;
+  CODE_EXEC_CPU_MS?: string;
+  CODE_EXEC_SUBREQUESTS?: string;
   DB?: D1Like; // D1 skill catalog, transcript, memory, and conversation targets
   [binding: string]: unknown;
 }
@@ -390,6 +397,17 @@ app.get('/__admin/connections', async (c) => {
   if (!projectId) return c.json({ error: 'projectId query param required' }, 400);
   const connections = await loadConnections(db, projectId); // metadata only — no secret is ever stored or returned
   return c.json({ projectId, connections });
+});
+
+app.get('/__admin/code-executions', async (c) => {
+  if (!requireAdmin(c)) return c.body(null, 404);
+  const db = c.env.DB;
+  if (!db) return c.json({ error: 'no DB binding' }, 500);
+  const projectId = c.req.query('projectId');
+  if (!projectId) return c.json({ error: 'projectId query param required' }, 400);
+  const limit = c.req.query('limit') ? Number(c.req.query('limit')) : 20;
+  const executions = await listCodeExecutionAudits(db, projectId, Number.isFinite(limit) ? limit : 20);
+  return c.json({ projectId, executions });
 });
 
 app.post('/__admin/agent-run-routes/:id/activate', async (c) => {

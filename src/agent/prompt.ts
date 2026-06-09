@@ -74,7 +74,17 @@ const SETUP_GUIDANCE =
   `setup_status FIRST. Use its checklist to answer what is connected, what is missing, and the next ` +
   `action. Only after setup_status says a provider is missing should you call request_connection for ` +
   `that exact provider. For GitHub, use OAuth for normal workspace setup; use PAT only when the person ` +
-  `wants access scoped to a specific owner/name repo. Never guess setup state from memory.`;
+      `wants access scoped to a specific owner/name repo. Never guess setup state from memory.`;
+
+const COORDINATOR_CODE_MODE =
+  `COORDINATOR CODE MODE\n` +
+  `When a task is mostly lightweight computation, JSON/data shaping, public web fetches, parsing, or a ` +
+  `repeatable transformation, use execute_code instead of doing long manual reasoning. It can run small ` +
+  `JavaScript or Python functions with public network access by default. For JavaScript, provide ` +
+  `export default async function main(input) { ... }. For Python, provide async def main(input): ... . ` +
+  `This is not bash, not a repo workspace, not npm install, not pip install, not persistent filesystem ` +
+  `state, and not source-code editing. Do not put secrets into code/input; the Dynamic Worker receives ` +
+  `no Hatchery secrets, provider tokens, DB bindings, or Slack credentials.`;
 
 // Guidance on AUTHORING skills — kept consistent whether or not the catalog is empty, because
 // the failure mode of a self-improving agent is skill SPRAWL (many narrow one-off skills nobody
@@ -149,7 +159,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
   );
 
   // 4–7. Behavioral guidance + platform — stable, model-agnostic, always on.
-  blocks.push(FINISHING_THE_JOB, USING_YOUR_TOOLS, SLACK_FORMATTING, CONNECTING_THE_DOTS, SETUP_GUIDANCE);
+  blocks.push(FINISHING_THE_JOB, USING_YOUR_TOOLS, SLACK_FORMATTING, CONNECTING_THE_DOTS, SETUP_GUIDANCE, COORDINATOR_CODE_MODE);
 
   blocks.push(
     `MEMORY NOTICES\n` +

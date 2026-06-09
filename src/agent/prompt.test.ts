@@ -47,4 +47,20 @@ test('prompt tells the agent to include concise memory notices after memory chan
   assert.match(prompt, /include a short memory notice/i);
 });
 
+test('prompt explains coordinator code mode and its limits', async () => {
+  const prompt = buildInstructions({
+    projectName: 'project_1',
+    personality: null,
+    catalog: [],
+  });
+
+  assert.match(prompt, /execute_code/);
+  assert.match(prompt, /lightweight/i);
+  assert.match(prompt, /JavaScript/i);
+  assert.match(prompt, /Python/i);
+  assert.match(prompt, /not bash/i);
+  assert.match(prompt, /not a repo workspace/i);
+  assert.match(prompt, /not source-code editing/i);
+});
+
 await run();
