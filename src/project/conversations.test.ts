@@ -7,6 +7,7 @@ import type { Binding } from './bindings';
 import {
   loadConversationTarget,
   resolveTarget,
+  sendFinalToConversationTarget,
   sendToConversationTarget,
   topLevelTargetFromBinding,
   upsertConversationTarget,
@@ -14,6 +15,7 @@ import {
 } from './conversations';
 import { normalizeSlackMessage } from '../shared/canonical';
 import type { D1Like } from '../skills/repository';
+import { createSlackTurnActivity, recordSlackToolActivity } from '../slack/activity';
 
 interface TargetRow {
   project_id: string;
@@ -30,6 +32,7 @@ interface TargetRow {
 
 class FakeD1 implements D1Like {
   rows: TargetRow[] = [];
+  activities: Record<string, unknown>[] = [];
 
   prepare(query: string) {
     const db = this;
@@ -70,6 +73,10 @@ class FakeD1 implements D1Like {
           external_conversation_id: r.external_conversation_id,
           transport_token_ref: r.transport_token_ref,
         }));
+    }
+    if (q.includes('FROM slack_turn_activity')) {
+      const [project_id, session_id] = v as [string, string];
+      return this.activities.filter((r) => r.project_id === project_id && r.session_id === session_id);
     }
     return [];
   }
@@ -115,6 +122,42 @@ class FakeD1 implements D1Like {
         created_at,
         updated_at,
       });
+      return { meta: { changes: 1 } };
+    }
+    if (q.startsWith('INSERT INTO slack_turn_activity')) {
+      const [
+        project_id,
+        session_id,
+        conversation_id,
+        slack_channel_id,
+        slack_thread_ts,
+        ack_message_ts,
+        transport_token_ref,
+        status,
+        activities_json,
+        last_posted_at,
+        created_at,
+        updated_at,
+        completed_at,
+      ] = v;
+      const existing = this.activities.find((r) => r.project_id === project_id && r.session_id === session_id);
+      const next = {
+        project_id,
+        session_id,
+        conversation_id,
+        slack_channel_id,
+        slack_thread_ts,
+        ack_message_ts,
+        transport_token_ref,
+        status,
+        activities_json,
+        last_posted_at,
+        created_at,
+        updated_at,
+        completed_at,
+      };
+      if (existing) Object.assign(existing, next);
+      else this.activities.push(next);
       return { meta: { changes: 1 } };
     }
     return { meta: { changes: 0 } };
@@ -312,6 +355,106 @@ test('Slack send chunks oversized replies and edits the ack for part 1', async (
     assert.equal(calls[1].body.thread_ts, '100.000');
     assert.match(String(calls[1].body.text), /^Part 2\/3/);
     assert.match(String(calls[2].body.text), /^Part 3\/3/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Slack final reply leaves an activity receipt and posts answer below when activity exists', async () => {
+  const db = new FakeD1();
+  const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url, init) => {
+    calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+    return new Response(JSON.stringify({ ok: true, ts: `posted-${calls.length}` }), { headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+
+  try {
+    const target: ConversationTarget = {
+      projectId: 'demo',
+      agentSlug: 'default',
+      conversationId: 'slack:T1:C1:100.000',
+      provider: 'slack',
+      externalAccountId: 'T1',
+      externalSpaceId: 'C1',
+      externalConversationId: '100.000',
+      transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
+    };
+    await createSlackTurnActivity(db, {
+      projectId: 'demo',
+      sessionId: 'conv:slack:T1:C1:100.000',
+      conversationId: 'slack:T1:C1:100.000',
+      slackChannelId: 'C1',
+      slackThreadTs: '100.000',
+      ackMessageTs: '555.666',
+      transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
+    });
+    await recordSlackToolActivity(db, {
+      projectId: 'demo',
+      sessionId: 'conv:slack:T1:C1:100.000',
+      toolName: 'execute_code',
+    });
+
+    await sendFinalToConversationTarget(
+      { SLACK_BOT_TOKEN_DEFAULT: 'xoxb-test' },
+      target,
+      'final answer',
+      {
+        db,
+        projectId: 'demo',
+        sessionId: 'conv:slack:T1:C1:100.000',
+        ackMessageTs: '555.666',
+      },
+    );
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].url, 'https://slack.com/api/chat.update');
+    assert.equal(calls[0].body.ts, '555.666');
+    assert.match(String(calls[0].body.text), /Activity/);
+    assert.match(String(calls[0].body.text), /Running code/);
+    assert.equal(calls[1].url, 'https://slack.com/api/chat.postMessage');
+    assert.deepEqual(calls[1].body, { channel: 'C1', text: 'final answer', thread_ts: '100.000' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Slack final reply still edits the ack when no activity exists', async () => {
+  const db = new FakeD1();
+  const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url, init) => {
+    calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+    return new Response(JSON.stringify({ ok: true, ts: 'posted' }), { headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+
+  try {
+    const target: ConversationTarget = {
+      projectId: 'demo',
+      agentSlug: 'default',
+      conversationId: 'slack:T1:C1:100.000',
+      provider: 'slack',
+      externalAccountId: 'T1',
+      externalSpaceId: 'C1',
+      externalConversationId: '100.000',
+      transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
+    };
+
+    await sendFinalToConversationTarget(
+      { SLACK_BOT_TOKEN_DEFAULT: 'xoxb-test' },
+      target,
+      'final answer',
+      {
+        db,
+        projectId: 'demo',
+        sessionId: 'conv:slack:T1:C1:100.000',
+        ackMessageTs: '555.666',
+      },
+    );
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://slack.com/api/chat.update');
+    assert.deepEqual(calls[0].body, { channel: 'C1', ts: '555.666', text: 'final answer' });
   } finally {
     globalThis.fetch = originalFetch;
   }

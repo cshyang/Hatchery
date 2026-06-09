@@ -1,6 +1,6 @@
 import { createAgent, defineTool, Type, type AgentRuntimeConfig, type ToolDefinition } from '@flue/runtime';
 import { bindingByProject, parseAgentInstanceId, DEFAULT_MODEL, resolveModel } from '../../src/project/bindings';
-import { resolveTarget, sendToConversationTarget } from '../../src/project/conversations';
+import { resolveTarget, sendFinalToConversationTarget, sendToConversationTarget } from '../../src/project/conversations';
 import { withToolLogging, withReplyReminder } from '../../src/agent/observability';
 import { skillTools, loadSkillCatalog, loadActiveSkillBody, skillBody, type D1Like } from '../../src/skills/repository';
 import { reminderTools } from '../../src/agent/reminders';
@@ -90,7 +90,12 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       if (!target) {
         throw new Error(`No reply target found for conversationId "${conv}".`);
       }
-      await sendToConversationTarget(env, target, String(text), ackMessageTs ? String(ackMessageTs) : undefined);
+      await sendFinalToConversationTarget(env, target, String(text), {
+        db,
+        projectId,
+        sessionId: conv ? `conv:${conv}` : '',
+        ackMessageTs: ackMessageTs ? String(ackMessageTs) : undefined,
+      });
       // Log the agent's own post to the transcript (the other half of the conversation reflection
       // consolidates). REM turns are told not to post, so this never logs reflection's own output.
       if (db) await logMessage(db, { projectId, conversationId: conv, senderId: 'agent', role: 'agent', text: String(text) }).catch(() => {});
