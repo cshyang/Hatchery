@@ -14,6 +14,7 @@ import { sourceChangeTools } from '../../src/workbench/source-change';
 import { logMessage } from '../../src/knowledge/reflection';
 import { buildConnectionRuntime } from '../../src/connections/runtime';
 import { setupStatusTool } from '../../src/setup/status';
+import { codeModeLimits, codeModeTools, hasCodeModeCapability, type DynamicWorkerLoaderLike } from '../../src/code-mode/code-mode';
 
 // The project agent. Addressed at /agents/project/<id>, id = "project:<projectId>:agent:<slug>"
 // (slug = "default" until a channel hosts multiple personas). Each instance is a persistent
@@ -142,6 +143,9 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   const triggerSecretKey = typeof env.TRIGGER_SECRET_KEY === 'string' ? env.TRIGGER_SECRET_KEY : '';
   const runnerGithubToken = typeof env.RUNNER_GITHUB_PAT_TEMP === 'string' ? env.RUNNER_GITHUB_PAT_TEMP : '';
   const hatcheryPublicUrl = typeof env.HATCHERY_PUBLIC_URL === 'string' ? env.HATCHERY_PUBLIC_URL : '';
+  const dynamicWorkerLoader = env.DYNAMIC_WORKER_LOADER as DynamicWorkerLoaderLike | undefined;
+  const hasCodeMode = hasCodeModeCapability({ db, loader: dynamicWorkerLoader });
+  const limits = codeModeLimits(env);
 
   const tools: ToolDefinition[] = [
     replyToConversation,
@@ -157,6 +161,8 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       hasCodingRunner: !!codingRunnerUrl && !!workbenchRunnerToken,
       hasAgentRunner: !!triggerSecretKey && !!agentRunnerToken && !!runnerGithubToken && !!hatcheryPublicUrl,
       hasLinearAgentIngress: typeof env.LINEAR_WEBHOOK_SECRET === 'string',
+      hasCodeMode,
+      codeModeLimits: hasCodeMode ? limits : null,
       canRequestConnections: connectionRuntime.canRequestConnections,
       providerCatalog: connectionRuntime.providerCatalog,
       connectionState: connectionRuntime.state,
@@ -168,6 +174,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     ...(db ? memoryTools(db, projectId) : []),
     ...userTools(db, botToken),
     ...(db ? searchTools(db, projectId) : []),
+    ...codeModeTools({ db, loader: dynamicWorkerLoader, projectId, env }),
     ...(db ? workbenchTools(db, projectId) : []),
     ...(db ? sourceChangeTools({ db, projectId, runnerUrl: codingRunnerUrl, runnerToken: workbenchRunnerToken }) : []),
     ...connectionRuntime.tools,

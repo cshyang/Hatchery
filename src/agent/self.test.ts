@@ -21,6 +21,8 @@ test('buildSelfStatus reports the live runtime manifest without exposing connect
     hasCodingRunner: true,
     hasAgentRunner: true,
     hasLinearAgentIngress: true,
+    hasCodeMode: true,
+    codeModeLimits: { maxCodeBytes: 20_000, maxInputBytes: 100_000, maxOutputBytes: 20_000, cpuMs: 5000, subRequests: 50 },
     providerCatalog: [
       { provider: 'github', summary: 'read repos' },
       { provider: 'notion', summary: 'read docs' },
@@ -49,6 +51,12 @@ test('buildSelfStatus reports the live runtime manifest without exposing connect
   assert.match(status.capabilities.agentRuns.note, /Pi/);
   assert.match(status.capabilities.agentRuns.note, /Agent Kits/);
   assert.match(status.capabilities.agentRuns.note, /admin-only/);
+  assert.equal(status.capabilities.codeMode.enabled, true);
+  assert.deepEqual(status.capabilities.codeMode.tools, ['execute_code']);
+  assert.match(status.capabilities.codeMode.note, /JavaScript/);
+  assert.match(status.capabilities.codeMode.note, /Python/);
+  assert.match(status.capabilities.codeMode.note, /public network/);
+  assert.equal(JSON.stringify(status).includes('NANGO_SECRET_KEY'), false);
   assert.equal(JSON.stringify(status).includes('OpenCode'), false);
   assert.equal(JSON.stringify(status).includes('Claude Code'), false);
   assert.match(status.limits.join('\n'), /E2B/);
@@ -77,6 +85,8 @@ test('self_status tool returns the manifest as formatted JSON', async () => {
     hasCodingRunner: false,
     hasAgentRunner: false,
     hasLinearAgentIngress: true,
+    hasCodeMode: false,
+    codeModeLimits: null,
     providerCatalog: [],
     connectionState: [],
     connectionToolNames: [],
@@ -92,6 +102,8 @@ test('self_status tool returns the manifest as formatted JSON', async () => {
   assert.match(parsed.capabilities.agentRuns.note, /not configured/);
   assert.match(parsed.capabilities.agentRuns.note, /Trigger\.dev/);
   assert.deepEqual(parsed.capabilities.agentRuns.tools, ['propose_agent_route']);
+  assert.equal(parsed.capabilities.codeMode.enabled, false);
+  assert.deepEqual(parsed.capabilities.codeMode.tools, []);
 });
 
 run();

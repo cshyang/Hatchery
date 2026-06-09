@@ -1,7 +1,7 @@
 {
   "$schema": "https://workers.cloudflare.com/schema/wrangler.json",
   "name": "hatchery",
-  "compatibility_date": "2026-04-01",
+  "compatibility_date": "2026-06-09",
   "compatibility_flags": ["nodejs_compat"],
   // Persisted logs (queryable in the dashboard) so a failed turn can be inspected after the fact
   // instead of racing a live `wrangler tail`. head_sampling_rate 1 = keep every invocation.
@@ -13,6 +13,9 @@
   // scheduler worker via env.TICKER (service binding avoids CF 1042). Flue MERGES
   // user wrangler config, so this survives the build — verified post-build.
   "services": [{ "binding": "TICKER", "service": "hatchery-ticker" }],
+  // Coordinator Code Mode: project agents can run small JS/Python snippets in isolated
+  // Dynamic Workers. The tool is still gated by DB so every execution has an audit row.
+  "worker_loaders": [{ "binding": "DYNAMIC_WORKER_LOADER" }],
   // Project data store: skills, memory, transcripts, and conversation reply targets.
   // For skills, /__internal/scheduled loads bodies FRESH at fire time. Survives
   // Flue's wrangler merge.

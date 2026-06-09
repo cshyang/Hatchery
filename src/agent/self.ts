@@ -13,6 +13,14 @@ export interface SelfStatusInput {
   hasCodingRunner: boolean;
   hasAgentRunner: boolean;
   hasLinearAgentIngress: boolean;
+  hasCodeMode: boolean;
+  codeModeLimits: {
+    maxCodeBytes: number;
+    maxInputBytes: number;
+    maxOutputBytes: number;
+    cpuMs: number;
+    subRequests: number;
+  } | null;
   canRequestConnections: boolean;
   providerCatalog: ProviderCatalogEntry[];
   connectionState: ConnectionState[];
@@ -77,6 +85,13 @@ export function buildSelfStatus(input: SelfStatusInput) {
           ? 'Admin-approved routes can turn Linear state transitions into Hatchery agent-run receipts and dispatch the Trigger.dev-hosted Pi runner with Agent Kits. Boundary events are stored in the event ledger; route activation is admin-only.'
           : 'Linear agent-run intake and route proposals are available, but Trigger.dev runner dispatch is not configured yet. Route activation is admin-only.',
       ),
+      codeMode: capability(
+        input.hasCodeMode,
+        ['execute_code'],
+        input.hasCodeMode && input.codeModeLimits
+          ? `Coordinator Code Mode can run lightweight JavaScript and Python in Cloudflare Dynamic Workers with public network access by default. Limits: code ${input.codeModeLimits.maxCodeBytes} bytes, input ${input.codeModeLimits.maxInputBytes} bytes, output ${input.codeModeLimits.maxOutputBytes} bytes, CPU ${input.codeModeLimits.cpuMs}ms, subrequests ${input.codeModeLimits.subRequests}. It is not bash, not a repo workspace, and receives no Hatchery secrets or provider tokens.`
+          : 'Unavailable unless DB and DYNAMIC_WORKER_LOADER are configured. Code Mode is for lightweight JavaScript/Python only, not bash or repo workspaces.',
+      ),
       userLookup: capability(input.hasDb || input.hasBotToken, ['resolve_user'], 'Resolves Slack user ids via cache and, when available, Slack users.info.'),
       connections: capability(
         input.connectionToolNames.length > 0 || input.canRequestConnections,
@@ -101,6 +116,7 @@ export function buildSelfStatus(input: SelfStatusInput) {
       'Source-code evolution happens through workbench proposals, an external coding runner, PR review, and deployment; this agent does not edit or deploy its own code directly.',
       'Linear-driven coding work is control-plane only: Hatchery records leases and callbacks; the Trigger.dev runner owns Pi execution, Agent Kit loading, clone/edit/test/commit/PR, and never auto-merges from this runtime.',
       'Trigger.dev is the runner host, not the run-state source of truth. E2B or another sandbox/workspace provider is still required before running arbitrary third-party repos.',
+      'Coordinator Code Mode can execute lightweight JavaScript/Python only when configured; it has no bash, git, npm install, pip install, persistent filesystem, or source-code write authority.',
       'External writes must go through explicit gated tools; connected read APIs do not grant arbitrary write authority.',
       'GitHub PAT setup stores only auth-mode/repo metadata and a Nango connection reference; the PAT remains in Nango.',
     ],
