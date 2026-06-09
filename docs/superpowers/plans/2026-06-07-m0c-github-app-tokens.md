@@ -22,9 +22,13 @@ Phase 1 code is **merged to `main`, deployed via push-to-deploy CI** (`.github/w
 
 **The App-connect saga (resolved, for future reference):** private-app → **Make public** (Advanced tab) → install on the org → Callback URL `https://api.nango.dev/oauth/callback` + the **Setup URL from the Nango integration page** → and the real unlock: the connect flow only records on a **fresh install**, so an already-installed app hangs on "Connecting…" forever. Fix = **uninstall → reconnect through the Nango link** (NOT GitHub's own Install button — Nango's link carries the `state`). Then bump the App's repo perms to `Contents`/`Pull requests: Read & write` + approve. ⚠️ `GET /repos.permissions.push` is a **false-negative for App tokens** — verify via the credential's `permissions` field or an actual write (create+delete a ref).
 
-**Still open:**
-- **Task 1.5 (retire the PAT):** the App works, so `RUNNER_GITHUB_PAT_TEMP` is now pure fallback. Retire when comfortable; **rotate it regardless** (shared in chat). Projects `20168`/`demo` still reference their own (stale/PAT) github connections — they never run, but tidy them before fully removing the PAT.
-- **Phase 2 (self-serve `request_connection` app mode):** still unbuilt — the Slack agent can't yet *offer* "GitHub App" (only oauth/pat). Build Tasks 2.1+2.2 when you want self-serve onboarding.
+**Done (2026-06-09):**
+- ✅ **Phase 2** — `request_connection` offers GitHub App (`authMode: "app"` → `github-app`); agent recommends it. Merged `6e449b4`, CI-deployed `f46a9b45`.
+- ✅ **Task 1.5** — `RUNNER_GITHUB_PAT_TEMP` rotated/retired (done by operator).
+
+**✅ M0c is COMPLETE.** Runner uses per-project GitHub connections; the App path is live (bot identity, 1h scoped tokens); the agent can self-serve the App connect; the temp PAT is retired.
+
+Net-new follow-ups (separate roadmap, NOT M0c): live runner progress stream ("runner feels too workflow"); multi-role pi loop.
 
 ## Verification findings (load-bearing facts — already confirmed, do not re-litigate)
 
