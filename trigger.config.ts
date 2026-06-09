@@ -13,7 +13,19 @@ export default defineConfig({
       aptGet({ packages: ['git'] }), // clone/push need git; not guaranteed in the base image
       // pi is SPAWNED, not imported, so the esbuild bundler never includes it — `additionalPackages`
       // installs it (and its bin) into the bundle's node_modules. Pinned to the dev machine's version.
-      additionalPackages({ packages: ['@earendil-works/pi-coding-agent@0.78.0'] }),
+      // The capability extensions are loaded by run-coding-task via `-e <path>` (the container has no
+      // ~/.pi settings.json, so packages can't be auto-discovered). ask-user is deliberately NOT
+      // bundled: it blocks on human input and would hang a non-interactive `pi -p` run. Offline is
+      // lifted in run-coding-task so web-access/mcp-adapter can reach the network.
+      additionalPackages({
+        packages: [
+          '@earendil-works/pi-coding-agent@0.78.0',
+          'pi-subagents@0.27.0',
+          'pi-web-access@0.10.7',
+          'pi-mcp-adapter@2.9.0',
+          '@jerryan/pi-todo-lite@1.0.1',
+        ],
+      }),
       // ship the kit; lands at bundle root, where run-coding-task's process.cwd()-based path resolves it.
       additionalFiles({ files: ['agent-kits/coding-default/**'] }),
     ],
