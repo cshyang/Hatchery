@@ -18,6 +18,17 @@ export interface SlackFileDeps extends WorkspaceDeps {
   fetcher?: typeof fetch;
 }
 
+// Destination resolution mirrors reply_to_conversation: the model supplies only a
+// conversationId; channel/thread/token come from trusted config, never from the model.
+export type SlackTargetResolver = (
+  conversationId: string,
+) => Promise<{ channelId: string; threadTs: string | null; token: string } | null>;
+
+export interface SlackSendDeps extends WorkspaceDeps {
+  resolveTarget: SlackTargetResolver;
+  fetcher?: typeof fetch;
+}
+
 export interface LoadSlackFileResult {
   opId: string;
   status: 'completed' | 'failed';
@@ -118,12 +129,106 @@ export async function workspaceLoadSlackFile(
   }
 }
 
+export interface SendSlackFileResult {
+  opId: string;
+  status: 'completed' | 'failed';
+  fileId: string | null;
+  name: string | null;
+  bytes: number;
+  error: string | null;
+  durationMs: number;
+}
+
+interface SlackUploadUrlResponse {
+  ok: boolean;
+  error?: string;
+  upload_url?: string;
+  file_id?: string;
+}
+
+export async function workspaceSendFile(
+  deps: SlackSendDeps,
+  params: { path: string; title?: string; conversationId?: string },
+): Promise<SendSlackFileResult> {
+  const fetcher = deps.fetcher ?? fetch;
+  const cap = maxSlackFileBytes(deps.env);
+  const path = params.path?.trim() ?? '';
+  const op = await beginWorkspaceOp(deps, {
+    op: 'send_file',
+    detail: path || '(missing path)',
+    conversationId: params.conversationId,
+    bytesIn: 0,
+  });
+
+  const fail = async (message: string): Promise<SendSlackFileResult> => {
+    const failed = await op.failFile(path, message);
+    return { opId: failed.opId, status: 'failed', fileId: null, name: null, bytes: 0, error: failed.error, durationMs: failed.durationMs };
+  };
+
+  if (!path) return fail('path is required');
+
+  try {
+    const target = await deps.resolveTarget(params.conversationId?.trim() ?? '');
+    if (!target) return fail(`No Slack target found for conversationId "${params.conversationId ?? ''}".`);
+
+    const read = await deps.sandbox().readFile(path, { encoding: 'base64' });
+    if (!read.success) return fail('sandbox read failed');
+    const bytes = fromBase64(read.content ?? '');
+    if (bytes.byteLength === 0) return fail('file is empty or unreadable');
+    if (bytes.byteLength > cap) return fail(`file is too large (${bytes.byteLength} bytes > ${cap} bytes)`);
+
+    const filename = path.split('/').pop() || 'file';
+    const urlRes = await fetcher('https://slack.com/api/files.getUploadURLExternal', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${target.token}`, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ filename, length: String(bytes.byteLength) }).toString(),
+    });
+    const urlData = (await urlRes.json()) as SlackUploadUrlResponse;
+    if (!urlData.ok || !urlData.upload_url || !urlData.file_id) {
+      return fail(`Slack getUploadURLExternal failed: ${urlData.error ?? 'unknown error'}`);
+    }
+
+    const uploadRes = await fetcher(urlData.upload_url, { method: 'POST', body: bytes });
+    if (!uploadRes.ok) return fail(`Slack file upload failed: HTTP ${uploadRes.status}`);
+
+    const completeRes = await fetcher('https://slack.com/api/files.completeUploadExternal', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${target.token}`, 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({
+        files: [{ id: urlData.file_id, title: params.title?.trim() || filename }],
+        channel_id: target.channelId,
+        ...(target.threadTs ? { thread_ts: target.threadTs } : {}),
+      }),
+    });
+    const completeData = (await completeRes.json()) as { ok: boolean; error?: string };
+    if (!completeData.ok) return fail(`Slack completeUploadExternal failed: ${completeData.error ?? 'unknown error'}`);
+
+    const completedAt = await op.complete({
+      resultPreview: `sent ${bytes.byteLength} bytes from ${path} as ${filename}`,
+      exitCode: null,
+      bytesOut: bytes.byteLength,
+    });
+    return {
+      opId: op.id,
+      status: 'completed',
+      fileId: urlData.file_id,
+      name: filename,
+      bytes: bytes.byteLength,
+      error: null,
+      durationMs: completedAt - op.startedAt,
+    };
+  } catch (e) {
+    return fail(e instanceof Error ? e.message : String(e));
+  }
+}
+
 export function workspaceSlackFileTools(args: {
   db?: D1Like;
   sandbox?: SandboxFactory;
   projectId: string;
   env?: Record<string, unknown>;
   token?: string;
+  resolveTarget?: SlackTargetResolver;
   fetcher?: typeof fetch;
 }): ToolDefinition[] {
   if (!args.db || !args.sandbox || !args.token) return [];
@@ -135,7 +240,31 @@ export function workspaceSlackFileTools(args: {
     token: args.token,
     fetcher: args.fetcher,
   };
+  const resolveTarget = args.resolveTarget;
+  const sendTools: ToolDefinition[] = resolveTarget
+    ? [
+        defineTool({
+          name: 'workspace_send_file',
+          description:
+            'Upload a file from the sandbox container into the current Slack thread (e.g. a generated CSV or chart). Pass the container path; the destination is resolved from conversationId like reply_to_conversation. Size cap ~20MB. This shares the file — still send your text answer via reply_to_conversation.',
+          parameters: Type.Object({
+            path: Type.String({ description: 'Absolute container path of the file to send, e.g. /workspace/out/result.csv.' }),
+            title: Type.Optional(Type.String({ description: 'Display title in Slack. Defaults to the filename.' })),
+            conversationId: Type.Optional(Type.String({ description: 'Copy from the current Dispatch Input, same as your reply.' })),
+          }),
+          async execute(params) {
+            return safeJson(
+              await workspaceSendFile(
+                { db: deps.db, sandbox: deps.sandbox, projectId: deps.projectId, env: deps.env, resolveTarget, fetcher: deps.fetcher },
+                params as { path: string; title?: string; conversationId?: string },
+              ),
+            );
+          },
+        }),
+      ]
+    : [];
   return [
+    ...sendTools,
     defineTool({
       name: 'workspace_load_slack_file',
       description:
@@ -165,4 +294,11 @@ function toBase64(buffer: ArrayBuffer): string {
     binary += String.fromCharCode(...view.subarray(i, i + chunk));
   }
   return btoa(binary);
+}
+
+function fromBase64(content: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(content.replace(/\s+/g, ''));
+  const bytes = new Uint8Array(new ArrayBuffer(binary.length));
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
