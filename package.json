@@ -19,6 +19,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@cloudflare/sandbox": "^0.12.1",
     "@flue/runtime": "^0.9.1",
     "@flue/sdk": "^0.9.1",
     "@trigger.dev/sdk": "^4.4.6",
@@ -27,12 +28,13 @@
     "valibot": "^1.4.1"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.40.1",
     "@flue/cli": "^0.9.1",
     "@trigger.dev/build": "^4.4.6",
     "trigger.dev": "^4.4.6",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
-    "wrangler": "^4.95.0"
+    "wrangler": "^4.99.0"
   },
   "type": "module"
 }
