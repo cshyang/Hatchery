@@ -40,6 +40,7 @@ $EDITOR .env.deploy
 | `migrate` | applies D1 migrations to `hatchery-skills` |
 | `deploy` | builds Flue, deploys `hatchery` (crons included — the ticker worker is retired) |
 | `secrets` | pushes set values from `.env.deploy` to the Worker |
+| `manifest [url]` | prints the Slack app manifest with the worker URL filled in, ready to paste (url defaults to `HATCHERY_PUBLIC_URL`) |
 
 After you create/install the Slack app, add the Slack bot token to `.env.deploy` and rerun:
 
@@ -138,7 +139,8 @@ Workspace        clone/edit/test filesystem
 
 - Slack app event URL: `<worker-url>/slack/events`
 - Slack slash command URL: `<worker-url>/slack/commands` (`/hatchery` — declared in
-  `slack-app.manifest.json`; existing apps must re-apply the manifest to pick it up)
+  `slack-app.manifest.json`; existing apps must re-apply the manifest to pick it up).
+  `./scripts/setup.sh manifest` prints the paste-ready JSON with the worker URL filled in.
 - Nango webhook URL: `<worker-url>/nango/webhook`
 - Linear webhook URL: `<worker-url>/linear/webhook`
 
