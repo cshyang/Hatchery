@@ -107,7 +107,7 @@ guards the external ticker used to hit, minus the second worker. Crons are UTC, 
 | `src/setup` | Setup-status tool: what's connected, what's missing |
 | `src/config`, `src/shared` | Deployment config (team allowlist) and cross-cutting utils (redaction, byte bounds, KV idempotency) |
 | `trigger/` | The Trigger.dev `run-coding-task`: spawns Pi, manages branch/PR, parses the RPC stream |
-| `agent-kits/` | Markdown agent definitions + skills for the Pi runner (`coding-default` live; `delivery` is a WIP port) |
+| `agent-kits/` | Markdown agent definitions + skills for the Pi runner (`coding-default` live; `delivery` — the gated plan→implement→review pipeline — wired end-to-end but not yet activated on any route) |
 
 Bindings: D1 `hatchery-skills` (`DB`), KV `SLACK_EVENTS`, DO `SANDBOX` (container), and a
 Dynamic Worker loader. Flue generates the agent DO bindings (`FLUE_PROJECT_AGENT`,
