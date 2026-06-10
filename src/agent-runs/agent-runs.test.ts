@@ -4,6 +4,7 @@ import { createTestRunner } from '../shared/test-utils';
 import type { D1Like } from '../skills/repository';
 import { claimRunForDispatch, createAgentRun, findLatestRunByLinearIssue, getActiveAgentRunByBranch, getAgentRun, getAgentRunById, handleAgentRunCallback, updateAgentRun } from './repository';
 import { buildRunnerDispatch, claimAndDispatchRun, DISPATCH_MAX_ATTEMPTS, dispatchConcurrencyKey, reconcileAgentRuns, resolveDispatchGithubToken } from './dispatch';
+import { adHocIdentifier, assignCodingRunTool } from './assign-tool';
 import type { AgentRun } from './repository';
 
 const { test, run } = createTestRunner();
@@ -14,6 +15,7 @@ class FakeD1 implements D1Like {
   agentRuns: Row[] = [];
   events: Row[] = [];
   notifications: Row[] = [];
+  routes: Row[] = [];
   beforeUpdateAgentRun?: (row: Row, nextStatus: unknown) => void;
 
   prepare(query: string) {
@@ -91,6 +93,15 @@ class FakeD1 implements D1Like {
                   .filter((r) => r.status === 'running' && liveness(r) < Number(cutoff))
                   .sort((a, b) => Number(a.updated_at) - Number(b.updated_at))
                   .slice(0, Number(limit));
+                return { results: rows as T[] };
+              }
+            }
+            if (query.startsWith('SELECT') && query.includes('FROM agent_run_routes')) {
+              if (query.includes("WHERE project_id=? AND status='active'")) {
+                const [projectId] = values;
+                const rows = db.routes
+                  .filter((r) => r.project_id === projectId && r.status === 'active')
+                  .sort((a, b) => Number(b.priority ?? 0) - Number(a.priority ?? 0));
                 return { results: rows as T[] };
               }
             }
@@ -930,6 +941,73 @@ test('dispatchConcurrencyKey: same identifier in different projects never collid
   const a = dispatchConcurrencyKey({ projectId: 'p1', runId: 'r1', targetBranch: null, issue: { id: 'x', identifier: 'FRD-12', url: '', title: 't', description: null } });
   const b = dispatchConcurrencyKey({ projectId: 'p2', runId: 'r2', targetBranch: null, issue: { id: 'x', identifier: 'FRD-12', url: '', title: 't', description: null } });
   assert.notEqual(a, b);
+});
+
+// ── assign_coding_run (the assigner dispatch tool) ──────────────────────────────────────────────
+
+const activeRoute = (over: Row = {}): Row => ({
+  id: 'route-1', project_id: 'P', provider: 'linear', external_key: 'EDK', trigger_type: 'state',
+  trigger_value: 'Run Agent', github_owner: 'acme', github_repo: 'api', base_branch: 'main',
+  kit: 'harness', runtime: 'pi', sandbox_provider: 'e2b', priority: 0, status: 'active',
+  created_by_type: 'admin', created_by: 'admin-1', reason: 'r', created_at: 1, updated_at: 1,
+  activated_by: 'admin-1', activated_at: 1, disabled_by: null, disabled_at: null, ...over,
+});
+const execAssign = (db: FakeD1, input: Record<string, unknown>, nowMs = 1_750_000_000_000) =>
+  (assignCodingRunTool({ db, projectId: 'P', now: () => nowMs }).execute as (a: unknown) => Promise<string>)(input);
+
+test('assign_coding_run: refuses without an active route (no standing grant, no row written)', async () => {
+  const db = new FakeD1();
+  const out = await execAssign(db, { title: 'Fix slugify', description: 'AC: x' });
+  assert.match(out, /No active agent-run route/i);
+  assert.equal(db.agentRuns.length, 0);
+});
+
+test('assign_coding_run: queues a run on the route grant, and the stored payload survives the runner contract', async () => {
+  const db = new FakeD1();
+  db.routes.push(activeRoute());
+  const out = JSON.parse(await execAssign(db, {
+    title: 'Strip trailing hyphens in slugify',
+    description: 'AC:\n- slugify("!!!") === ""\nVerification: bun test',
+    identifier: 'FRD-9',
+    linearUrl: 'https://linear.app/x/issue/FRD-9',
+  }));
+  assert.equal(out.issueKey, 'FRD-9');
+  assert.equal(out.branch, 'harness/FRD-9');
+  assert.equal(out.kit, 'harness');
+  assert.equal(out.status, 'queued');
+  assert.equal(db.agentRuns.length, 1);
+  const row = db.agentRuns[0];
+  assert.equal(row.source_type, 'slack');
+  assert.equal(row.route_id, 'route-1');
+  // Producer↔contract assertion: the row dispatches through the SAME mapper the cron uses.
+  const run = (await getAgentRunById(db, String(row.id)))!;
+  const dispatch = buildRunnerDispatch(run, { githubToken: 'tok', runnerToken: 'rt', hatcheryPublicUrl: 'https://h.dev' });
+  assert.equal(dispatch.kit, 'harness');
+  assert.equal(dispatch.issue?.identifier, 'FRD-9');
+  assert.match(dispatch.issue?.description ?? '', /bun test/);
+  assert.equal(dispatchConcurrencyKey(dispatch), 'P:FRD-9', 'serializes with any Linear-triggered run for the same issue');
+});
+
+test('assign_coding_run: one live run per issue key — refuse while in flight, allow after terminal', async () => {
+  const db = new FakeD1();
+  db.routes.push(activeRoute());
+  await execAssign(db, { title: 'T', description: 'D', identifier: 'FRD-9' }, 1000);
+  const second = await execAssign(db, { title: 'T', description: 'D', identifier: 'FRD-9' }, 2000);
+  assert.match(second, /already has a run in flight/i);
+  assert.equal(db.agentRuns.length, 1);
+  db.agentRuns[0].status = 'completed';
+  const third = JSON.parse(await execAssign(db, { title: 'T again', description: 'D', identifier: 'FRD-9' }, 3000));
+  assert.equal(third.status, 'queued');
+  assert.equal(db.agentRuns.length, 2, 're-assign after terminal is a fresh run (same deterministic branch resumes the ledger)');
+});
+
+test('assign_coding_run: ad-hoc work gets a generated branch-safe identifier', async () => {
+  const db = new FakeD1();
+  db.routes.push(activeRoute());
+  const out = JSON.parse(await execAssign(db, { title: 'Tidy the README badges!', description: 'D' }));
+  assert.match(out.issueKey, /^A-tidy-the-readme-badges-[a-z0-9]+$/);
+  assert.equal(out.branch, `harness/${out.issueKey}`);
+  assert.equal(adHocIdentifier('!!!', 99), `A-task-${(99).toString(36).slice(-4)}`, 'all-punctuation titles fall back to "task"');
 });
 
 await run();
