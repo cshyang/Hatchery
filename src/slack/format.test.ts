@@ -10,7 +10,7 @@ test('formatSlackText converts common Markdown while preserving Slack entities a
   const input = [
     '# Setup',
     '',
-    '**Ready** for [GitHub](https://github.com/Calibrax-ai/autoship) in <#C123|dev>.',
+    '**Ready** for [GitHub](https://github.com/acme/widgets) in <#C123|dev>.',
     'Use `2 ** 3` and keep <https://linear.app|Linear> unchanged.',
     '',
     '```ts',
@@ -23,7 +23,7 @@ test('formatSlackText converts common Markdown while preserving Slack entities a
     [
       '*Setup*',
       '',
-      '*Ready* for <https://github.com/Calibrax-ai/autoship|GitHub> in <#C123|dev>.',
+      '*Ready* for <https://github.com/acme/widgets|GitHub> in <#C123|dev>.',
       'Use `2 ** 3` and keep <https://linear.app|Linear> unchanged.',
       '',
       '```ts',

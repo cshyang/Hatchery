@@ -179,7 +179,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
   blocks.push(
     `MEMORY NOTICES\n` +
       `When you call save_memory, update_memory, or forget_memory during a user-facing turn, include a short memory notice in ` +
-      `your final reply using the tool result wording, e.g. "Remembered: this channel uses Calibrax-ai/autoship as the default ` +
+      `your final reply using the tool result wording, e.g. "Remembered: this channel uses acme/widgets as the default ` +
       `repo." or "Memory updated: the Linear team key is EDK." Keep it one line; do not expose memory ids unless the person ` +
       `needs to edit or remove one.`,
   );

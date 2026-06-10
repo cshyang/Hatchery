@@ -484,7 +484,7 @@ test('request_connection: GitHub PAT requires a repo and stores the repo as meta
 
   const missingRepo = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'github', authMode: 'pat' });
   assert.match(missingRepo, /owner\/name/i);
-  assert.match(missingRepo, /Calibrax-ai\/autoship/i);
+  assert.match(missingRepo, /acme\/widgets/i);
   assert.equal(calls.length, 0, 'no Nango session starts without a repo-bound PAT');
 
   const badRepo = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'github', authMode: 'pat', repo: 'https://github.com/Acme/Repo/pull/1' });

@@ -41,7 +41,7 @@ test('prompt tells the agent to include concise memory notices after memory chan
     projectName: 'project_1',
     personality: null,
     catalog: [],
-    memoryBlock: 'WHAT YOU REMEMBER\nMemory [1% — 20/2000]\n[1] This channel uses Calibrax-ai/autoship.',
+    memoryBlock: 'WHAT YOU REMEMBER\nMemory [1% — 20/2000]\n[1] This channel uses acme/widgets.',
   });
 
   assert.match(prompt, /Remembered:/);
