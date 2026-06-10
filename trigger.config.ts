@@ -29,7 +29,7 @@ export default defineConfig({
         ],
       }),
       // ship the kits; they land at bundle root, where run-coding-task's process.cwd()-based path resolves them.
-      additionalFiles({ files: ['agent-kits/coding-default/**', 'agent-kits/delivery/**'] }),
+      additionalFiles({ files: ['agent-kits/coding-default/**', 'agent-kits/harness/**'] }),
     ],
   },
 });

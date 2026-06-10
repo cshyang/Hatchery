@@ -135,7 +135,7 @@ export async function resolveDispatchGithubToken(run: AgentRun, deps: RunnerDisp
 
 /**
  * Per-issue serialization key. Two dispatches for the same issue must never run concurrently —
- * for the delivery kit both would commit to the same deterministic `harness/<id>` branch; for
+ * for the harness kit both would commit to the same deterministic `harness/<id>` branch; for
  * coding-default a continuation pushes a specific PR branch. The task's queue has
  * `concurrencyLimit: 1`, and Trigger creates a separate one-slot queue per distinct key, so
  * different issues still run in parallel.
