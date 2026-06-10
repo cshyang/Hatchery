@@ -97,8 +97,7 @@ async function fireHeartbeat(topic?: string): Promise<number> {
     active.map((b) =>
       dispatch({
         agent: 'project',
-        id: agentInstanceId(b.projectId),
-        session: `heartbeat:${b.projectId}`,
+        id: agentInstanceId(b.projectId, 'heartbeat'),
         input: { kind: 'heartbeat', now, ...(topic ? { topic } : {}) },
       }),
     ),
@@ -158,8 +157,7 @@ app.post('/__internal/scheduled', async (c) => {
 
   await dispatch({
     agent: 'project',
-    id: agentInstanceId(body.projectId),
-    session: `job:${body.projectId}:${body.jobId}`,
+    id: agentInstanceId(body.projectId, `job:${body.jobId}`),
     input,
   });
   return c.json({ dispatched: true, jobId: body.jobId, skill: input.skill ?? null });
@@ -349,8 +347,7 @@ app.post('/__internal/reflect-sweep', async (c) => {
     if (!transcript) continue; // raced to empty; skip
     await dispatch({
       agent: 'project',
-      id: agentInstanceId(projectId),
-      session: `reflect:${projectId}:${Date.now()}`, // fresh session — no carryover, no thread pollution
+      id: agentInstanceId(projectId, `reflect:${Date.now()}`), // fresh instance — no carryover, no thread pollution
       input: { kind: 'heartbeat', now, instructions: buildReflectInstructions(transcript) },
     });
     swept++;
@@ -663,8 +660,7 @@ app.post('/slack/events', async (c) => {
   await dispatchSlackTurnWithFallback(
     {
       agent: 'project',
-      id: agentInstanceId(msg.projectId),
-      session: `conv:${msg.conversationId}`,
+      id: agentInstanceId(msg.projectId, `conv:${msg.conversationId}`),
       // Forward the author identity in neutral terms so history retains who said what — the
       // future reflection job reads senderId from it to attribute facts. (The initializer itself
       // can't see this; only the model does.)

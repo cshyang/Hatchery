@@ -20,16 +20,15 @@
   "license": "ISC",
   "dependencies": {
     "@cloudflare/sandbox": "^0.12.1",
-    "@flue/runtime": "^0.9.1",
-    "@flue/sdk": "^0.9.1",
+    "@flue/runtime": "^0.11.0",
+    "@flue/sdk": "^0.11.0",
     "@trigger.dev/sdk": "^4.4.6",
-    "agents": "^0.13.3",
+    "agents": "^0.15.0",
     "hono": "^4.12.23",
     "valibot": "^1.4.1"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.40.1",
-    "@flue/cli": "^0.9.1",
+    "@flue/cli": "^0.11.0",
     "@trigger.dev/build": "^4.4.6",
     "trigger.dev": "^4.4.6",
     "tsx": "^4.22.4",
