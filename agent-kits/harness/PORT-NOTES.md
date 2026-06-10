@@ -314,3 +314,30 @@ the last autoship-era name standing. Same change flips `DEFAULT_KIT` to `harness
 now the default execution path; `coding-default` is legacy, scheduled for deletion once the
 harness kit has real-run mileage. Prose below this section predates the rename and says
 "delivery kit" — read it as this kit.
+
+## Express lane (2026-06-11)
+
+Extends earn-or-skip to the planning leg — "planning as tool, not phase", mirroring the oracle
+idiom. At state `new` the conductor runs a five-criterion triage (one-sentence goal, bounded
+change, evident verification, no security surface, single slice); ALL pass → `express.md`
+artifact + inference record, issue body becomes the contract, straight to implementation.
+Uncertainty resolves the OPPOSITE way from the oracle test: unsure → full pipeline.
+Discipline counterweights: implementation review is MANDATORY in express (only independent
+judge left in the lane); verification unchanged (triple-run, clean worktree); PR checklist
+must open with an express disclosure line; escalation is one-way (any contradicting evidence
+→ append ## Escalated to express.md, dispatch planner, never re-enter express).
+New derived state: `express-build`. Enum: `artifact: express`.
+Motivation: harness is now the DEFAULT kit for every dispatch; trivial issues must not pay
+full-pipeline latency/cost. This is step one toward one-kit-adaptive-depth (coding-default
+deletion follows real-run mileage).
+
+### Express live test (TEST-2, 2026-06-11)
+
+One run, all invariants held: triage wrote express.md (5 criteria + evidence), planning+oracle
+skips logged, NO spec.md, implementation review ran and APPROVED **despite the same model
+skipping that gate on TEST-1 the day before** (the mandatory-in-express rule out-steers the
+learned default), verification triple-run 3/3, clean one-line fix committed on harness/TEST-2.
+Found + fixed: the fix shipped UNPINNED (no new test asserting the AC lines — the oracle isn't
+there to pin behavior in express). Added the pin-the-bug rule with a mechanical conductor check.
+Known flake reconfirmed: model-authored timestamps in artifacts are unreliable (review claimed
+12:00:00Z); mtime/git remain the clock.
