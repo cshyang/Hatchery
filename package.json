@@ -16,8 +16,8 @@
     "trigger:deploy": "trigger deploy"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "cshyang <cshyang.chng@gmail.com>",
+  "license": "Apache-2.0",
   "dependencies": {
     "@cloudflare/sandbox": "^0.12.1",
     "@flue/runtime": "^0.11.0",
