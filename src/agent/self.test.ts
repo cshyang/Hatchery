@@ -23,6 +23,8 @@ test('buildSelfStatus reports the live runtime manifest without exposing connect
     hasLinearAgentIngress: true,
     hasCodeMode: true,
     codeModeLimits: { maxCodeBytes: 20_000, maxInputBytes: 100_000, maxOutputBytes: 20_000, cpuMs: 5000, subRequests: 50 },
+    hasWorkspace: true,
+    workspaceLimits: { execTimeoutMs: 60_000, maxExecTimeoutMs: 300_000, maxOutputBytes: 20_000, maxReadBytes: 1_000_000, maxWriteBytes: 1_000_000 },
     providerCatalog: [
       { provider: 'github', summary: 'read repos' },
       { provider: 'notion', summary: 'read docs' },
@@ -56,6 +58,18 @@ test('buildSelfStatus reports the live runtime manifest without exposing connect
   assert.match(status.capabilities.codeMode.note, /JavaScript/);
   assert.match(status.capabilities.codeMode.note, /Python/);
   assert.match(status.capabilities.codeMode.note, /public network/);
+  assert.equal(status.capabilities.workspace.enabled, true);
+  assert.deepEqual(status.capabilities.workspace.tools, [
+    'workspace_exec',
+    'workspace_write_file',
+    'workspace_read_file',
+    'workspace_load_slack_file',
+    'workspace_send_file',
+  ]);
+  assert.match(status.capabilities.workspace.note, /EPHEMERAL/);
+  assert.match(status.capabilities.workspace.note, /pandas/);
+  assert.match(status.capabilities.workspace.note, /distinct from Code Mode/i);
+  assert.match(status.capabilities.workspace.note, /No Hatchery secrets/);
   assert.equal(JSON.stringify(status).includes('NANGO_SECRET_KEY'), false);
   assert.equal(JSON.stringify(status).includes('OpenCode'), false);
   assert.equal(JSON.stringify(status).includes('Claude Code'), false);
@@ -68,7 +82,8 @@ test('buildSelfStatus reports the live runtime manifest without exposing connect
   assert.deepEqual(status.connections.requestableProviders, ['github', 'notion']);
   assert.deepEqual(status.connections.toolNames, ['github_call_api', 'request_connection']);
   assert.equal(JSON.stringify(status).includes('owner/private-repo'), false);
-  assert.ok(status.limits.some((line) => line.includes('no filesystem')));
+  // With workspace enabled, the filesystem limit names the sandbox instead of denying outright.
+  assert.ok(status.limits.some((line) => line.includes('no native filesystem') && line.includes('workspace sandbox')));
   assert.ok(status.limits.some((line) => line.includes('No raw environment access')));
 });
 
@@ -87,6 +102,8 @@ test('self_status tool returns the manifest as formatted JSON', async () => {
     hasLinearAgentIngress: true,
     hasCodeMode: false,
     codeModeLimits: null,
+    hasWorkspace: false,
+    workspaceLimits: null,
     providerCatalog: [],
     connectionState: [],
     connectionToolNames: [],
@@ -104,6 +121,10 @@ test('self_status tool returns the manifest as formatted JSON', async () => {
   assert.deepEqual(parsed.capabilities.agentRuns.tools, ['propose_agent_route']);
   assert.equal(parsed.capabilities.codeMode.enabled, false);
   assert.deepEqual(parsed.capabilities.codeMode.tools, []);
+  assert.equal(parsed.capabilities.workspace.enabled, false);
+  assert.deepEqual(parsed.capabilities.workspace.tools, []);
+  assert.match(parsed.capabilities.workspace.note, /SANDBOX/);
+  assert.ok(parsed.limits.some((line: string) => line.includes('no filesystem or shell access')));
 });
 
 run();

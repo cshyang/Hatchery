@@ -15,7 +15,7 @@ export interface SandboxLike {
     stderr: string;
   }>;
   writeFile(path: string, content: string, options?: { encoding?: string }): Promise<{ success: boolean }>;
-  readFile(path: string): Promise<{ success: boolean; content: string }>;
+  readFile(path: string, options?: { encoding?: string }): Promise<{ success: boolean; content: string }>;
 }
 
 // Lazy: the container boots on first operation, so tools receive a thunk and

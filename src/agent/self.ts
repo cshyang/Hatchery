@@ -21,6 +21,14 @@ export interface SelfStatusInput {
     cpuMs: number;
     subRequests: number;
   } | null;
+  hasWorkspace: boolean;
+  workspaceLimits: {
+    execTimeoutMs: number;
+    maxExecTimeoutMs: number;
+    maxOutputBytes: number;
+    maxReadBytes: number;
+    maxWriteBytes: number;
+  } | null;
   canRequestConnections: boolean;
   providerCatalog: ProviderCatalogEntry[];
   connectionState: ConnectionState[];
@@ -92,6 +100,13 @@ export function buildSelfStatus(input: SelfStatusInput) {
           ? `Coordinator Code Mode can run lightweight JavaScript and Python in Cloudflare Dynamic Workers with public network access by default. Limits: code ${input.codeModeLimits.maxCodeBytes} bytes, input ${input.codeModeLimits.maxInputBytes} bytes, output ${input.codeModeLimits.maxOutputBytes} bytes, CPU ${input.codeModeLimits.cpuMs}ms, subrequests ${input.codeModeLimits.subRequests}. It is not bash, not a repo workspace, and receives no Hatchery secrets or provider tokens.`
           : 'Unavailable unless DB and DYNAMIC_WORKER_LOADER are configured. Code Mode is for lightweight JavaScript/Python only, not bash or repo workspaces.',
       ),
+      workspace: capability(
+        input.hasWorkspace,
+        ['workspace_exec', 'workspace_write_file', 'workspace_read_file', 'workspace_load_slack_file', 'workspace_send_file'],
+        input.hasWorkspace && input.workspaceLimits
+          ? `Workspace is a real per-project sandbox container (Ubuntu with git, node, python3 + pandas/numpy) for files, spreadsheets, shell commands, and multi-step data work — distinct from Code Mode: use execute_code for small pure functions, workspace tools for anything needing a filesystem or shell. The filesystem is EPHEMERAL (container sleeps after ~10 idle minutes and loses all files; first command after idle pays a ~6s start). Slack-attached files load into /workspace/inputs via workspace_load_slack_file; generated files post back to the thread via workspace_send_file. Limits: exec timeout ${input.workspaceLimits.execTimeoutMs}ms (max ${input.workspaceLimits.maxExecTimeoutMs}ms), output ${input.workspaceLimits.maxOutputBytes} bytes, file read/write ${input.workspaceLimits.maxReadBytes}/${input.workspaceLimits.maxWriteBytes} bytes. No Hatchery secrets, provider tokens, or Slack credentials enter the container.`
+          : 'Unavailable unless DB and the SANDBOX container binding are configured.',
+      ),
       userLookup: capability(input.hasDb || input.hasBotToken, ['resolve_user'], 'Resolves Slack user ids via cache and, when available, Slack users.info.'),
       connections: capability(
         input.connectionToolNames.length > 0 || input.canRequestConnections,
@@ -110,7 +125,9 @@ export function buildSelfStatus(input: SelfStatusInput) {
       toolNames: input.connectionToolNames,
     },
     limits: [
-      'This Durable Object agent has no filesystem or shell access.',
+      input.hasWorkspace
+        ? 'This Durable Object agent has no native filesystem; shell and files exist only inside the ephemeral workspace sandbox container, through audited workspace tools.'
+        : 'This Durable Object agent has no filesystem or shell access.',
       'No raw environment access; Worker secrets are resolved only by trusted broker/tool code.',
       'Repository/source inspection requires a connected provider such as GitHub; it is not VM-style self-introspection.',
       'Source-code evolution happens through workbench proposals, an external coding runner, PR review, and deployment; this agent does not edit or deploy its own code directly.',

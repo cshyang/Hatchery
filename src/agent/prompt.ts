@@ -86,6 +86,19 @@ const COORDINATOR_CODE_MODE =
   `state, and not source-code editing. Do not put secrets into code/input; the Dynamic Worker receives ` +
   `no Hatchery secrets, provider tokens, DB bindings, or Slack credentials.`;
 
+const WORKSPACE_SANDBOX =
+  `WORKSPACE SANDBOX\n` +
+  `When work needs a real filesystem or shell — user-attached files, spreadsheets (python3 with pandas is ` +
+  `installed), multi-step scripts, generated output files — use the workspace tools instead of execute_code: ` +
+  `workspace_load_slack_file pulls a Slack attachment (ids in attachedFiles on the Dispatch Input) into ` +
+  `/workspace/inputs, workspace_exec runs shell commands, workspace_write_file/workspace_read_file move text ` +
+  `in and out, and workspace_send_file posts a generated file back into the thread (your text answer still ` +
+  `goes through reply_to_conversation). The container filesystem is EPHEMERAL: it sleeps after ~10 idle ` +
+  `minutes and loses everything, so never assume files from earlier turns still exist — re-load inputs and ` +
+  `verify with ls before reusing state. The first command after idle takes ~6s extra. Boundary: execute_code ` +
+  `for small pure functions; workspace for anything touching files or shell. The container receives no ` +
+  `Hatchery secrets, provider tokens, or Slack credentials — never echo credentials into it.`;
+
 // Guidance on AUTHORING skills — kept consistent whether or not the catalog is empty, because
 // the failure mode of a self-improving agent is skill SPRAWL (many narrow one-off skills nobody
 // finds), not too few skills. So: write broad/class-level, extend before adding, archive (never
@@ -161,7 +174,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
   );
 
   // 4–7. Behavioral guidance + platform — stable, model-agnostic, always on.
-  blocks.push(FINISHING_THE_JOB, USING_YOUR_TOOLS, SLACK_FORMATTING, CONNECTING_THE_DOTS, SETUP_GUIDANCE, COORDINATOR_CODE_MODE);
+  blocks.push(FINISHING_THE_JOB, USING_YOUR_TOOLS, SLACK_FORMATTING, CONNECTING_THE_DOTS, SETUP_GUIDANCE, COORDINATOR_CODE_MODE, WORKSPACE_SANDBOX);
 
   blocks.push(
     `MEMORY NOTICES\n` +

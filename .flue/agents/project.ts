@@ -16,7 +16,7 @@ import { buildConnectionRuntime } from '../../src/connections/runtime';
 import { setupStatusTool } from '../../src/setup/status';
 import { codeModeLimits, codeModeTools, hasCodeModeCapability, type DynamicWorkerLoaderLike } from '../../src/code-mode/code-mode';
 import { getSandbox } from '@cloudflare/sandbox';
-import { workspaceTools, type SandboxLike } from '../../src/workspace/workspace';
+import { hasWorkspaceCapability, workspaceLimits, workspaceTools, type SandboxLike } from '../../src/workspace/workspace';
 import { workspaceSlackFileTools } from '../../src/workspace/slack-files';
 
 // The project agent. Addressed at /agents/project/<id>, id = "project:<projectId>:agent:<slug>"
@@ -160,6 +160,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   const sandbox = sandboxNamespace
     ? () => getSandbox(sandboxNamespace, projectId) as unknown as SandboxLike
     : undefined;
+  const hasWorkspace = hasWorkspaceCapability({ db, sandbox });
 
   const tools: ToolDefinition[] = [
     replyToConversation,
@@ -177,6 +178,8 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       hasLinearAgentIngress: typeof env.LINEAR_WEBHOOK_SECRET === 'string',
       hasCodeMode,
       codeModeLimits: hasCodeMode ? limits : null,
+      hasWorkspace,
+      workspaceLimits: hasWorkspace ? workspaceLimits(env) : null,
       canRequestConnections: connectionRuntime.canRequestConnections,
       providerCatalog: connectionRuntime.providerCatalog,
       connectionState: connectionRuntime.state,
@@ -190,7 +193,22 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     ...(db ? searchTools(db, projectId) : []),
     ...codeModeTools({ db, loader: dynamicWorkerLoader, projectId, env }),
     ...workspaceTools({ db, sandbox, projectId, env }),
-    ...workspaceSlackFileTools({ db, sandbox, projectId, env, token: botToken }),
+    ...workspaceSlackFileTools({
+      db,
+      sandbox,
+      projectId,
+      env,
+      token: botToken,
+      // Same trust line as reply_to_conversation: the model names a conversation,
+      // trusted config supplies channel/thread/token.
+      resolveTarget: async (conversationId) => {
+        const target = await resolveTarget(db, binding, projectId, slug, conversationId);
+        if (!target) return null;
+        const token = env[target.transportTokenRef] as string | undefined;
+        if (!token) return null;
+        return { channelId: target.externalSpaceId, threadTs: target.externalConversationId, token };
+      },
+    }),
     ...(db ? workbenchTools(db, projectId) : []),
     ...(db ? sourceChangeTools({ db, projectId, runnerUrl: codingRunnerUrl, runnerToken: workbenchRunnerToken }) : []),
     ...connectionRuntime.tools,

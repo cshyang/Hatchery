@@ -4,7 +4,14 @@ import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
 import type { D1Like } from '../skills/repository';
 import { listWorkspaceOps, type SandboxLike } from './workspace';
-import { maxSlackFileBytes, workspaceLoadSlackFile, workspaceSlackFileTools, WORKSPACE_INPUTS_DIR } from './slack-files';
+import {
+  maxSlackFileBytes,
+  workspaceLoadSlackFile,
+  workspaceSendFile,
+  workspaceSlackFileTools,
+  WORKSPACE_INPUTS_DIR,
+  type SlackTargetResolver,
+} from './slack-files';
 
 const { test, run } = createTestRunner();
 
@@ -71,6 +78,8 @@ class FakeD1 implements D1Like {
 class FakeSandbox implements SandboxLike {
   execCalls: string[] = [];
   writes: Array<{ path: string; content: string; options?: { encoding?: string } }> = [];
+  reads: Array<{ path: string; options?: { encoding?: string } }> = [];
+  files = new Map<string, string>(); // base64-encoded contents
 
   async exec(command: string) {
     this.execCalls.push(command);
@@ -82,8 +91,11 @@ class FakeSandbox implements SandboxLike {
     return { success: true };
   }
 
-  async readFile(): Promise<{ success: boolean; content: string }> {
-    throw new Error('unused');
+  async readFile(path: string, options?: { encoding?: string }): Promise<{ success: boolean; content: string }> {
+    this.reads.push({ path, options });
+    const content = this.files.get(path);
+    if (content === undefined) throw new Error(`no such file: ${path}`);
+    return { success: true, content };
   }
 }
 
@@ -204,14 +216,131 @@ test('loadSlackFile: hostile filename is sanitized into the inputs dir', async (
   assert.ok(!result.path!.includes('..'));
 });
 
-test('workspaceSlackFileTools: gated off without db, sandbox, or token', () => {
+test('workspaceSlackFileTools: gated off without db, sandbox, or token; send needs resolveTarget', () => {
   const db = new FakeD1();
   const sandbox = new FakeSandbox();
   assert.equal(workspaceSlackFileTools({ projectId: 'p' }).length, 0);
   assert.equal(workspaceSlackFileTools({ db, sandbox: () => sandbox, projectId: 'p' }).length, 0);
   assert.equal(workspaceSlackFileTools({ db, projectId: 'p', token: 't' }).length, 0);
-  const tools = workspaceSlackFileTools({ db, sandbox: () => sandbox, projectId: 'p', token: 't' });
-  assert.deepEqual(tools.map((t) => t.name), ['workspace_load_slack_file']);
+  const loadOnly = workspaceSlackFileTools({ db, sandbox: () => sandbox, projectId: 'p', token: 't' });
+  assert.deepEqual(loadOnly.map((t) => t.name), ['workspace_load_slack_file']);
+  const withSend = workspaceSlackFileTools({
+    db,
+    sandbox: () => sandbox,
+    projectId: 'p',
+    token: 't',
+    resolveTarget: async () => ({ channelId: 'C1', threadTs: null, token: 't' }),
+  });
+  assert.deepEqual(withSend.map((t) => t.name).sort(), ['workspace_load_slack_file', 'workspace_send_file']);
+});
+
+interface SendCall {
+  url: string;
+  headers: Record<string, string>;
+  body: unknown;
+}
+
+function sendFetcher(args: {
+  uploadUrl?: unknown;
+  uploadStatus?: number;
+  complete?: unknown;
+  calls?: SendCall[];
+}): typeof fetch {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    args.calls?.push({ url, headers: (init?.headers ?? {}) as Record<string, string>, body: init?.body });
+    if (url.startsWith('https://slack.com/api/files.getUploadURLExternal')) {
+      return new Response(JSON.stringify(args.uploadUrl ?? { ok: true, upload_url: 'https://upload.slack.example/u1', file_id: 'F_NEW' }));
+    }
+    if (url.startsWith('https://upload.slack.example/')) {
+      return new Response('OK', { status: args.uploadStatus ?? 200 });
+    }
+    if (url.startsWith('https://slack.com/api/files.completeUploadExternal')) {
+      return new Response(JSON.stringify(args.complete ?? { ok: true }));
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
+}
+
+function sendDeps(db: FakeD1, sandbox: FakeSandbox, fetcher: typeof fetch, args: { target?: ReturnType<SlackTargetResolver> | null; env?: Record<string, unknown> } = {}) {
+  const resolveTarget: SlackTargetResolver = async () =>
+    args.target === null ? null : { channelId: 'C9', threadTs: '111.222', token: 'xoxb-send-token' };
+  return { db, sandbox: () => sandbox, projectId: 'proj-1', env: args.env ?? {}, resolveTarget, fetcher };
+}
+
+test('sendFile: reads base64 from sandbox, runs the 3-step external upload into the thread', async () => {
+  const db = new FakeD1();
+  const sandbox = new FakeSandbox();
+  sandbox.files.set('/workspace/out/result.csv', btoa('a,b\n1,2\n'));
+  const calls: SendCall[] = [];
+  const result = await workspaceSendFile(sendDeps(db, sandbox, sendFetcher({ calls })), {
+    path: '/workspace/out/result.csv',
+    conversationId: 'conv-1',
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.fileId, 'F_NEW');
+  assert.equal(result.name, 'result.csv');
+  assert.equal(result.bytes, 8);
+
+  assert.deepEqual(sandbox.reads[0], { path: '/workspace/out/result.csv', options: { encoding: 'base64' } });
+
+  const [getUrl, upload, complete] = calls;
+  assert.ok(String(getUrl.body).includes('filename=result.csv'));
+  assert.ok(String(getUrl.body).includes('length=8'));
+  assert.equal(getUrl.headers.authorization, 'Bearer xoxb-send-token');
+  assert.equal(new TextDecoder().decode(upload.body as Uint8Array), 'a,b\n1,2\n');
+  const completeBody = JSON.parse(String(complete.body));
+  assert.equal(completeBody.channel_id, 'C9');
+  assert.equal(completeBody.thread_ts, '111.222');
+  assert.deepEqual(completeBody.files, [{ id: 'F_NEW', title: 'result.csv' }]);
+
+  const [audit] = await listWorkspaceOps(db, 'proj-1');
+  assert.equal(audit.op, 'send_file');
+  assert.equal(audit.status, 'completed');
+  assert.equal(audit.bytesOut, 8);
+  assert.ok(!JSON.stringify(db.rows).includes('xoxb-send-token'));
+});
+
+test('sendFile: fails without a resolvable target, before touching the sandbox', async () => {
+  const db = new FakeD1();
+  const sandbox = new FakeSandbox();
+  const result = await workspaceSendFile(sendDeps(db, sandbox, sendFetcher({}), { target: null }), {
+    path: '/workspace/out/x.csv',
+    conversationId: 'conv-x',
+  });
+  assert.equal(result.status, 'failed');
+  assert.ok(String(result.error).includes('No Slack target'));
+  assert.equal(sandbox.reads.length, 0);
+});
+
+test('sendFile: oversize, missing file, upload-step failure, and complete-step failure all audit as failed', async () => {
+  const db = new FakeD1();
+  const sandbox = new FakeSandbox();
+  sandbox.files.set('/workspace/big.bin', btoa('x'.repeat(200)));
+  const big = await workspaceSendFile(sendDeps(db, sandbox, sendFetcher({}), { env: { WORKSPACE_MAX_SLACK_FILE_BYTES: '100' } }), {
+    path: '/workspace/big.bin',
+  });
+  assert.equal(big.status, 'failed');
+  assert.ok(String(big.error).includes('too large'));
+
+  const missing = await workspaceSendFile(sendDeps(db, sandbox, sendFetcher({})), { path: '/workspace/nope.csv' });
+  assert.equal(missing.status, 'failed');
+
+  sandbox.files.set('/workspace/ok.csv', btoa('data'));
+  const httpFail = await workspaceSendFile(sendDeps(db, sandbox, sendFetcher({ uploadStatus: 500 })), { path: '/workspace/ok.csv' });
+  assert.equal(httpFail.status, 'failed');
+  assert.ok(String(httpFail.error).includes('500'));
+
+  const completeFail = await workspaceSendFile(sendDeps(db, sandbox, sendFetcher({ complete: { ok: false, error: 'not_in_channel' } })), {
+    path: '/workspace/ok.csv',
+  });
+  assert.equal(completeFail.status, 'failed');
+  assert.ok(String(completeFail.error).includes('not_in_channel'));
+
+  const audits = await listWorkspaceOps(db, 'proj-1');
+  assert.equal(audits.length, 4);
+  assert.ok(audits.every((a) => a.op === 'send_file' && a.status === 'failed'));
 });
 
 test('maxSlackFileBytes: default 20MB, env override, junk falls back', () => {
