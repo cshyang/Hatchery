@@ -55,6 +55,59 @@ One agent instance = one conversation (Flue 0.11 thread-as-instance). Instance i
 `conv:<conversationId>` (Slack threads), `heartbeat`, `job:<jobId>` (reminders),
 `reflect:<ts>` (nightly REM), `work:<itemId>` (workbench).
 
+### The layers
+
+Conceptually the system is five layers, and the model's judgment is deliberately
+sandwiched between two deterministic ones: the gateway above it filters what is worth a
+model call, the execution layer below it does only what it is told and leaves an audit
+row. Token spend and blast radius are both pinched at the agent layer.
+
+```mermaid
+flowchart TB
+    subgraph L1 ["1 · Ingress — events enter"]
+        direction LR
+        slack[Slack events]
+        linear[Linear webhooks]
+        nango[Nango webhooks]
+        cron[Cron clock]
+    end
+    subgraph L2 ["2 · Gateway — deterministic control plane"]
+        direction LR
+        verify[verify + dedupe]
+        routes[routing: bindings, agent-run routes]
+        plane[lifecycles: agent_runs, work_items, reminders]
+    end
+    subgraph L3 ["3 · Agent — judgment"]
+        agent["project agent DO (Flue)<br>one instance per scope: conv / heartbeat / job / reflect / work"]
+    end
+    subgraph L4 ["4 · Execution — muscle"]
+        direction LR
+        sandbox[Sandbox container]
+        code[code mode<br>Dynamic Workers]
+        runner[Trigger.dev pi runner<br>+ agent kits]
+    end
+    subgraph L5 ["5 · State — memory"]
+        direction LR
+        d1[("D1: bindings, messages,<br>memories, skills, runs...")]
+        kv[("KV: idempotency")]
+    end
+    L1 --> L2 -->|"dispatch(agent, id, input)"| L3 --> L4
+    L2 -.-> L5
+    L3 -.-> L5
+```
+
+1. **Ingress** — things happen: Slack messages, Linear transitions, OAuth callbacks, and
+   time itself (the crons are just another event source). No intelligence, just signals.
+2. **Gateway** — decisions in code: signature checks, KV dedupe, project resolution, and
+   the bookkeeping state machines. Deterministic, cheap, testable — no tokens spent.
+3. **Agent** — decisions by model. The only layer with judgment; the instance id's scope
+   decides which lane of the agent wakes up.
+4. **Execution** — muscle in three sizes: the sandbox container (shell/fs/git), Dynamic
+   Workers (code snippets), and the Trigger.dev pi runner (repo-scale coding). All lazy,
+   all audited, none of them think for themselves.
+5. **State** — what survives: D1 is the durable truth, KV the short-lived dedupe.
+   Everything above can die and restart; this layer is why that's fine.
+
 ### Life of a Slack turn
 
 ```mermaid
