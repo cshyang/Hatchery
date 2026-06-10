@@ -3,8 +3,7 @@
 Hatchery deploys as a small control plane plus a separate coding runner.
 
 ```text
-hatchery          Cloudflare Worker + Flue Durable Objects
-hatchery-ticker   Cloudflare cron Worker that pokes Hatchery
+hatchery          Cloudflare Worker + Flue Durable Objects (hosts its own crons)
 run-coding-task   Trigger.dev task that runs Pi + Agent Kits
 ```
 
@@ -14,7 +13,7 @@ merge, or production deploy authority.
 
 ## Prerequisites
 
-- Node `>=22.18`. Flue `0.9.1` rejects older Node versions.
+- Node `>=22.18`. Flue `0.11` rejects older Node versions.
 - `npm install`
 - Cloudflare account + Wrangler auth.
 - Trigger.dev project and secret key.
@@ -39,8 +38,8 @@ $EDITOR .env.deploy
 |---|---|
 | `resources` | creates D1 + KV if absent, writes ids into `wrangler.jsonc` |
 | `migrate` | applies D1 migrations to `hatchery-skills` |
-| `deploy` | builds Flue, deploys `hatchery`, then deploys `hatchery-ticker` |
-| `secrets` | pushes set values from `.env.deploy` to both Workers |
+| `deploy` | builds Flue, deploys `hatchery` (crons included — the ticker worker is retired) |
+| `secrets` | pushes set values from `.env.deploy` to the Worker |
 
 After you create/install the Slack app, add the Slack bot token to `.env.deploy` and rerun:
 
@@ -55,7 +54,7 @@ Everything account-specific lives in `.env.deploy` and is pushed as Worker secre
 | Secret / var | Worker | Required for |
 |---|---|---|
 | `ZAI_API_KEY` | hatchery | model turns inside the Cloudflare agent |
-| `HEARTBEAT_TOKEN` | both Cloudflare workers | ticker pokes and reflection |
+| `HEARTBEAT_TOKEN` | hatchery | guards the internal cron-fired routes |
 | `SLACK_SIGNING_SECRET` | hatchery | `/slack/events` verification |
 | `SLACK_BOT_TOKEN_DEFAULT` | hatchery | Slack replies |
 | `KNOWN_TEAM_IDS` | hatchery | Slack auto-provision allowlist |
@@ -116,7 +115,7 @@ unknown kits fail fast in the control plane instead of inside a Trigger run.
 
 | Secret | Workflow | Purpose |
 |---|---|---|
-| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | `deploy.yml` | Worker + ticker deploy |
+| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | `deploy.yml` | Worker deploy |
 | `TRIGGER_ACCESS_TOKEN` | `deploy-runner.yml` | Trigger.dev personal access token for `trigger deploy` |
 
 ## Workspace Provider
