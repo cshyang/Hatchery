@@ -89,7 +89,7 @@ observe((event, ctx) => {
 // project with NO specific work — the agent stays silent unless it has a self-scheduled
 // reminder due. A caller MAY pass {topic} to give the wake something to act on. Per-job
 // scheduled work arrives via /__internal/scheduled instead, carrying its skill/prompt.
-// (Flue's generated entry forwards only `fetch`, so this lives outside Flue — see ticker/.)
+// The cron clock lives in .flue/cloudflare.ts (in-house since Flue 0.11 forwards `scheduled`).
 async function fireHeartbeat(topic?: string): Promise<number> {
   const active = bindings.filter((b) => b.status === 'active');
   const now = new Date().toISOString();
@@ -122,10 +122,11 @@ app.post('/__heartbeat', async (c) => {
   return c.json({ dispatched, topic: topic ?? null });
 });
 
-// Per-job fire from the SchedulerDO (the agent's self-scheduled work). Unlike
-// /__heartbeat (which fans out to every active project), this targets ONE project,
-// in a session dedicated to the job id so each named schedule keeps its own memory.
-// `fireId` makes it idempotent against alarm retries via the same KV claim layer.
+// Per-job fire from the minutely reminder scan in .flue/cloudflare.ts (the agent's
+// self-scheduled work, stored in the D1 reminders table). Unlike /__heartbeat (which fans
+// out to every active project), this targets ONE project, in an instance scope dedicated
+// to the job id so each named schedule keeps its own memory. `fireId` makes it idempotent
+// against scan retries via the same KV claim layer.
 app.post('/__internal/scheduled', async (c) => {
   if (!requireHeartbeat(c)) return c.body(null, 404);
 
@@ -309,9 +310,9 @@ app.post('/__internal/agent-runs', async (c) => {
   return c.json(result.body ?? {}, result.status as 200 | 400 | 500);
 });
 
-// Agent-run reconciler. The ticker's frequent cron pokes this (Flue drops scheduled(), so the clock
-// lives on the external ticker worker). It (re)dispatches queued runs, reclaims runs stuck mid-dispatch,
-// and times out runs whose runner went dark — the durability backstop for the fire-and-forget webhook.
+// Agent-run reconciler. The every-2-min cron in .flue/cloudflare.ts pokes this in-process.
+// It (re)dispatches queued runs, reclaims runs stuck mid-dispatch, and times out runs whose
+// runner went dark — the durability backstop for the fire-and-forget webhook.
 app.post('/__internal/agent-runs/reconcile', async (c) => {
   if (!requireHeartbeat(c)) return c.body(null, 404);
   const db = c.env.DB;
@@ -329,7 +330,7 @@ app.post('/__internal/agent-runs/reconcile', async (c) => {
   return c.json({ ...summary, notifications });
 });
 
-// Nightly REM: the ticker's nightly cron pokes this. The GATE is cheap SQL (projects with
+// Nightly REM: the nightly cron in .flue/cloudflare.ts pokes this. The GATE is cheap SQL (projects with
 // messages past their watermark) — idle projects never dispatch a token-costing turn. For each
 // qualifying project we take its batch (advancing the watermark server-side) and hand the
 // transcript INLINE to a fresh consolidation session, so the live agent can't consume the

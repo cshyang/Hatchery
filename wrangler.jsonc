@@ -9,10 +9,17 @@
   "kv_namespaces": [
     { "binding": "SLACK_EVENTS", "id": "21c63a4fa37540159e6e8b0a1ac19b66" }
   ],
-  // Reverse channel: the agent's schedule_self tool reaches the SchedulerDO in the
-  // scheduler worker via env.TICKER (service binding avoids CF 1042). Flue MERGES
-  // user wrangler config, so this survives the build — verified post-build.
-  "services": [{ "binding": "TICKER", "service": "hatchery-ticker" }],
+  // The cron clock, in-house since Flue 0.11 (the generated entry forwards `scheduled`,
+  // so the external hatchery-ticker worker is retired). Expressions are mirrored as
+  // constants in .flue/cloudflare.ts — keep both in sync. UTC, no DST shift.
+  "triggers": {
+    "crons": [
+      "0 */6 * * *", // liveness backstop heartbeat
+      "0 19 * * *", // nightly REM reflect-sweep (03:00 KL)
+      "*/2 * * * *", // agent-run outbox reconcile
+      "* * * * *" // reminder due-scan (minute precision)
+    ]
+  },
   // Coordinator Code Mode: project agents can run small JS/Python snippets in isolated
   // Dynamic Workers. The tool is still gated by DB so every execution has an audit row.
   "worker_loaders": [{ "binding": "DYNAMIC_WORKER_LOADER" }],

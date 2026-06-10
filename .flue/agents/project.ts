@@ -44,9 +44,6 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     };
   }
 
-  const ticker = env.TICKER as { fetch(request: Request): Promise<Response> } | undefined;
-  const heartbeatToken = (env.HEARTBEAT_TOKEN as string | undefined) ?? '';
-
   // L1 catalog query — cheap, every turn. .catch keeps a D1 hiccup from breaking the agent.
   const skills = db ? await loadSkillCatalog(db, projectId).catch(() => []) : [];
   // Personality (overwritable): a skill named `personality` defines the agent's role/voice and is
@@ -170,8 +167,6 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       agentSlug: slug,
       model,
       hasDb: !!db,
-      hasTicker: !!ticker,
-      hasHeartbeatToken: !!heartbeatToken,
       hasBotToken: !!botToken,
       hasCodingRunner: !!codingRunnerUrl && !!workbenchRunnerToken,
       hasAgentRunner: !!triggerSecretKey && !!agentRunnerToken && !!runnerGithubToken && !!hatcheryPublicUrl,
@@ -187,7 +182,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     }),
     setupStatusTool({ db, binding, projectId, env }),
     ...(db ? skillTools(db, projectId) : []),
-    ...reminderTools(ticker, heartbeatToken, projectId),
+    ...reminderTools(db, projectId),
     ...(db ? memoryTools(db, projectId) : []),
     ...userTools(db, botToken),
     ...(db ? searchTools(db, projectId) : []),

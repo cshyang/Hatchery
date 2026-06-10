@@ -1,26 +1,17 @@
-// Reminder tools (the "when"). The agent programs the SchedulerDO in the scheduler
-// worker via the TICKER service binding. A reminder references a skill by NAME (or
-// carries a one-off prompt) — never the skill body, so edits to the skill apply to
-// all future scheduled runs (reference, not copy).
+// Reminder tools (the "when"). Reminders live in the D1 `reminders` table; the minutely
+// cron scan in .flue/cloudflare.ts fires due rows through /__internal/scheduled. (The
+// external ticker worker's SchedulerDO is retired — Flue 0.11 hosts its own cron.)
+// A reminder references a skill by NAME (or carries a one-off prompt) — never the skill
+// body, so edits to the skill apply to all future scheduled runs (reference, not copy).
 
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import type { D1Like } from '../skills/repository';
+import { upsertReminder, listReminders, cancelReminder, setReminderEnabled } from '../gateway/reminders-store';
 
-type Fetcher = { fetch(request: Request): Promise<Response> };
-
-export function reminderTools(ticker: Fetcher | undefined, token: string, projectId: string): ToolDefinition[] {
-  const base = `https://scheduler.internal/internal/projects/${encodeURIComponent(projectId)}/schedules`;
-  const call = async (path: string, method: string, body?: unknown): Promise<string> => {
-    if (!ticker) throw new Error('Reminders are unavailable (no TICKER binding).');
-    const res = await ticker.fetch(
-      new Request(`${base}${path}`, {
-        method,
-        headers: { 'content-type': 'application/json', 'x-hatchery-token': token },
-        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-      }),
-    );
-    const text = await res.text();
-    if (!res.ok) throw new Error(`scheduler ${method} ${path || '/'} -> ${res.status}: ${text.slice(0, 120)}`);
-    return text;
+export function reminderTools(db: D1Like | undefined, projectId: string): ToolDefinition[] {
+  const store = (): D1Like => {
+    if (!db) throw new Error('Reminders are unavailable (no DB binding).');
+    return db;
   };
 
   const setReminder = defineTool({
@@ -41,26 +32,25 @@ export function reminderTools(ticker: Fetcher | undefined, token: string, projec
       prompt: Type.Optional(Type.String({ description: 'A one-off instruction for the run (with or instead of a skill).' })),
     }),
     async execute({ id, cron, everyMs, inMs, runAt, skill, prompt }) {
-      const out = await call('', 'POST', {
-        id,
+      const set = await upsertReminder(store(), projectId, {
+        id: String(id),
         kind: 'heartbeat',
-        cron,
-        everyMs,
-        inMs,
-        runAt,
+        cron: cron ? String(cron) : undefined,
+        everyMs: typeof everyMs === 'number' ? everyMs : undefined,
+        inMs: typeof inMs === 'number' ? inMs : undefined,
+        runAt: typeof runAt === 'number' ? runAt : undefined,
         payload: { skill, prompt },
       });
-      const parsed = JSON.parse(out) as { id: string; nextRun: number };
-      return `reminder "${parsed.id}" set — next run ${new Date(parsed.nextRun).toISOString()} (UTC).`;
+      return `reminder "${set.id}" set — next run ${new Date(set.nextRun).toISOString()} (UTC).`;
     },
   });
 
-  const listReminders = defineTool({
+  const listRemindersTool = defineTool({
     name: 'list_reminders',
     description: 'List your scheduled reminders (id, timing, next run, paused state).',
     parameters: Type.Object({}),
     async execute() {
-      const jobs = JSON.parse(await call('', 'GET')) as Array<Record<string, unknown>>;
+      const jobs = await listReminders(store(), projectId);
       if (!jobs.length) return 'No reminders set.';
       return jobs
         .map((j) => {
@@ -72,12 +62,12 @@ export function reminderTools(ticker: Fetcher | undefined, token: string, projec
     },
   });
 
-  const cancelReminder = defineTool({
+  const cancelReminderTool = defineTool({
     name: 'cancel_reminder',
     description: 'Delete a reminder by id (permanent).',
     parameters: Type.Object({ id: Type.String({ description: 'Reminder id to cancel.' }) }),
     async execute({ id }) {
-      await call(`/${encodeURIComponent(String(id))}`, 'DELETE');
+      await cancelReminder(store(), projectId, String(id));
       return `cancelled "${id}".`;
     },
   });
@@ -87,8 +77,8 @@ export function reminderTools(ticker: Fetcher | undefined, token: string, projec
     description: 'Pause a reminder — keeps it but stops it firing, until you resume it.',
     parameters: Type.Object({ id: Type.String({ description: 'Reminder id to pause.' }) }),
     async execute({ id }) {
-      await call(`/${encodeURIComponent(String(id))}`, 'PATCH', { enabled: false });
-      return `paused "${id}".`;
+      const res = await setReminderEnabled(store(), projectId, String(id), false);
+      return res.found ? `paused "${id}".` : `no reminder named "${id}".`;
     },
   });
 
@@ -97,10 +87,10 @@ export function reminderTools(ticker: Fetcher | undefined, token: string, projec
     description: 'Resume a paused reminder.',
     parameters: Type.Object({ id: Type.String({ description: 'Reminder id to resume.' }) }),
     async execute({ id }) {
-      await call(`/${encodeURIComponent(String(id))}`, 'PATCH', { enabled: true });
-      return `resumed "${id}".`;
+      const res = await setReminderEnabled(store(), projectId, String(id), true);
+      return res.found ? `resumed "${id}".` : `no reminder named "${id}".`;
     },
   });
 
-  return [setReminder, listReminders, cancelReminder, pauseReminder, resumeReminder];
+  return [setReminder, listRemindersTool, cancelReminderTool, pauseReminder, resumeReminder];
 }
