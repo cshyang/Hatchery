@@ -30,6 +30,44 @@ test('postMessage sends formatted text and optional blocks', async () => {
   }
 });
 
+test('postMessage carries persona identity fields when supplied', async () => {
+  const calls: Array<{ body: Record<string, unknown> }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_url, init) => {
+    calls.push({ body: JSON.parse(String(init?.body)) });
+    return new Response(JSON.stringify({ ok: true, ts: '1.2' }), { headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+
+  try {
+    await postMessage('xoxb-test', 'C1', 'hi', undefined, { username: 'Wren', iconEmoji: ':bird:' });
+    assert.equal(calls[0].body.username, 'Wren');
+    assert.equal(calls[0].body.icon_emoji, ':bird:');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('postMessage retries without identity when chat:write.customize is missing', async () => {
+  const calls: Array<{ body: Record<string, unknown> }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    calls.push({ body });
+    const payload = body.username ? { ok: false, error: 'missing_scope' } : { ok: true, ts: '9.9' };
+    return new Response(JSON.stringify(payload), { headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+
+  try {
+    const ts = await postMessage('xoxb-test', 'C1', 'hi', undefined, { username: 'Wren', iconEmoji: ':bird:' });
+    assert.equal(ts, '9.9');
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].body.username, undefined);
+    assert.equal(calls[1].body.icon_emoji, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('editMessage sends formatted text and optional blocks', async () => {
   const calls: Array<{ body: Record<string, unknown> }> = [];
   const originalFetch = globalThis.fetch;

@@ -1,5 +1,6 @@
 import type { Binding } from './bindings';
 import { DEFAULT_AGENT_SLUG } from './bindings';
+import type { Persona } from './persona';
 import type { D1Like } from '../skills/repository';
 import { postMessage, editMessage } from '../slack/post';
 import { chunkSlackText, formatSlackText, SLACK_TEXT_LIMIT } from '../slack/format';
@@ -141,6 +142,7 @@ export async function sendToConversationTarget(
   target: ConversationTarget,
   text: string,
   ackMessageTs?: string,
+  persona?: Persona | null,
 ): Promise<void> {
   const token = env[target.transportTokenRef];
   if (typeof token !== 'string' || !token) {
@@ -148,6 +150,8 @@ export async function sendToConversationTarget(
   }
 
   if (target.provider === 'slack') {
+    // Identity rides on fresh posts only — edits (chat.update) inherit the posted identity.
+    const identity = persona ? { username: persona.name, ...(persona.iconEmoji ? { iconEmoji: persona.iconEmoji } : {}) } : {};
     const maxChars =
       typeof env.SLACK_REPLY_MAX_CHARS === 'number'
         ? env.SLACK_REPLY_MAX_CHARS
@@ -163,14 +167,14 @@ export async function sendToConversationTarget(
     if (ackMessageTs) {
       await editMessage(token, target.externalSpaceId, ackMessageTs, parts[0] ?? '', { format: false });
       for (const part of parts.slice(1)) {
-        await postMessage(token, target.externalSpaceId, part, target.externalConversationId ?? undefined, { format: false });
+        await postMessage(token, target.externalSpaceId, part, target.externalConversationId ?? undefined, { format: false, ...identity });
       }
     } else {
       let threadTs = target.externalConversationId ?? undefined;
-      const firstTs = await postMessage(token, target.externalSpaceId, parts[0] ?? '', threadTs, { format: false });
+      const firstTs = await postMessage(token, target.externalSpaceId, parts[0] ?? '', threadTs, { format: false, ...identity });
       if (!threadTs) threadTs = firstTs;
       for (const part of parts.slice(1)) {
-        await postMessage(token, target.externalSpaceId, part, threadTs, { format: false });
+        await postMessage(token, target.externalSpaceId, part, threadTs, { format: false, ...identity });
       }
     }
     return;
@@ -189,6 +193,7 @@ export async function sendFinalToConversationTarget(
     projectId: string;
     sessionId: string;
     ackMessageTs?: string;
+    persona?: Persona | null;
   },
 ): Promise<void> {
   const ackMessageTs = opts.ackMessageTs;
@@ -196,7 +201,7 @@ export async function sendFinalToConversationTarget(
     ackMessageTs && (await shouldPostFinalBelowActivity(opts.db, opts.projectId, opts.sessionId));
 
   if (!shouldPreserveReceipt) {
-    await sendToConversationTarget(env, target, text, ackMessageTs);
+    await sendToConversationTarget(env, target, text, ackMessageTs, opts.persona);
     if (ackMessageTs && opts.db) {
       await completeSlackTurnActivity(opts.db, opts.projectId, opts.sessionId).catch(() => null);
     }
@@ -215,5 +220,5 @@ export async function sendFinalToConversationTarget(
     );
   }
 
-  await sendToConversationTarget(env, target, text);
+  await sendToConversationTarget(env, target, text, undefined, opts.persona);
 }

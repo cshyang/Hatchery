@@ -1,5 +1,6 @@
 import { createAgent, defineTool, Type, type AgentRuntimeConfig, type ToolDefinition } from '@flue/runtime';
 import { bindingByProject, parseAgentInstanceId, DEFAULT_MODEL, resolveModel } from '../../src/project/bindings';
+import { loadPersona, personaTools } from '../../src/project/persona';
 import { resolveTarget, sendFinalToConversationTarget, sendToConversationTarget } from '../../src/project/conversations';
 import { withToolLogging, withReplyReminder } from '../../src/agent/observability';
 import { skillTools, loadSkillCatalog, loadActiveSkillBody, skillBody, type D1Like } from '../../src/skills/repository';
@@ -63,6 +64,10 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   const projectMem = db ? await loadProjectMemory(db, projectId).catch(() => []) : [];
   const memoryBlock = renderMemory(projectMem);
 
+  // Persona (structured): the display identity fresh Slack posts wear (chat:write.customize).
+  // Set by the set_persona tool at hatch/rewrite; null until hatched → app default name.
+  const persona = db ? await loadPersona(db, projectId).catch(() => null) : null;
+
   const connectionRuntime = await buildConnectionRuntime({ db, binding, env, projectId });
 
   const replyToConversation = defineTool({
@@ -95,6 +100,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
         projectId,
         sessionId: conv ? `conv:${conv}` : '',
         ackMessageTs: ackMessageTs ? String(ackMessageTs) : undefined,
+        persona,
       });
       // Log the agent's own post to the transcript (the other half of the conversation reflection
       // consolidates). REM turns are told not to post, so this never logs reflection's own output.
@@ -131,7 +137,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       const target = await resolveTarget(db, binding, projectId, slug, conversationId ? String(conversationId) : '');
       if (!target) return 'no target — status skipped';
       try {
-        await sendToConversationTarget(env, target, String(text), ackMessageTs ? String(ackMessageTs) : undefined);
+        await sendToConversationTarget(env, target, String(text), ackMessageTs ? String(ackMessageTs) : undefined, persona);
         return 'posted';
       } catch (e) {
         return `status not posted: ${e instanceof Error ? e.message : 'error'}`;
@@ -182,6 +188,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     }),
     setupStatusTool({ db, binding, projectId, env }),
     ...(db ? skillTools(db, projectId) : []),
+    ...personaTools(db, projectId),
     ...reminderTools(db, projectId),
     ...(db ? memoryTools(db, projectId) : []),
     ...userTools(db, botToken),
