@@ -27,7 +27,7 @@ export type AgentRunRouteStatus = (typeof AGENT_RUN_ROUTE_STATUSES)[number];
 export const AGENT_RUN_ROUTE_CREATED_BY_TYPES = ['model', 'admin', 'system'] as const;
 export type AgentRunRouteCreatedByType = (typeof AGENT_RUN_ROUTE_CREATED_BY_TYPES)[number];
 
-const SUPPORTED_KITS = new Set(['coding-default']);
+const SUPPORTED_KITS = new Set(['coding-default', 'delivery']);
 const SUPPORTED_RUNTIMES = new Set(['pi']);
 const SUPPORTED_SANDBOX_PROVIDERS = new Set(['e2b']);
 

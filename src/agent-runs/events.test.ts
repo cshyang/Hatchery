@@ -353,6 +353,35 @@ test('route proposal refuses unconnected provider and disallowed repo', async ()
   );
 });
 
+test('route proposal accepts the delivery kit and rejects unknown kits', async () => {
+  const db = new FakeD1();
+  db.connections.push({ project_id: 'P', provider: 'linear', status: 'active' });
+  db.connections.push({ project_id: 'P', provider: 'github', status: 'active', config_json: JSON.stringify({ repo: 'acme/repo' }) });
+  const deps = seq();
+
+  const base = {
+    projectId: 'P',
+    provider: 'linear',
+    externalKey: 'EDK',
+    triggerType: 'state',
+    triggerValue: 'Run Agent',
+    githubOwner: 'acme',
+    githubRepo: 'repo',
+    baseBranch: 'main',
+    runtime: 'pi',
+    sandboxProvider: 'e2b',
+    reason: 'delivery kit route',
+  };
+
+  const route = await createAgentRunRoute(db, { ...base, kit: 'delivery' }, deps);
+  assert.equal(route.kit, 'delivery');
+
+  await assert.rejects(
+    () => createAgentRunRoute(db, { ...base, kit: 'no-such-kit' }, deps),
+    /kit "no-such-kit" is not supported/i,
+  );
+});
+
 test('route proposal rejects unsupported new runtimes', async () => {
   const db = new FakeD1();
   db.connections.push({ project_id: 'P', provider: 'linear', status: 'active' });

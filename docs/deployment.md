@@ -18,7 +18,8 @@ merge, or production deploy authority.
 - `npm install`
 - Cloudflare account + Wrangler auth.
 - Trigger.dev project and secret key.
-- Z.ai key for Pi.
+- Z.ai key for the Worker agent (Flue runs `zai/glm-5.1` inside the DO).
+- OpenRouter key for the Pi runner (both kits run through OpenRouter; the runner no longer uses Z.ai).
 - Slack, Nango, Linear, and GitHub access for the workspace you are wiring.
 
 ## Cloudflare Setup
@@ -78,24 +79,45 @@ token minted per repo/run.
 The Trigger runner is configured by [trigger.config.ts](../trigger.config.ts). It packages:
 
 - `git`
-- `@earendil-works/pi-coding-agent`
-- `agent-kits/coding-default`
+- `@earendil-works/pi-coding-agent` (+ capability extensions)
+- `agent-kits/coding-default` and `agent-kits/delivery`
 
-Deploy it separately from Wrangler:
+Deploys happen automatically: a push to `main` touching `trigger/**`, `trigger.config.ts`,
+`agent-kits/**`, or `package-lock.json` runs [.github/workflows/deploy-runner.yml](../.github/workflows/deploy-runner.yml)
+(gate: typecheck + tests, then `trigger deploy`). Manual fallback: `npm run trigger:deploy`.
 
-```bash
-npm run trigger:deploy
-```
-
-Set Trigger.dev environment variables for the task:
+Set Trigger.dev environment variables for the task (dashboard → Environment Variables):
 
 | Secret / var | Required for |
 |---|---|
-| `ZAI_API_KEY` | Pi model calls inside the Trigger task |
+| `OPENROUTER_API_KEY` | all Pi model calls — both kits route through OpenRouter |
 | `KIT_ROOT` | optional override when packaged kit lookup differs |
+| `HATCHERY_PI_RUNTIME` | optional; `rpc` switches the pi channel, default is `cli` — runtime var, no redeploy needed |
 
 The GitHub token and Hatchery callback token are sent in the dispatch payload by Hatchery. They do
 not need to be standing Trigger.dev secrets.
+
+### Agent kits
+
+The dispatch payload's `kit` field (from the agent-run route config, default `coding-default`)
+selects the execution path inside `run-coding-task`:
+
+- `coding-default` — single Pi agent, run-scoped branch `hatchery/<slug>-<uuid8>`, regular PR.
+- `delivery` — the gated-pipeline harness: a conductor parent drives plan → review → implement →
+  verify through the `gated_dispatch` extension. Deterministic issue-scoped branch `harness/<id>`
+  (re-dispatch resumes from the committed artifact ledger + `handoff.json` cursor), draft PRs,
+  per-issue serialization via Trigger `concurrencyKey`, model tiers from the kit's
+  `.harness/defaults.yaml`. The runner owns push + PR so the GitHub token never enters the agent env.
+
+Kit names are validated at route creation against `SUPPORTED_KITS` in `src/agent-runs/events.ts` —
+unknown kits fail fast in the control plane instead of inside a Trigger run.
+
+## CI Secrets (GitHub Actions)
+
+| Secret | Workflow | Purpose |
+|---|---|---|
+| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | `deploy.yml` | Worker + ticker deploy |
+| `TRIGGER_ACCESS_TOKEN` | `deploy-runner.yml` | Trigger.dev personal access token for `trigger deploy` |
 
 ## Workspace Provider
 
