@@ -7,8 +7,6 @@ export interface SelfStatusInput {
   agentSlug: string;
   model: string;
   hasDb: boolean;
-  hasTicker: boolean;
-  hasHeartbeatToken: boolean;
   hasBotToken: boolean;
   hasCodingRunner: boolean;
   hasAgentRunner: boolean;
@@ -70,11 +68,11 @@ export function buildSelfStatus(input: SelfStatusInput) {
       status: capability(true, ['update_status'], 'Use only for slow multi-step turns; it is not the final reply.'),
       skills: capability(input.hasDb, ['save_skill', 'load_skill', 'archive_skill', 'restore_skill'], 'Project skills are durable procedures stored in D1.'),
       reminders: capability(
-        input.hasTicker && input.hasHeartbeatToken,
+        input.hasDb,
         ['set_reminder', 'list_reminders', 'pause_reminder', 'resume_reminder', 'cancel_reminder'],
-        input.hasTicker && input.hasHeartbeatToken
-          ? 'Scheduler binding and heartbeat token are present.'
-          : 'Unavailable unless the TICKER binding and heartbeat token are present.',
+        input.hasDb
+          ? 'Reminders are stored in D1 and fired by the in-Worker cron scan (minute precision).'
+          : 'Unavailable without the DB binding.',
       ),
       memory: capability(input.hasDb, ['save_memory', 'update_memory', 'forget_memory'], 'Project facts are stored in D1.'),
       search: capability(input.hasDb, ['search_channel'], 'Searches prior channel/thread transcripts stored for this project.'),
