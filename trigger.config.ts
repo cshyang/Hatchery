@@ -26,8 +26,8 @@ export default defineConfig({
           '@jerryan/pi-todo-lite@1.0.1',
         ],
       }),
-      // ship the kit; lands at bundle root, where run-coding-task's process.cwd()-based path resolves it.
-      additionalFiles({ files: ['agent-kits/coding-default/**'] }),
+      // ship the kits; they land at bundle root, where run-coding-task's process.cwd()-based path resolves them.
+      additionalFiles({ files: ['agent-kits/coding-default/**', 'agent-kits/delivery/**'] }),
     ],
   },
 });

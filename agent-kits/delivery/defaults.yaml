@@ -1,0 +1,30 @@
+# delivery kit — baseline config.
+# The runner installs this to `<workspace>/.harness/defaults.yaml` (a target repo may ship
+# its own to override). The conductor reads it; see conductor § Model & effort selection.
+#
+# models: tier → OpenRouter model id. The conductor maps each job-class onto a tier, then
+# dispatches with `openrouter/<id>` plus a thinking suffix (`:high`, `:medium`, …) per job.
+# The orchestrator only ever picks a tier KEY here — never a model out of OpenRouter's full
+# catalog — so model choice stays operator-controlled and reproducible.
+#
+# Tiers are price-agnostic knobs, NOT a cost doctrine — allocate per task. A hard,
+# cross-cutting task may warrant a frontier model in EVERY tier; a bounded mechanical one
+# may run cheap end to end. The baseline below is just a starting point:
+#   conductor → the parent orchestrator (the runner reads this for the pi --model)
+#   gate  → reasoning (judge artifacts at the generator-evaluator gates)
+#   default → coding / agentic (write specs, oracles, implementation)
+#   mechanical → cheapest (observe, re-validate, narrow edits)
+# Slugs + pricing taken from https://openrouter.ai/api/v1/models on 2026-06-09 —
+# re-verify before relying on them; OpenRouter slugs and prices drift.
+models:
+  conductor:  anthropic/claude-opus-4.8  # parent orchestrator — strong by default for unattended delivery; drop to an open model for simple/bounded work
+  gate:       deepseek/deepseek-v4-pro   # $0.44/$0.87 per M — strong reasoning for review/oracle gates
+  default:    moonshotai/kimi-k2.6       # $0.68/$3.41 per M — agentic/coding workhorse: plan, implementation
+  mechanical: xiaomi/mimo-v2.5           # $0.14/$0.28 per M — cheapest: observation, re-validation, narrow edits
+
+# Swap-ins (all verified on the catalog) as you tune cost/quality:
+#   cheaper default if Kimi's $3.41 completion bites: deepseek/deepseek-v4-pro
+#   even cheaper mechanical:                          deepseek/deepseek-v4-flash ($0.10/$0.20)
+#   stronger gate (reasoning, pricier):               qwen/qwen3.7-max · xiaomi/mimo-v2.5-pro
+#   max-quality gate (closed, expensive):             anthropic/claude-opus-4.8
+#   free-tier experimentation (rate-limited):         moonshotai/kimi-k2.6:free
