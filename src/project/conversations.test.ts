@@ -460,6 +460,62 @@ test('Slack final reply still edits the ack when no activity exists', async () =
   }
 });
 
+test('Slack final reply closes an empty activity receipt so late memory updates cannot overwrite it', async () => {
+  const db = new FakeD1();
+  const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url, init) => {
+    calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+    return new Response(JSON.stringify({ ok: true, ts: 'posted' }), { headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+
+  try {
+    const target: ConversationTarget = {
+      projectId: 'demo',
+      agentSlug: 'default',
+      conversationId: 'slack:T1:C1:100.000',
+      provider: 'slack',
+      externalAccountId: 'T1',
+      externalSpaceId: 'C1',
+      externalConversationId: '100.000',
+      transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
+    };
+    await createSlackTurnActivity(db, {
+      projectId: 'demo',
+      sessionId: 'conv:slack:T1:C1:100.000',
+      conversationId: 'slack:T1:C1:100.000',
+      slackChannelId: 'C1',
+      slackThreadTs: '100.000',
+      ackMessageTs: '555.666',
+      transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
+    });
+
+    await sendFinalToConversationTarget(
+      { SLACK_BOT_TOKEN_DEFAULT: 'xoxb-test' },
+      target,
+      'final answer',
+      {
+        db,
+        projectId: 'demo',
+        sessionId: 'conv:slack:T1:C1:100.000',
+        ackMessageTs: '555.666',
+      },
+    );
+
+    const lateActivity = await recordSlackToolActivity(db, {
+      projectId: 'demo',
+      sessionId: 'conv:slack:T1:C1:100.000',
+      toolName: 'update_memory',
+    });
+
+    assert.equal(lateActivity, null);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].body, { channel: 'C1', ts: '555.666', text: 'final answer' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('top-level project posts omit provider-native thread id', async () => {
   const target = topLevelTargetFromBinding(binding);
   assert.equal(target.conversationId, '');
