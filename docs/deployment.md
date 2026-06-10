@@ -137,6 +137,8 @@ Workspace        clone/edit/test filesystem
 ## External Dashboard Wiring
 
 - Slack app event URL: `<worker-url>/slack/events`
+- Slack slash command URL: `<worker-url>/slack/commands` (`/hatchery` — declared in
+  `slack-app.manifest.json`; existing apps must re-apply the manifest to pick it up)
 - Nango webhook URL: `<worker-url>/nango/webhook`
 - Linear webhook URL: `<worker-url>/linear/webhook`
 
