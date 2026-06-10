@@ -44,6 +44,8 @@ export interface OpenOrUpdatePullRequestOpts {
   title: string;
   body: string;
   token: string;
+  /** Open as a draft PR (delivery-kit work envelopes are drafts). Existing PRs keep their state. */
+  draft?: boolean;
   fetchImpl?: typeof fetch;
 }
 
@@ -54,7 +56,7 @@ export interface PullRequestResult {
 }
 
 export async function openOrUpdatePullRequest(opts: OpenOrUpdatePullRequestOpts): Promise<PullRequestResult> {
-  const { owner, repo, head, base, title, body, token, fetchImpl = fetch } = opts;
+  const { owner, repo, head, base, title, body, token, draft = false, fetchImpl = fetch } = opts;
 
   const headers = {
     Authorization: `Bearer ${token}`,
@@ -85,7 +87,7 @@ export async function openOrUpdatePullRequest(opts: OpenOrUpdatePullRequestOpts)
   const createRes = await fetchImpl(createUrl, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ title, head, base, body }),
+    body: JSON.stringify({ title, head, base, body, draft }),
   });
 
   if (!createRes.ok) {
