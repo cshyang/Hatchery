@@ -1,7 +1,7 @@
 # Workspace Sandbox Thin Slice
 
 **Date**: 2026-06-10
-**Status**: implemented (slices 1–3 on main; pending deploy: D1 migration 0018, container image push, Slack app reinstall for file scopes)
+**Status**: verified in prod (2026-06-10). Deployed (migration 0018, container image, worker 6b33e4c7), Slack app reinstalled with file scopes, and end-to-end PDF test passed: load_slack_file → exec failed (exit 1) → agent pip-installed pymupdf → parsed the PDF, all within one coordinator turn with full audit rows in coordinator_workspace_ops.
 **Primary goal**: Let the coordinator process real files from Slack (xlsx/csv/etc.) in a real container — shell, filesystem, python — and post results back to the thread, with the coordinator holding the loop the whole time.
 
 ## Context
