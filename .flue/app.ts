@@ -6,6 +6,7 @@ import { fetchThreadReplies, renderThreadBackscroll } from '../src/slack/threads
 import { mentionsBot, stripMention } from '../src/slack/mentions';
 import { postWorkingAck } from '../src/slack/ack';
 import { createSlackTurnActivity, handleObservedSlackActivity } from '../src/slack/activity';
+import { recordSlackConversationFiles } from '../src/slack/file-authorizations';
 import { dispatchSlackTurnWithFallback } from '../src/slack/dispatch';
 import {
   parseSlackEventEnvelope,
@@ -610,6 +611,11 @@ app.post('/slack/events', async (c) => {
       externalSpaceId: msg.externalSpaceId,
       externalConversationId: msg.externalConversationId,
       transportTokenRef: binding.transportTokenRef,
+    });
+    await recordSlackConversationFiles(c.env.DB, {
+      projectId: msg.projectId,
+      conversationId: msg.conversationId,
+      files: ev.files,
     });
   }
 
