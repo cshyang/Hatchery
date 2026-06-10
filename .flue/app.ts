@@ -21,7 +21,7 @@ import { normalizeSlackMessage } from '../src/shared/canonical';
 import { upsertConversationTarget } from '../src/project/conversations';
 import { claimEvent, type KVLike } from '../src/shared/idempotency';
 import type { D1Like } from '../src/skills/repository';
-import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/knowledge/reflection';
+import { logMessage, projectsWithUnreflected, projectsWithUnreflectedRuns, takeUnreflectedBatch, takeUnreflectedRuns, buildReflectInstructions } from '../src/knowledge/reflection';
 import { upsertConnection, loadConnections, connectedNotice, disconnectedNotice, disableConnectionByRef } from '../src/connections/repository';
 import { verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook, fetchProviderApiSpec } from '../src/providers/nango';
 import { isCatalogProvider } from '../src/connections/catalog';
@@ -331,26 +331,27 @@ app.post('/__internal/agent-runs/reconcile', async (c) => {
   return c.json({ ...summary, notifications });
 });
 
-// Nightly REM: the nightly cron in .flue/cloudflare.ts pokes this. The GATE is cheap SQL (projects with
-// messages past their watermark) — idle projects never dispatch a token-costing turn. For each
-// qualifying project we take its batch (advancing the watermark server-side) and hand the
-// transcript INLINE to a fresh consolidation session, so the live agent can't consume the
-// watermark and reflection turns never pollute a real conversation thread.
+// Nightly REM: the nightly cron in .flue/cloudflare.ts pokes this. The GATE is cheap SQL (projects
+// with messages OR terminal runs past their watermarks) — idle projects never dispatch a
+// token-costing turn. For each qualifying project we take both batches (advancing each watermark
+// server-side) and hand them INLINE to a fresh consolidation session, so the live agent can't
+// consume a watermark and reflection turns never pollute a real conversation thread.
 app.post('/__internal/reflect-sweep', async (c) => {
   if (!requireHeartbeat(c)) return c.body(null, 404);
   const db = c.env.DB;
   if (!db) return c.json({ swept: 0, reason: 'no DB binding' });
 
-  const projects = await projectsWithUnreflected(db);
+  const projects = new Set([...(await projectsWithUnreflected(db)), ...(await projectsWithUnreflectedRuns(db))]);
   const now = new Date().toISOString();
   let swept = 0;
   for (const projectId of projects) {
     const transcript = await takeUnreflectedBatch(db, projectId);
-    if (!transcript) continue; // raced to empty; skip
+    const runDigest = await takeUnreflectedRuns(db, projectId);
+    if (!transcript && !runDigest) continue; // raced to empty; skip
     await dispatch({
       agent: 'project',
       id: agentInstanceId(projectId, `reflect:${Date.now()}`), // fresh instance — no carryover, no thread pollution
-      input: { kind: 'heartbeat', now, instructions: buildReflectInstructions(transcript) },
+      input: { kind: 'heartbeat', now, instructions: buildReflectInstructions(transcript, runDigest) },
     });
     swept++;
   }
