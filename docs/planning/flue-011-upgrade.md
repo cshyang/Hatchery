@@ -1,7 +1,7 @@
 # Flue 0.11 Upgrade
 
 **Date**: 2026-06-10
-**Status**: phase 1 in progress (branch `flue-011-upgrade`)
+**Status**: phases 1+2 deployed (branch `flue-011-upgrade`). Phase 1 live as version cfda14da (prod-smoked: PDF turn). Phase 2 live as d1a0916b: all four crons in-Worker, reminders on D1 (migration 0019), ticker source deleted. Verified in prod: a planted one-shot reminder was claimed by the minutely scan and dispatched. Remaining: confirm the reminder turn's Slack post, delete the hatchery-ticker worker from Cloudflare, merge to main. Phase 3 (native sandbox harness) not started.
 **Spike**: all 0.11 claims verified live on a minimal project (see flue-cloudflare-agents skill, "0.11 spike gotchas"): `cloudflare.ts` entry, `scheduled` handler, `extend({base})` + `scheduleEvery`, `{id, input}` dispatch, native sandbox in `createAgent`, Durable Streams replay, no workerd skew.
 
 ## Why upgrade
