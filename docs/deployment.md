@@ -140,7 +140,8 @@ Workspace        clone/edit/test filesystem
 - Nango webhook URL: `<worker-url>/nango/webhook`
 - Linear webhook URL: `<worker-url>/linear/webhook`
 
-Nango integration ids should use the catalog slugs unless overridden in connection config:
+Curated providers ship hand-tuned API profiles; their Nango integration ids should use the catalog
+slugs unless overridden in connection config:
 
 ```text
 github
@@ -148,6 +149,13 @@ github-pat
 linear
 notion
 ```
+
+**Any other integration enabled in the Nango project is also connectable** — no Hatchery change
+needed. The agent validates the name live against `GET /integrations`, the auth webhook persists the
+provider's API spec from Nango's catalog (base URL + required headers), and the call tool goes
+direct for Bearer-auth providers or relays through Nango's proxy for exotic auth. Generic providers
+default to `methodPolicy: get-post` (destructive verbs blocked); an operator can set
+`methodPolicy: "all"` in the connection config to allow writes for one connection.
 
 Linear should enable Issue events for `Run Agent` transitions. Comment events are needed for
 continuation runs.
