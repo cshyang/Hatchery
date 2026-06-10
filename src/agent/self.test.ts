@@ -14,8 +14,6 @@ test('buildSelfStatus reports the live runtime manifest without exposing connect
     agentSlug: 'default',
     model: 'gpt-test',
     hasDb: true,
-    hasTicker: false,
-    hasHeartbeatToken: false,
     hasBotToken: true,
     canRequestConnections: true,
     hasCodingRunner: true,
@@ -43,7 +41,8 @@ test('buildSelfStatus reports the live runtime manifest without exposing connect
     model: 'gpt-test',
   });
   assert.equal(status.capabilities.skills.enabled, true);
-  assert.equal(status.capabilities.reminders.enabled, false);
+  // Reminders are gated on DB only since the D1 store replaced the ticker's SchedulerDO.
+  assert.equal(status.capabilities.reminders.enabled, true);
   assert.equal(status.capabilities.sourceEvolution.enabled, true);
   assert.deepEqual(status.capabilities.sourceEvolution.tools, ['propose_self_change', 'dispatch_coding_run']);
   assert.equal(status.capabilities.agentRuns.enabled, true);
@@ -74,7 +73,7 @@ test('buildSelfStatus reports the live runtime manifest without exposing connect
   assert.equal(JSON.stringify(status).includes('OpenCode'), false);
   assert.equal(JSON.stringify(status).includes('Claude Code'), false);
   assert.match(status.limits.join('\n'), /E2B/);
-  assert.match(status.capabilities.reminders.note, /TICKER/);
+  assert.match(status.capabilities.reminders.note, /D1/);
   assert.deepEqual(status.connections.providers, [
     { provider: 'github', status: 'connected', configKeys: ['repo'] },
     { provider: 'notion', status: 'not_connected', configKeys: [] },
@@ -93,8 +92,6 @@ test('self_status tool returns the manifest as formatted JSON', async () => {
     agentSlug: 'helper',
     model: 'gpt-test',
     hasDb: true,
-    hasTicker: true,
-    hasHeartbeatToken: true,
     hasBotToken: false,
     canRequestConnections: false,
     hasCodingRunner: false,

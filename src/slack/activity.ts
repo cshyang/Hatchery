@@ -168,17 +168,20 @@ export async function handleObservedSlackActivity(event: FlueEvent, ctx: FlueCon
   try {
     const db = (ctx.env as Record<string, unknown>).DB as D1Like | undefined;
     if (!db) return;
-    if (!event.instanceId || !event.session?.startsWith('conv:')) return;
+    if (!event.instanceId) return;
 
-    const { projectId, slug } = parseAgentInstanceId(event.instanceId);
-    if (slug !== 'default') return;
+    // On Flue 0.11 the conversation scope rides in the instance id (`.../conv:<id>`), not in
+    // event.session (always 'default' now). slack_turn_activity.session_id keeps storing the
+    // same `conv:...` strings as before.
+    const { projectId, slug, scope } = parseAgentInstanceId(event.instanceId);
+    if (slug !== 'default' || !scope?.startsWith('conv:')) return;
 
     const toolEvent = observedToolEvent(event);
     if (!toolEvent) return;
 
     const recorded = await recordSlackToolActivity(db, {
       projectId,
-      sessionId: event.session,
+      sessionId: scope,
       toolName: toolEvent.toolName,
       isError: toolEvent.isError,
       terminal: toolEvent.terminal,
@@ -306,10 +309,10 @@ function parseActivities(value: string): SlackActivityItem[] {
 }
 
 function observedToolEvent(event: FlueEvent): { toolName: string; isError?: boolean; terminal?: boolean } | null {
-  if (event.type === 'tool_start' || event.type === 'tool_execution_start') {
+  if (event.type === 'tool_start') {
     return { toolName: event.toolName };
   }
-  if ((event.type === 'tool_call' || event.type === 'tool_execution_end') && event.isError) {
+  if (event.type === 'tool_call' && event.isError) {
     return { toolName: event.toolName, isError: true, terminal: true };
   }
   return null;

@@ -1,6 +1,6 @@
 name: deploy
 
-# CD for Hatchery. Push to main → gate → (guard migrations) → build → deploy both workers → smoke.
+# CD for Hatchery. Push to main → gate → (guard migrations) → build → deploy → smoke.
 # Code deploys are reversible (`wrangler rollback`); the irreversible part — D1 migrations — is NOT
 # auto-applied here (some are destructive rebuilds against the single prod DB). The guard below stops
 # a deploy whenever a migration is unapplied, so prod code never runs ahead of its schema.
@@ -55,15 +55,14 @@ jobs:
           fi
           echo "No pending migrations."
 
-      # ── Build + deploy both workers ──────────────────────────────────────────
+      # ── Build + deploy ───────────────────────────────────────────────────────
+      # (The hatchery-ticker worker is retired — Flue 0.11 hosts the cron in-Worker.)
       - name: Build (Flue → Cloudflare)
         run: npx flue build --target cloudflare
       - name: Deploy hatchery
         run: |
           set -o pipefail   # else `| tee` swallows wrangler's exit code → a failed deploy looks green
           npx wrangler deploy --config dist/hatchery/wrangler.json | tee deploy.out
-      - name: Deploy ticker
-        run: npx wrangler deploy --config ticker/wrangler.jsonc
 
       # ── Smoke: did the worker actually come up? (best-effort for now) ─────────
       - name: Smoke check
