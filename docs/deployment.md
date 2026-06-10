@@ -84,6 +84,7 @@ Everything account-specific lives in `.env.deploy` and is pushed as Worker secre
 | `AGENT_RUNNER_TOKEN` | hatchery | runner callback auth |
 | `HATCHERY_PUBLIC_URL` | hatchery | public callback origin for Trigger.dev |
 | `RUNNER_GITHUB_PAT_TEMP` | hatchery | temporary dogfood GitHub token sent to the runner |
+| `GITHUB_SELF_TOKEN` | hatchery | optional; capability-request issues on Hatchery's own repo (see Self-Improvement Loop) |
 | `WORKBENCH_RUNNER_TOKEN`, `CODING_RUNNER_URL` | hatchery | optional source-change workbench runner |
 
 `RUNNER_GITHUB_PAT_TEMP` is a stopgap. Production should replace it with a GitHub App installation
@@ -208,3 +209,46 @@ Linear state transition
 
 The runner should report `pr_opened` when the PR is ready for review. Completion should come from a
 real terminal signal such as PR merge, deploy, failure, or an explicit future policy decision.
+
+## Self-Improvement Loop (capability requests)
+
+Optional. Lets the agent turn "can you do X?" moments in Slack into GitHub issues on Hatchery's OWN
+repo (the `file-capability-request` skill: offer → explicit human confirmation → dedupe against open
+`capability-request` issues → file with the verbatim ask + requester + channel). The proposal queue
+lives with the code, not in any tenant's tracker. Filing is human-gated per request; pickup is
+human too — no automated dispatch from these issues yet.
+
+Provisioning (three steps, no deploy):
+
+1. **Credential** — a fine-grained GitHub PAT: repository access = ONLY the Hatchery repo,
+   permissions = Issues read/write (Metadata read is implied). Narrow token, loose fence: the
+   connection's `get-post` policy allows POST broadly, so the token's own scope is the guard.
+
+```bash
+npx wrangler secret put GITHUB_SELF_TOKEN
+```
+
+2. **Connection** — a `github-self` row for the channel, Worker-secret backend. `config.api` is a
+   hand-set provider spec, so the generic dynamic profile serves it (direct Bearer calls, `get-post`
+   default). Via the guarded admin route:
+
+```bash
+curl -X POST -H "x-hatchery-admin-token: $ADMIN_CONNECTIONS_TOKEN" \
+  -H "content-type: application/json" \
+  "$HATCHERY_PUBLIC_URL/__admin/connections" -d '{
+    "projectId": "<channel-id>", "provider": "github-self",
+    "tokenRef": "GITHUB_SELF_TOKEN",
+    "config": { "repo": "<owner>/<repo>", "api": {
+      "baseUrl": "https://api.github.com", "authMode": "OAUTH2",
+      "headers": { "x-github-api-version": "2022-11-28", "accept": "application/vnd.github+json" } } }
+  }'
+```
+
+3. **Skill** — `file-capability-request`, saved at `__global__` scope so every channel inherits it
+   (a channel can override by name). Teach it in Slack and have the agent `save_skill` it, or seed
+   the row directly.
+
+The `github-self_call_api` tool appears the moment the secret exists — `connectionState` gates on
+the env var, no deploy or restart. Related but separate: a tenant github connection can be opened
+for writes on the PROJECT repos by setting `methodPolicy: "get-post"` in its connection config
+(destructive verbs stay blocked; `"all"` is a deliberate per-connection operator decision).
