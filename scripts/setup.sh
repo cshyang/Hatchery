@@ -6,6 +6,9 @@
 #   ./scripts/setup.sh migrate     apply D1 migrations (remote)
 #   ./scripts/setup.sh deploy      build + deploy hatchery (crons included; ticker worker retired)
 #   ./scripts/setup.sh secrets     push secrets from .env.deploy to the worker
+#   ./scripts/setup.sh manifest [url]   print the Slack app manifest with the worker URL filled
+#                                  in, ready to paste at api.slack.com/apps -> App Manifest
+#                                  (url defaults to HATCHERY_PUBLIC_URL from .env.deploy)
 #
 # Idempotent: re-running reuses existing D1/KV and never clobbers a secret you didn't change.
 # Phaseable on purpose — the Slack app needs the worker URL (from `deploy`), but `secrets`
@@ -22,8 +25,13 @@ KV_BINDING="SLACK_EVENTS"
 WORKER="hatchery"
 BULK_FILE=".secrets.bulk.json"
 
-[ -f "$ENV_FILE" ] || { echo "❌ Missing $ENV_FILE — copy .env.deploy.example to .env.deploy and fill it."; exit 1; }
-set -a; . "./$ENV_FILE"; set +a
+# `manifest` works without .env.deploy (the URL can be passed as an argument); every other
+# phase needs the file.
+if [ -f "$ENV_FILE" ]; then
+  set -a; . "./$ENV_FILE"; set +a
+elif [ "${1:-full}" != "manifest" ]; then
+  echo "❌ Missing $ENV_FILE — copy .env.deploy.example to .env.deploy and fill it."; exit 1
+fi
 
 require_login() {
   wrangler whoami >/dev/null 2>&1 || { echo "❌ Not logged in. Run 'wrangler login' for the TARGET account first."; exit 1; }
@@ -90,6 +98,19 @@ secrets() {
   echo "✓ secrets set."
 }
 
+manifest() {
+  local url="${1:-${HATCHERY_PUBLIC_URL:-}}"
+  [ -n "$url" ] || { echo "❌ No worker URL. Set HATCHERY_PUBLIC_URL in $ENV_FILE or pass one: ./scripts/setup.sh manifest https://hatchery.<account>.workers.dev"; exit 1; }
+  # Parse → substitute → reprint: validates the JSON and drops the repo-reader _comment so the
+  # output is exactly what api.slack.com/apps -> App Manifest expects.
+  URL="${url%/}" node -e '
+    const fs = require("fs");
+    const m = JSON.parse(fs.readFileSync("slack-app.manifest.json", "utf8"));
+    delete m._comment;
+    process.stdout.write(JSON.stringify(m, null, 2).replaceAll("https://REPLACE-WITH-YOUR-WORKER-URL", process.env.URL) + "\n");
+  '
+}
+
 checklist() {
   cat <<'EOF'
 
@@ -97,8 +118,9 @@ checklist() {
 ✅ Cloudflare side is live. Wire the SaaS side (can't be automated), using the
    worker URL printed by the deploy step above as <URL>:
 
-  [ ] Slack   create app from ./slack-app.manifest.json (api.slack.com/apps → From a manifest)
-              set event request_url → <URL>/slack/events ; install to workspace
+  [ ] Slack   ./scripts/setup.sh manifest <URL>  prints paste-ready JSON for
+              api.slack.com/apps → From a manifest (new app) or App Manifest (existing app —
+              re-applying a scope change also needs Install App → Reinstall to Workspace)
               put the Bot User OAuth Token (xoxb-…) in .env.deploy as SLACK_BOT_TOKEN_DEFAULT
               put the bot user id in SLACK_BOT_ID, your team id in KNOWN_TEAM_IDS
               then: ./scripts/setup.sh secrets
@@ -116,6 +138,7 @@ case "${1:-full}" in
   migrate)   migrate ;;
   deploy)    deploy ;;
   secrets)   secrets ;;
+  manifest)  manifest "${2:-}" ;;
   full)      resources; migrate; deploy; secrets; checklist ;;
-  *) echo "usage: $0 [full|resources|migrate|deploy|secrets]"; exit 1 ;;
+  *) echo "usage: $0 [full|resources|migrate|deploy|secrets|manifest [url]]"; exit 1 ;;
 esac
