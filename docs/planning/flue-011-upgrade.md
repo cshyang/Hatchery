@@ -42,9 +42,24 @@ Accepted losses:
 
 Move heartbeat/reflect/scheduled jobs to `triggers.crons` + `scheduled` handler in `cloudflare.ts` (or per-DO `scheduleEvery` via `extend`). Export SchedulerDO reminder data or re-create via `set_reminder` before deleting the scheduler Worker, TICKER binding, and heartbeat token.
 
-## Phase 3 (optional): native sandbox harness
+## Phase 3: native sandbox harness — evaluated and REJECTED (2026-06-10)
 
-Swap `workspace_exec/write/read` plumbing for `sandbox: getSandbox(...)` + `cwd`; keep audit ledger, bounded outputs, and `workspace_load_slack_file`/`workspace_send_file`.
+The plan was to swap `workspace_exec/write/read` for `sandbox: getSandbox(...)` + `cwd` in
+`createAgent`. Spike evidence killed it: configuring `sandbox:` makes the harness run
+`ls -1 /workspace` at **session init** (workspace skill/AGENTS.md discovery), booting the
+container on EVERY turn — including pure-text replies that never touch a file. Verified on a
+no-tool turn (`docker ps` empty before, container up after). The `sandbox` config accepts a
+factory but init-time discovery invokes it regardless, so there is no lazy path.
+
+For a chat coordinator where most turns are text-only, that trades a ~6s cold-start tax on
+the first reply after every idle window (plus a continuously-warm paid container during any
+conversation) for tools the agent has not needed (edit/grep/glob). The hand-rolled tools
+boot the container only when actually used — the right shape for this agent.
+
+**Re-entry conditions** (revisit if any holds): Flue ships lazy/deferred workspace discovery;
+the coordinator demonstrably struggles with multi-file editing through `workspace_exec`; or
+Hatchery grows an agent persona whose primary job is file work (that persona can set
+`sandbox:` while the coordinator keeps the lazy tools — it's per-agent config).
 
 ## Out of scope
 
