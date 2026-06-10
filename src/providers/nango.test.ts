@@ -42,7 +42,7 @@ test('startConnectSession: includes non-secret metadata tags and keeps end_user_
       secretKey: 'nk_secret',
       endUserId: 'C123',
       integrationId: 'github-pat',
-      tags: { end_user_id: 'wrong-project', provider: 'github', auth_mode: 'pat', repo: 'Calibrax-ai/autoship' },
+      tags: { end_user_id: 'wrong-project', provider: 'github', auth_mode: 'pat', repo: 'acme/widgets' },
     },
     { fetchImpl: fn },
   );
@@ -51,7 +51,7 @@ test('startConnectSession: includes non-secret metadata tags and keeps end_user_
   assert.deepEqual(body.tags, {
     provider: 'github',
     auth_mode: 'pat',
-    repo: 'Calibrax-ai/autoship',
+    repo: 'acme/widgets',
     end_user_id: 'C123',
   });
 });
@@ -151,14 +151,14 @@ test('parseNangoAuthWebhook: normalizes an auth/creation/success event; null for
     connectionId: 'conn_gh',
     provider: 'github',
     providerConfigKey: 'github-pat',
-    tags: { end_user_id: 'C123', provider: 'github', auth_mode: 'pat', repo: 'Calibrax-ai/autoship' },
+    tags: { end_user_id: 'C123', provider: 'github', auth_mode: 'pat', repo: 'acme/widgets' },
   }));
   assert.deepEqual(githubPat, {
     projectId: 'C123',
     provider: 'github',
     providerConfigKey: 'github-pat',
     connectionId: 'conn_gh',
-    config: { nangoIntegrationKey: 'github-pat', authMode: 'pat', repo: 'Calibrax-ai/autoship' },
+    config: { nangoIntegrationKey: 'github-pat', authMode: 'pat', repo: 'acme/widgets' },
   });
 
   assert.equal(parseNangoAuthWebhook(JSON.stringify({ type: 'auth', operation: 'creation', success: false, connectionId: 'c', provider: 'notion', providerConfigKey: 'notion', tags: { end_user_id: 'C1' } })), null, 'success:false → null (failed consent, no row)');

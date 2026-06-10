@@ -168,10 +168,10 @@ export function requestConnectionTool(
       }
       const normalizedRepo = repo == null || repo === '' ? null : normalizeGithubRepo(repo);
       if (p === 'github' && mode === 'pat' && !normalizedRepo) {
-        return 'repo is required for a GitHub PAT connection. Use owner/name, for example Calibrax-ai/autoship.';
+        return 'repo is required for a GitHub PAT connection. Use owner/name, for example acme/widgets.';
       }
       if (p === 'github' && repo && !normalizedRepo) {
-        return 'repo must be a GitHub owner/name value, for example Calibrax-ai/autoship.';
+        return 'repo must be a GitHub owner/name value, for example acme/widgets.';
       }
       const integrationId = nangoIntegrationKey(p, mode as ConnectionAuthMode, args.nangoIntegrationKeys);
       const tags: Record<string, string> = { provider: p, auth_mode: mode };

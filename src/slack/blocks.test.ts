@@ -20,9 +20,9 @@ const agentRun: AgentRun = {
   slackTeamId: null,
   slackChannelId: null,
   slackThreadTs: null,
-  githubOwner: 'Calibrax-ai',
-  githubRepo: 'autoship',
-  targetRepo: 'github.com/Calibrax-ai/autoship',
+  githubOwner: 'acme',
+  githubRepo: 'widgets',
+  targetRepo: 'github.com/acme/widgets',
   baseBranch: 'main',
   kit: 'coding-default',
   runtime: 'pi',
@@ -32,7 +32,7 @@ const agentRun: AgentRun = {
   status: 'waiting_approval',
   branch: 'agent/EDK-42',
   commitSha: 'abc123',
-  prUrl: 'https://github.com/Calibrax-ai/autoship/pull/7',
+  prUrl: 'https://github.com/acme/widgets/pull/7',
   ciUrl: null,
   summary: 'Implemented Slack rendering.',
   error: null,
@@ -52,7 +52,7 @@ test('agentRunNotificationText renders a Slack-ready PR opened fallback', () => 
   const text = agentRunNotificationText('pr_opened', agentRun);
 
   assert.match(text, /PR opened/);
-  assert.match(text, /<https:\/\/github\.com\/Calibrax-ai\/autoship\/pull\/7\|Open PR>/);
+  assert.match(text, /<https:\/\/github\.com\/acme\/widgets\/pull\/7\|Open PR>/);
   assert.match(text, /EDK-42/);
   assert.doesNotMatch(text, /undefined|null/);
 });
@@ -65,7 +65,7 @@ test('agentRunNotificationBlocks renders backend-owned Block Kit with fallback f
     type: 'header',
     text: { type: 'plain_text', text: 'Agent run waiting for review', emoji: true },
   });
-  assert.equal(blocks.some((block) => JSON.stringify(block).includes('Calibrax-ai/autoship')), true);
+  assert.equal(blocks.some((block) => JSON.stringify(block).includes('acme/widgets')), true);
   assert.equal(blocks.some((block) => JSON.stringify(block).includes('Open PR')), true);
 });
 

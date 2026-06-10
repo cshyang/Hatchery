@@ -80,8 +80,8 @@ function route(status = 'active', runtime = 'pi'): Row {
     external_key: 'EDK',
     trigger_type: 'state',
     trigger_value: 'Run Agent',
-    github_owner: 'Calibrax-ai',
-    github_repo: 'autoship',
+    github_owner: 'acme',
+    github_repo: 'widgets',
     base_branch: 'main',
     kit: 'coding-default',
     runtime,
@@ -114,20 +114,20 @@ test('setup_status reports missing GitHub and Linear for a project with no activ
 
 test('setup_status reports GitHub PAT repo metadata when connected through github-pat', async () => {
   const db = new FakeD1();
-  db.connections.push(connection('github', { authMode: 'pat', repo: 'Calibrax-ai/autoship', nangoIntegrationKey: 'github-pat' }));
+  db.connections.push(connection('github', { authMode: 'pat', repo: 'acme/widgets', nangoIntegrationKey: 'github-pat' }));
 
   const status = await buildSetupStatus({
     db,
     binding: binding(),
     projectId: 'project_1',
     env: { NANGO_SECRET_KEY: 'secret' },
-    targetRepo: 'Calibrax-ai/autoship',
+    targetRepo: 'acme/widgets',
   });
 
   assert.deepEqual(status.connected.find((c) => c.provider === 'github'), {
     provider: 'github',
     authMode: 'pat',
-    repo: 'Calibrax-ai/autoship',
+    repo: 'acme/widgets',
   });
 });
 
@@ -140,7 +140,7 @@ test('setup_status reports missing Linear route when GitHub and Linear are conne
     binding: binding(),
     projectId: 'project_1',
     env: { NANGO_SECRET_KEY: 'secret', TRIGGER_SECRET_KEY: 'trigger_secret', AGENT_RUNNER_TOKEN: 'runner_secret', RUNNER_GITHUB_PAT_TEMP: 'github_secret', HATCHERY_PUBLIC_URL: 'https://hatchery.example' },
-    targetRepo: 'Calibrax-ai/autoship',
+    targetRepo: 'acme/widgets',
     linearTeamKey: 'EDK',
   });
 
@@ -152,7 +152,7 @@ test('setup_status reports missing Linear route when GitHub and Linear are conne
 
 test('setup_status reports ready when GitHub, Linear, active route, and runner config are present', async () => {
   const db = new FakeD1();
-  db.connections.push(connection('github', { authMode: 'pat', repo: 'Calibrax-ai/autoship' }), connection('linear', { authMode: 'oauth' }));
+  db.connections.push(connection('github', { authMode: 'pat', repo: 'acme/widgets' }), connection('linear', { authMode: 'oauth' }));
   db.routes.push(route('active'));
 
   const status = await buildSetupStatus({
@@ -160,7 +160,7 @@ test('setup_status reports ready when GitHub, Linear, active route, and runner c
     binding: binding(),
     projectId: 'project_1',
     env: { NANGO_SECRET_KEY: 'secret', TRIGGER_SECRET_KEY: 'trigger_secret', AGENT_RUNNER_TOKEN: 'runner_secret', RUNNER_GITHUB_PAT_TEMP: 'github_secret', HATCHERY_PUBLIC_URL: 'https://hatchery.example' },
-    targetRepo: 'Calibrax-ai/autoship',
+    targetRepo: 'acme/widgets',
     linearTeamKey: 'EDK',
     intent: 'run_agent',
   });
@@ -168,16 +168,16 @@ test('setup_status reports ready when GitHub, Linear, active route, and runner c
   assert.equal(status.ready, true);
   assert.deepEqual(status.missing, []);
   assert.equal(status.routes[0].status, 'active');
-  assert.equal(status.routes[0].targetRepo, 'Calibrax-ai/autoship');
+  assert.equal(status.routes[0].targetRepo, 'acme/widgets');
   assert.deepEqual(status.runner, { configured: true, runtime: 'pi', sandboxProvider: 'e2b' });
   assert.equal(status.nextAction?.type, 'none');
   assert.match(status.slackText, /Ready/);
-  assert.match(status.slackText, /Calibrax-ai\/autoship/);
+  assert.match(status.slackText, /acme\/widgets/);
 });
 
 test('setup_status flags legacy opencode active routes before Pi readiness', async () => {
   const db = new FakeD1();
-  db.connections.push(connection('github', { authMode: 'pat', repo: 'Calibrax-ai/autoship' }), connection('linear', { authMode: 'oauth' }));
+  db.connections.push(connection('github', { authMode: 'pat', repo: 'acme/widgets' }), connection('linear', { authMode: 'oauth' }));
   db.routes.push(route('active', 'opencode'));
 
   const status = await buildSetupStatus({
@@ -185,7 +185,7 @@ test('setup_status flags legacy opencode active routes before Pi readiness', asy
     binding: binding(),
     projectId: 'project_1',
     env: { NANGO_SECRET_KEY: 'secret', TRIGGER_SECRET_KEY: 'trigger_secret', AGENT_RUNNER_TOKEN: 'runner_secret', RUNNER_GITHUB_PAT_TEMP: 'github_secret', HATCHERY_PUBLIC_URL: 'https://hatchery.example' },
-    targetRepo: 'Calibrax-ai/autoship',
+    targetRepo: 'acme/widgets',
     linearTeamKey: 'EDK',
   });
 
@@ -198,7 +198,7 @@ test('setup_status flags legacy opencode active routes before Pi readiness', asy
 
 test('setup_status tool returns structured JSON without exposing configured values', async () => {
   const db = new FakeD1();
-  db.connections.push(connection('github', { authMode: 'pat', repo: 'Calibrax-ai/autoship' }), connection('linear', { authMode: 'oauth' }));
+  db.connections.push(connection('github', { authMode: 'pat', repo: 'acme/widgets' }), connection('linear', { authMode: 'oauth' }));
   db.routes.push(route('active'));
   const tool = setupStatusTool({
     db,
@@ -208,7 +208,7 @@ test('setup_status tool returns structured JSON without exposing configured valu
   });
 
   const out = await (tool.execute as (a: unknown) => Promise<string>)({
-    targetRepo: 'Calibrax-ai/autoship',
+    targetRepo: 'acme/widgets',
     linearTeamKey: 'EDK',
     intent: 'run_agent',
   });
