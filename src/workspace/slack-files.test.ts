@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
 import type { D1Like } from '../skills/repository';
+import { recordSlackConversationFiles } from '../slack/file-authorizations';
 import { listWorkspaceOps, type SandboxLike } from './workspace';
 import {
   maxSlackFileBytes,
@@ -34,10 +35,21 @@ class FakeD1 implements D1Like {
               const [projectId, limit] = values;
               return {
                 results: db.rows
-                  .filter((r) => r.project_id === projectId)
+                  .filter((r) => r.table === 'coordinator_workspace_ops' && r.project_id === projectId)
                   .sort((a, b) => Number(b.created_at) - Number(a.created_at))
                   .slice(0, Number(limit ?? 20)) as T[],
               };
+            }
+            if (query.includes('FROM slack_conversation_files')) {
+              const [projectId, conversationId, fileId] = values;
+              const row = db.rows.find(
+                (r) =>
+                  r.table === 'slack_conversation_files' &&
+                  r.project_id === projectId &&
+                  r.conversation_id === conversationId &&
+                  r.file_id === fileId,
+              );
+              return { results: (row ? [{ file_id: fileId }] : []) as T[] };
             }
             return { results: [] as T[] };
           },
@@ -45,6 +57,7 @@ class FakeD1 implements D1Like {
             if (query.startsWith('INSERT INTO coordinator_workspace_ops')) {
               const [id, projectId, conversationId, op, detailPreview, bytesIn, createdAt] = values;
               db.rows.push({
+                table: 'coordinator_workspace_ops',
                 id,
                 project_id: projectId,
                 conversation_id: conversationId,
@@ -59,6 +72,29 @@ class FakeD1 implements D1Like {
                 created_at: createdAt,
                 completed_at: null,
               });
+              return { meta: { changes: 1 } };
+            }
+            if (query.startsWith('INSERT INTO slack_conversation_files')) {
+              const [projectId, conversationId, fileId, name, mimetype, size, createdAt, updatedAt] = values;
+              const existing = db.rows.find(
+                (r) =>
+                  r.table === 'slack_conversation_files' &&
+                  r.project_id === projectId &&
+                  r.conversation_id === conversationId &&
+                  r.file_id === fileId,
+              );
+              const patch = {
+                table: 'slack_conversation_files',
+                project_id: projectId,
+                conversation_id: conversationId,
+                file_id: fileId,
+                name,
+                mimetype,
+                size,
+                updated_at: updatedAt,
+              };
+              if (existing) Object.assign(existing, patch);
+              else db.rows.push({ ...patch, created_at: createdAt });
               return { meta: { changes: 1 } };
             }
             if (query.startsWith('UPDATE coordinator_workspace_ops')) {
@@ -132,14 +168,26 @@ const INFO_OK = {
   file: { id: 'F123', name: 'report.xlsx', mimetype: 'application/vnd.ms-excel', size: 3, url_private_download: 'https://files.slack.com/dl/F123' },
 };
 
+const CONVERSATION_ID = 'slack:T1:C1:111.222';
+
+async function allowFile(db: FakeD1, fileId = 'F123', conversationId = CONVERSATION_ID): Promise<void> {
+  await recordSlackConversationFiles(db, {
+    projectId: 'proj-1',
+    conversationId,
+    files: [{ id: fileId, name: 'report.xlsx', mimetype: 'application/vnd.ms-excel', size: 3 }],
+    now: () => 123,
+  });
+}
+
 test('loadSlackFile: downloads via files.info, writes base64 into /workspace/inputs, audits', async () => {
   const db = new FakeD1();
   const sandbox = new FakeSandbox();
+  await allowFile(db);
   const calls: FetchCall[] = [];
   const body = new Uint8Array([104, 105, 33]); // "hi!"
   const result = await workspaceLoadSlackFile(deps(db, sandbox, fakeFetcher({ info: INFO_OK, body, calls })), {
     fileId: 'F123',
-    conversationId: 'conv-9',
+    conversationId: CONVERSATION_ID,
   });
 
   assert.equal(result.status, 'completed');
@@ -158,17 +206,52 @@ test('loadSlackFile: downloads via files.info, writes base64 into /workspace/inp
   assert.equal(audit.op, 'load_slack_file');
   assert.equal(audit.status, 'completed');
   assert.equal(audit.bytesOut, 3);
-  assert.equal(audit.conversationId, 'conv-9');
+  assert.equal(audit.conversationId, CONVERSATION_ID);
   assert.ok(!JSON.stringify(db.rows).includes('xoxb-test-token'));
+});
+
+test('loadSlackFile: rejects files not attached to the conversation before Slack API calls', async () => {
+  const db = new FakeD1();
+  const sandbox = new FakeSandbox();
+  await allowFile(db, 'F_ALLOWED');
+  const calls: FetchCall[] = [];
+
+  const result = await workspaceLoadSlackFile(deps(db, sandbox, fakeFetcher({ info: INFO_OK, calls })), {
+    fileId: 'F123',
+    conversationId: CONVERSATION_ID,
+  });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error, 'Slack file is not attached to this conversation');
+  assert.equal(calls.length, 0);
+  assert.equal(sandbox.execCalls.length, 0);
+  assert.equal(sandbox.writes.length, 0);
+});
+
+test('loadSlackFile: conversationId is required because file ids are conversation-scoped', async () => {
+  const db = new FakeD1();
+  const sandbox = new FakeSandbox();
+  await allowFile(db);
+  const calls: FetchCall[] = [];
+
+  const result = await workspaceLoadSlackFile(deps(db, sandbox, fakeFetcher({ info: INFO_OK, calls })), {
+    fileId: 'F123',
+  });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error, 'conversationId is required to load Slack files');
+  assert.equal(calls.length, 0);
 });
 
 test('loadSlackFile: declared oversize fails before any download or sandbox boot', async () => {
   const db = new FakeD1();
   const sandbox = new FakeSandbox();
+  await allowFile(db);
   const calls: FetchCall[] = [];
   const info = { ok: true, file: { ...INFO_OK.file, size: 999 } };
   const result = await workspaceLoadSlackFile(deps(db, sandbox, fakeFetcher({ info, calls }), { WORKSPACE_MAX_SLACK_FILE_BYTES: '100' }), {
     fileId: 'F123',
+    conversationId: CONVERSATION_ID,
   });
 
   assert.equal(result.status, 'failed');
@@ -180,10 +263,12 @@ test('loadSlackFile: declared oversize fails before any download or sandbox boot
 test('loadSlackFile: actual bytes over cap fail even when declared size lies', async () => {
   const db = new FakeD1();
   const sandbox = new FakeSandbox();
+  await allowFile(db);
   const info = { ok: true, file: { ...INFO_OK.file, size: 3 } };
   const body = new Uint8Array(200);
   const result = await workspaceLoadSlackFile(deps(db, sandbox, fakeFetcher({ info, body }), { WORKSPACE_MAX_SLACK_FILE_BYTES: '100' }), {
     fileId: 'F123',
+    conversationId: CONVERSATION_ID,
   });
   assert.equal(result.status, 'failed');
   assert.equal(sandbox.writes.length, 0);
@@ -192,11 +277,19 @@ test('loadSlackFile: actual bytes over cap fail even when declared size lies', a
 test('loadSlackFile: Slack API error and HTTP failure produce failed audits', async () => {
   const db = new FakeD1();
   const sandbox = new FakeSandbox();
-  const denied = await workspaceLoadSlackFile(deps(db, sandbox, fakeFetcher({ info: { ok: false, error: 'file_not_found' } })), { fileId: 'F404' });
+  await allowFile(db, 'F404');
+  await allowFile(db);
+  const denied = await workspaceLoadSlackFile(deps(db, sandbox, fakeFetcher({ info: { ok: false, error: 'file_not_found' } })), {
+    fileId: 'F404',
+    conversationId: CONVERSATION_ID,
+  });
   assert.equal(denied.status, 'failed');
   assert.ok(String(denied.error).includes('file_not_found'));
 
-  const http = await workspaceLoadSlackFile(deps(db, sandbox, fakeFetcher({ info: INFO_OK, downloadStatus: 403 })), { fileId: 'F123' });
+  const http = await workspaceLoadSlackFile(deps(db, sandbox, fakeFetcher({ info: INFO_OK, downloadStatus: 403 })), {
+    fileId: 'F123',
+    conversationId: CONVERSATION_ID,
+  });
   assert.equal(http.status, 'failed');
   assert.ok(String(http.error).includes('403'));
 
@@ -208,8 +301,12 @@ test('loadSlackFile: Slack API error and HTTP failure produce failed audits', as
 test('loadSlackFile: hostile filename is sanitized into the inputs dir', async () => {
   const db = new FakeD1();
   const sandbox = new FakeSandbox();
+  await allowFile(db);
   const info = { ok: true, file: { ...INFO_OK.file, name: '../../etc/passwd; rm -rf $(x).csv' } };
-  const result = await workspaceLoadSlackFile(deps(db, sandbox, fakeFetcher({ info })), { fileId: 'F123' });
+  const result = await workspaceLoadSlackFile(deps(db, sandbox, fakeFetcher({ info })), {
+    fileId: 'F123',
+    conversationId: CONVERSATION_ID,
+  });
   assert.equal(result.status, 'completed');
   assert.ok(result.path!.startsWith(`${WORKSPACE_INPUTS_DIR}/F123_`));
   assert.ok(!/[^A-Za-z0-9._/-]/.test(result.path!.slice(WORKSPACE_INPUTS_DIR.length)));

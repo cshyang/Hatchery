@@ -7,6 +7,7 @@
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
 import type { D1Like } from '../skills/repository';
 import { safeJson } from '../shared/bounded';
+import { isSlackConversationFileAllowed } from '../slack/file-authorizations';
 import { beginWorkspaceOp, type SandboxFactory, type WorkspaceDeps } from './workspace';
 
 export const WORKSPACE_INPUTS_DIR = '/workspace/inputs';
@@ -67,10 +68,11 @@ export async function workspaceLoadSlackFile(
   const fetcher = deps.fetcher ?? fetch;
   const cap = maxSlackFileBytes(deps.env);
   const fileId = params.fileId?.trim() ?? '';
+  const conversationId = params.conversationId?.trim() ?? '';
   const op = await beginWorkspaceOp(deps, {
     op: 'load_slack_file',
     detail: fileId || '(missing file id)',
-    conversationId: params.conversationId,
+    conversationId,
     bytesIn: 0,
   });
 
@@ -80,6 +82,16 @@ export async function workspaceLoadSlackFile(
   };
 
   if (!fileId) return fail('fileId is required');
+  if (!conversationId) return fail('conversationId is required to load Slack files');
+
+  const allowed = await isSlackConversationFileAllowed(deps.db, {
+    projectId: deps.projectId,
+    conversationId,
+    fileId,
+  });
+  if (!allowed) {
+    return fail('Slack file is not attached to this conversation');
+  }
 
   try {
     const infoRes = await fetcher(`https://slack.com/api/files.info?file=${encodeURIComponent(fileId)}`, {
@@ -271,7 +283,7 @@ export function workspaceSlackFileTools(args: {
         `Download a file the user attached in Slack into this project's sandbox container under ${WORKSPACE_INPUTS_DIR}/, returning its container path. Use the file ids listed in attachedFiles on the current Dispatch Input. Size cap ~20MB. After loading, process the file with workspace_exec (python3 with pandas is available).`,
       parameters: Type.Object({
         fileId: Type.String({ description: 'Slack file id from attachedFiles, e.g. F0123456789.' }),
-        conversationId: Type.Optional(Type.String({ description: 'Copy from the current Dispatch Input when available.' })),
+        conversationId: Type.String({ description: 'Copy from the current Dispatch Input. Required: files can only be loaded from their attached conversation.' }),
       }),
       async execute(params) {
         return safeJson(await workspaceLoadSlackFile(deps, params as { fileId: string; conversationId?: string }));
