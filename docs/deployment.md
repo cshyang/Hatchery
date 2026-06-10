@@ -36,17 +36,32 @@ $EDITOR .env.deploy
 
 | Phase | Does |
 |---|---|
-| `resources` | creates D1 + KV if absent, writes ids into `wrangler.jsonc` |
+| `resources` | creates D1 + KV if absent, writes ids into the env file (never into tracked `wrangler.jsonc`) |
 | `migrate` | applies D1 migrations to `hatchery-skills` |
-| `deploy` | builds Flue, deploys `hatchery` (crons included — the ticker worker is retired) |
-| `secrets` | pushes set values from `.env.deploy` to the Worker |
+| `deploy` | builds Flue, patches the built config with the env file's resource ids, deploys `hatchery`, autofills `HATCHERY_PUBLIC_URL` |
+| `secrets` | pushes set values from `.env.deploy` to the Worker (derives `SLACK_BOT_ID` + `KNOWN_TEAM_IDS` from the bot token via auth.test) |
 | `manifest [url]` | prints the Slack app manifest with the worker URL filled in, ready to paste (url defaults to `HATCHERY_PUBLIC_URL`) |
+| `doctor` | verifies the deployment leg by leg — config, worker liveness, Slack token, optional integrations — with the next step for each gap |
 
 After you create/install the Slack app, add the Slack bot token to `.env.deploy` and rerun:
 
 ```bash
 ./scripts/setup.sh secrets
 ```
+
+### Second account (e.g. work)
+
+`HATCHERY_ENV=<name>` points every phase at `.env.deploy.<name>`:
+
+```bash
+HATCHERY_ENV=work ./scripts/setup.sh full
+HATCHERY_ENV=work ./scripts/setup.sh doctor
+```
+
+Account-specific resource ids stay in that env file; tracked files (`wrangler.jsonc`,
+`trigger.config.ts`) keep the canonical instance's values, which CI continues to deploy.
+A second Trigger.dev project is selected with `TRIGGER_PROJECT_REF` when running
+`npm run trigger:deploy`.
 
 ## Worker Config
 

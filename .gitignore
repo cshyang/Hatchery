@@ -6,6 +6,7 @@ dist/
 .env
 .dev.vars
 .env.deploy
+.env.deploy.*
 .secrets.bulk.json
 
 # Trigger.dev CLI build/cache dir

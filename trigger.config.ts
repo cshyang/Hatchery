@@ -2,7 +2,9 @@ import { defineConfig } from '@trigger.dev/sdk';
 import { aptGet, additionalPackages, additionalFiles } from '@trigger.dev/build/extensions/core';
 
 export default defineConfig({
-  project: 'proj_vmlezgoianzbhanptfog',
+  // Canonical project; a clone deploying to its own Trigger.dev account overrides via env
+  // (set TRIGGER_PROJECT_REF in the shell or the .env.deploy.<name> file before trigger:deploy).
+  project: process.env.TRIGGER_PROJECT_REF ?? 'proj_vmlezgoianzbhanptfog',
   dirs: ['./trigger'],
   runtime: 'node-22', // pi-coding-agent requires node >=22.19; Trigger's default "node" image is 21.x → pi crashes on require(ESM).
   maxDuration: 2700, // seconds; 45 min. Hatchery's 3h reaper is the backstop (a maxDuration kill skips cleanup hooks).
