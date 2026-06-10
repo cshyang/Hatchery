@@ -353,7 +353,7 @@ test('route proposal refuses unconnected provider and disallowed repo', async ()
   );
 });
 
-test('route proposal accepts the delivery kit and rejects unknown kits', async () => {
+test('route proposal accepts the harness kit and rejects unknown kits', async () => {
   const db = new FakeD1();
   db.connections.push({ project_id: 'P', provider: 'linear', status: 'active' });
   db.connections.push({ project_id: 'P', provider: 'github', status: 'active', config_json: JSON.stringify({ repo: 'acme/repo' }) });
@@ -373,8 +373,8 @@ test('route proposal accepts the delivery kit and rejects unknown kits', async (
     reason: 'delivery kit route',
   };
 
-  const route = await createAgentRunRoute(db, { ...base, kit: 'delivery' }, deps);
-  assert.equal(route.kit, 'delivery');
+  const route = await createAgentRunRoute(db, { ...base, kit: 'harness' }, deps);
+  assert.equal(route.kit, 'harness');
 
   await assert.rejects(
     () => createAgentRunRoute(db, { ...base, kit: 'no-such-kit' }, deps),
