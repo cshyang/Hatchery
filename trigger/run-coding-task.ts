@@ -452,6 +452,12 @@ Runner environment contract (binding):
 
 export const runCodingTask = task({
   id: 'run-coding-task',
+  // Per-issue serialization: every dispatch carries a concurrencyKey (control plane:
+  // dispatchConcurrencyKey — project:issue), and Trigger gives each distinct key its own
+  // one-slot copy of this queue. Same issue → strictly serial (two concurrent runs would
+  // fight over the delivery kit's deterministic harness/<id> branch); different issues →
+  // parallel as before. The limit only ever binds per key, never globally.
+  queue: { concurrencyLimit: 1 },
   // pi/GLM coding runs OOM the default small-1x (0.5GB) — confirmed TASK_PROCESS_OOM_KILLED on a
   // blogpost task. Trying small-2x (1GB); bump to medium-2x (4GB) if a real task still OOMs.
   machine: 'small-2x',

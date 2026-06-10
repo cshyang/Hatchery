@@ -133,6 +133,23 @@ export async function resolveDispatchGithubToken(run: AgentRun, deps: RunnerDisp
   return (await deps.resolveGithubToken?.(run)) ?? deps.githubToken ?? null;
 }
 
+/**
+ * Per-issue serialization key. Two dispatches for the same issue must never run concurrently —
+ * for the delivery kit both would commit to the same deterministic `harness/<id>` branch; for
+ * coding-default a continuation pushes a specific PR branch. The task's queue has
+ * `concurrencyLimit: 1`, and Trigger creates a separate one-slot queue per distinct key, so
+ * different issues still run in parallel.
+ *
+ * Key resolution: issue identifier when known (initial runs) → targetBranch with the delivery
+ * `harness/` prefix stripped (continuations of the same issue land on the same key as their
+ * initial run) → runId (no issue identity at all: unique key, effectively unserialized).
+ * Project-scoped so identical identifiers in different projects never collide.
+ */
+export function dispatchConcurrencyKey(d: Pick<RunnerDispatch, 'projectId' | 'issue' | 'targetBranch' | 'runId'>): string {
+  const issueKey = d.issue?.identifier ?? d.targetBranch?.replace(/^harness\//, '') ?? d.runId;
+  return `${d.projectId}:${issueKey}`;
+}
+
 async function triggerCodingTask(deps: RunnerDispatchDeps, dispatch: RunnerDispatch): Promise<{ triggerRunId: string }> {
   let res: Response;
   try {
@@ -141,7 +158,10 @@ async function triggerCodingTask(deps: RunnerDispatchDeps, dispatch: RunnerDispa
       {
         method: 'POST',
         headers: { authorization: `Bearer ${deps.triggerSecretKey}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ payload: dispatch, options: { idempotencyKey: dispatch.runId } }),
+        body: JSON.stringify({
+          payload: dispatch,
+          options: { idempotencyKey: dispatch.runId, concurrencyKey: dispatchConcurrencyKey(dispatch) },
+        }),
       },
       {
         timeoutMs: RUNNER_FETCH_TIMEOUT_MS,

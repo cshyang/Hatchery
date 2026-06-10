@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
 import type { D1Like } from '../skills/repository';
 import { claimRunForDispatch, createAgentRun, findLatestRunByLinearIssue, getActiveAgentRunByBranch, getAgentRun, getAgentRunById, handleAgentRunCallback, updateAgentRun } from './repository';
-import { buildRunnerDispatch, claimAndDispatchRun, DISPATCH_MAX_ATTEMPTS, reconcileAgentRuns, resolveDispatchGithubToken } from './dispatch';
+import { buildRunnerDispatch, claimAndDispatchRun, DISPATCH_MAX_ATTEMPTS, dispatchConcurrencyKey, reconcileAgentRuns, resolveDispatchGithubToken } from './dispatch';
 import type { AgentRun } from './repository';
 
 const { test, run } = createTestRunner();
@@ -902,6 +902,34 @@ test('updateAgentRun round-trips triggerRunId', async () => {
   await updateAgentRun(db, { id: run.id, triggerRunId: 'run_abc' }, deps);
   const readBack = await getAgentRunById(db, run.id);
   assert.equal(readBack?.triggerRunId, 'run_abc');
+});
+
+
+// ---------------------------------------------------------------------------
+// dispatchConcurrencyKey (per-issue serialization)
+// ---------------------------------------------------------------------------
+
+test('dispatchConcurrencyKey: initial run keys on project + issue identifier', () => {
+  assert.equal(
+    dispatchConcurrencyKey({ projectId: 'p1', runId: 'r1', targetBranch: null, issue: { id: 'x', identifier: 'FRD-12', url: '', title: 't', description: null } }),
+    'p1:FRD-12',
+  );
+});
+
+test('dispatchConcurrencyKey: delivery continuation lands on the same key as its initial run', () => {
+  const initial = dispatchConcurrencyKey({ projectId: 'p1', runId: 'r1', targetBranch: null, issue: { id: 'x', identifier: 'FRD-12', url: '', title: 't', description: null } });
+  const continuation = dispatchConcurrencyKey({ projectId: 'p1', runId: 'r2', targetBranch: 'harness/FRD-12', issue: null });
+  assert.equal(continuation, initial);
+});
+
+test('dispatchConcurrencyKey: no issue identity falls back to runId (unique key, no serialization)', () => {
+  assert.equal(dispatchConcurrencyKey({ projectId: 'p1', runId: 'r9', targetBranch: null, issue: null }), 'p1:r9');
+});
+
+test('dispatchConcurrencyKey: same identifier in different projects never collides', () => {
+  const a = dispatchConcurrencyKey({ projectId: 'p1', runId: 'r1', targetBranch: null, issue: { id: 'x', identifier: 'FRD-12', url: '', title: 't', description: null } });
+  const b = dispatchConcurrencyKey({ projectId: 'p2', runId: 'r2', targetBranch: null, issue: { id: 'x', identifier: 'FRD-12', url: '', title: 't', description: null } });
+  assert.notEqual(a, b);
 });
 
 await run();
