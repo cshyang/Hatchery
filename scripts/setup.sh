@@ -4,8 +4,8 @@
 #   ./scripts/setup.sh             full run: resources -> migrate -> deploy -> secrets
 #   ./scripts/setup.sh resources   create D1 + KV, write their ids into wrangler.jsonc
 #   ./scripts/setup.sh migrate     apply D1 migrations (remote)
-#   ./scripts/setup.sh deploy      build + deploy hatchery, then deploy the ticker
-#   ./scripts/setup.sh secrets     push secrets from .env.deploy to both workers
+#   ./scripts/setup.sh deploy      build + deploy hatchery (crons included; ticker worker retired)
+#   ./scripts/setup.sh secrets     push secrets from .env.deploy to the worker
 #
 # Idempotent: re-running reuses existing D1/KV and never clobbers a secret you didn't change.
 # Phaseable on purpose — the Slack app needs the worker URL (from `deploy`), but `secrets`
@@ -20,7 +20,6 @@ ENV_FILE=".env.deploy"
 DB_NAME="hatchery-skills"
 KV_BINDING="SLACK_EVENTS"
 WORKER="hatchery"
-TICKER_DIR="ticker"
 BULK_FILE=".secrets.bulk.json"
 
 [ -f "$ENV_FILE" ] || { echo "❌ Missing $ENV_FILE — copy .env.deploy.example to .env.deploy and fill it."; exit 1; }
@@ -67,8 +66,6 @@ deploy() {
   echo "→ build + deploy $WORKER"
   npx flue build --target cloudflare
   wrangler deploy --config "dist/$WORKER/wrangler.json"
-  echo "→ deploy ticker ($TICKER_DIR)"
-  ( cd "$TICKER_DIR" && wrangler deploy )
   echo "✓ deployed. Use the worker URL printed above for the Slack/Nango/Linear webhooks."
 }
 
@@ -89,10 +86,8 @@ secrets() {
   local n; n="$(node -e 'process.stdout.write(String(Object.keys(require("./"+process.env.BULK_FILE)).length))' BULK_FILE="$BULK_FILE")"
   echo "→ pushing $n secrets to $WORKER"
   wrangler secret bulk "$BULK_FILE"
-  echo "→ pushing HEARTBEAT_TOKEN to ticker (must match $WORKER)"
-  printf '%s' "$HEARTBEAT_TOKEN" | ( cd "$TICKER_DIR" && wrangler secret put HEARTBEAT_TOKEN )
   rm -f "$BULK_FILE"; trap - EXIT
-  echo "✓ secrets set on both workers."
+  echo "✓ secrets set."
 }
 
 checklist() {

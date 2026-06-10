@@ -237,11 +237,11 @@ test('Flue observer ignores non-Slack sessions and non-project agents', async ()
   const restore = installFetchCapture(calls);
   try {
     await handleObservedSlackActivity(
-      { type: 'tool_start', instanceId: 'project:P:agent:default', session: 'heartbeat:P', toolName: 'execute_code', toolCallId: 'tc1' } as never,
+      { type: 'tool_start', instanceId: 'project:P:agent:default/heartbeat', session: 'default', toolName: 'execute_code', toolCallId: 'tc1' } as never,
       { env: { DB: db, SLACK_BOT_TOKEN_DEFAULT: 'xoxb-test' } } as never,
     );
     await handleObservedSlackActivity(
-      { type: 'tool_start', instanceId: 'bad-instance', session: 'conv:slack:T:C:100.000', toolName: 'execute_code', toolCallId: 'tc1' } as never,
+      { type: 'tool_start', instanceId: 'bad-instance', session: 'default', toolName: 'execute_code', toolCallId: 'tc1' } as never,
       { env: { DB: db, SLACK_BOT_TOKEN_DEFAULT: 'xoxb-test' } } as never,
     );
   } finally {
@@ -258,7 +258,7 @@ test('Flue observer edits the ack with friendly labels for known tool starts', a
   const restore = installFetchCapture(calls);
   try {
     await handleObservedSlackActivity(
-      { type: 'tool_start', instanceId: 'project:P:agent:default', session: 'conv:slack:T:C:100.000', toolName: 'execute_code', toolCallId: 'tc1' } as never,
+      { type: 'tool_start', instanceId: 'project:P:agent:default/conv:slack:T:C:100.000', session: 'default', toolName: 'execute_code', toolCallId: 'tc1' } as never,
       { env: { DB: db, SLACK_BOT_TOKEN_DEFAULT: 'xoxb-test' } } as never,
     );
   } finally {
@@ -281,8 +281,8 @@ test('Flue observer hides unknown tools and never posts args or results', async 
     await handleObservedSlackActivity(
       {
         type: 'tool_start',
-        instanceId: 'project:P:agent:default',
-        session: 'conv:slack:T:C:100.000',
+        instanceId: 'project:P:agent:default/conv:slack:T:C:100.000',
+        session: 'default',
         toolName: 'secret_debug_tool',
         toolCallId: 'tc1',
         args: { token: 'secret-token' },
@@ -292,8 +292,8 @@ test('Flue observer hides unknown tools and never posts args or results', async 
     await handleObservedSlackActivity(
       {
         type: 'tool_call',
-        instanceId: 'project:P:agent:default',
-        session: 'conv:slack:T:C:100.000',
+        instanceId: 'project:P:agent:default/conv:slack:T:C:100.000',
+        session: 'default',
         toolName: 'execute_code',
         toolCallId: 'tc2',
         isError: true,

@@ -68,22 +68,28 @@ export const DEFAULT_AGENT_SLUG = 'default';
 // account-coupled config and now lives in src/config/deployment.ts (isKnownTeam), read from env so
 // relocating to another workspace is a config change, not a code edit.
 
-// Flue DO instance id for a project's agent persona: `project:<projectId>:agent:<slug>`.
-// The slug is 'default' today — baked in now because DO instance ids are sticky (renaming
-// one makes a NEW DO and orphans its sessions). A channel is the shared room; each persona
-// is its own instance inside it. Build + parse go through these two functions so the format
-// never drifts across the heartbeat / scheduled / event dispatch sites.
-export function agentInstanceId(projectId: string, slug: string = DEFAULT_AGENT_SLUG): string {
-  return `project:${projectId}:agent:${slug}`;
+// Flue DO instance id for a project's agent persona, scoped per conversation:
+// `project:<projectId>:agent:<slug>/<scope>`. On Flue 0.11+ an agent instance IS one
+// conversation (named sessions are gone), so the scope that used to be a session name
+// (`conv:<conversationId>`, `heartbeat`, `job:<jobId>`, ...) rides in the instance id.
+// The scope sits after `/` because scopes contain `:` and slugs never do. DO instance
+// ids are sticky — renaming one makes a NEW DO and orphans its history. Build + parse
+// go through these two functions so the format never drifts across dispatch sites.
+export function agentInstanceId(projectId: string, scope?: string, slug: string = DEFAULT_AGENT_SLUG): string {
+  const base = `project:${projectId}:agent:${slug}`;
+  return scope ? `${base}/${scope}` : base;
 }
 
-/** Parse projectId + slug from an instance id. Tolerates the legacy bare `project:<id>`
- *  (no `:agent:` suffix) so any DO created before this change still resolves. */
-export function parseAgentInstanceId(id: string): { projectId: string; slug: string } {
-  const m = id.match(/^project:(.+):agent:([^:]+)$/);
-  if (m) return { projectId: m[1], slug: m[2] };
-  const projectId = id.startsWith('project:') ? id.slice('project:'.length) : id;
-  return { projectId, slug: DEFAULT_AGENT_SLUG };
+/** Parse projectId + slug + scope from an instance id. Tolerates scope-less ids and the
+ *  legacy bare `project:<id>` (no `:agent:` suffix) so older callers still resolve. */
+export function parseAgentInstanceId(id: string): { projectId: string; slug: string; scope: string | null } {
+  const slash = id.indexOf('/');
+  const base = slash === -1 ? id : id.slice(0, slash);
+  const scope = slash === -1 ? null : id.slice(slash + 1) || null;
+  const m = base.match(/^project:(.+):agent:([^:]+)$/);
+  if (m) return { projectId: m[1], slug: m[2], scope };
+  const projectId = base.startsWith('project:') ? base.slice('project:'.length) : base;
+  return { projectId, slug: DEFAULT_AGENT_SLUG, scope };
 }
 
 export interface Binding {

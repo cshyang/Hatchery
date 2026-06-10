@@ -427,8 +427,7 @@ test('handleInternalWorkItemRequest authenticates, dedupes, and records dispatch
   assert.equal(dispatched.length, 1);
   assert.deepEqual(dispatched[0], {
     agent: 'project',
-    id: 'project:P:agent:default',
-    session: `work:P:${first.body?.workItem.id}`,
+    id: `project:P:agent:default/work:${first.body?.workItem.id}`,
     input: { kind: 'work_item', workItemId: first.body?.workItem.id, title: 'From Linear' },
   });
 
