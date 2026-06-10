@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
-import { startConnectSession, fetchToken, deleteConnection, verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook } from './nango';
+import { startConnectSession, fetchToken, deleteConnection, verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook, fetchProviderApiSpec, listIntegrations } from './nango';
 
 // A fake fetch that records the last call and returns a canned Response.
 function fakeFetch(responder: (url: string, init: RequestInit) => Response) {
@@ -184,6 +184,49 @@ test('parseNangoDeletionWebhook: extracts connectionId on auth/deletion; null ot
   assert.equal(parseNangoDeletionWebhook(JSON.stringify({ type: 'auth', operation: 'deletion' })), null, 'no connectionId → null');
   assert.equal(parseNangoDeletionWebhook(JSON.stringify({ type: 'sync', operation: 'deletion', connectionId: 'c' })), null, 'non-auth → null');
   assert.equal(parseNangoDeletionWebhook('not json'), null, 'garbage → null');
+});
+
+test('fetchProviderApiSpec: parses base_url + headers + auth_mode, drops templated headers, strips trailing slash', async () => {
+  // Shape from the live probe of /providers/notion (2026-06-10) plus a templated header to filter.
+  const { fn, calls } = fakeFetch(() =>
+    new Response(JSON.stringify({ data: {
+      auth_mode: 'OAUTH2',
+      docs: 'https://nango.dev/docs/api-integrations/notion',
+      proxy: { base_url: 'https://api.notion.com/', headers: { 'Notion-Version': '2022-06-28', authorization: 'Bearer ${apiKey}' } },
+    } }), { status: 200 }),
+  );
+  const spec = (await fetchProviderApiSpec({ secretKey: 'nk', provider: 'notion' }, { fetchImpl: fn }))!;
+  assert.match(calls[0].url, /\/providers\/notion$/);
+  assert.equal((calls[0].init.headers as Record<string, string>).authorization, 'Bearer nk');
+  assert.equal(spec.baseUrl, 'https://api.notion.com');
+  assert.deepEqual(spec.headers, { 'notion-version': '2022-06-28' }, 'templated ${apiKey} header dropped, names lowercased');
+  assert.equal(spec.authMode, 'OAUTH2');
+  assert.equal(spec.docs, 'https://nango.dev/docs/api-integrations/notion');
+});
+
+test('fetchProviderApiSpec: null for templated base_url, missing proxy, or a non-OK response', async () => {
+  const templated = fakeFetch(() => new Response(JSON.stringify({ data: { auth_mode: 'API_KEY', proxy: { base_url: 'https://${connectionConfig.domain}' } } }), { status: 200 }));
+  assert.equal(await fetchProviderApiSpec({ secretKey: 'nk', provider: 'onepassword' }, { fetchImpl: templated.fn }), null);
+  const noProxy = fakeFetch(() => new Response(JSON.stringify({ data: { auth_mode: 'OAUTH2' } }), { status: 200 }));
+  assert.equal(await fetchProviderApiSpec({ secretKey: 'nk', provider: 'x' }, { fetchImpl: noProxy.fn }), null);
+  const gone = fakeFetch(() => new Response('{"error":"unknown"}', { status: 404 }));
+  assert.equal(await fetchProviderApiSpec({ secretKey: 'nk', provider: 'nope' }, { fetchImpl: gone.fn }), null);
+});
+
+test('listIntegrations: parses unique_key/provider/display_name from the data envelope', async () => {
+  const { fn, calls } = fakeFetch(() =>
+    new Response(JSON.stringify({ data: [
+      { unique_key: 'github-pat', provider: 'github-pat', display_name: 'Github (Personal Access Token)' },
+      { unique_key: 'airtable', provider: 'airtable', display_name: 'Airtable' },
+      { provider: 'broken-no-key' },
+    ] }), { status: 200 }),
+  );
+  const out = await listIntegrations({ secretKey: 'nk' }, { fetchImpl: fn });
+  assert.match(calls[0].url, /\/integrations$/);
+  assert.deepEqual(out, [
+    { uniqueKey: 'github-pat', provider: 'github-pat', displayName: 'Github (Personal Access Token)' },
+    { uniqueKey: 'airtable', provider: 'airtable', displayName: 'Airtable' },
+  ], 'entries without unique_key are dropped');
 });
 
 await run();

@@ -1,8 +1,8 @@
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
-import { genericApiTool, PROVIDER_API_PROFILES } from '../providers/generic-api';
+import { dynamicApiProfile, genericApiTool, nangoProxyProfile, PROVIDER_API_PROFILES } from '../providers/generic-api';
 import { disconnectedNotice, disableConnectionByRef, loadConnections, type ConnectionState, type ResolvedConnection } from './repository';
 import { githubReadTools } from '../providers/github';
-import { deleteConnection, startConnectSession } from '../providers/nango';
+import { deleteConnection, listIntegrations, startConnectSession } from '../providers/nango';
 import { PROVIDER_CATALOG, providerUsesGenericApi, type ProviderCatalogEntry } from './catalog';
 import type { D1Like } from '../skills/repository';
 import {
@@ -31,6 +31,13 @@ export function connectionsBlock(
     }
     return `  ⚪ ${c.provider} (not connected) — ${c.summary}`;
   });
+  // Generic Nango providers: connected but not in the curated catalog — still listed, still usable.
+  const curated = new Set(catalog.map((c) => c.provider));
+  for (const s of state) {
+    if (s.status === 'connected' && !curated.has(s.provider)) {
+      lines.push(`  ✅ ${s.provider} (connected) — generic API access via ${s.provider}_call_api`);
+    }
+  }
   const intro = canRequest
     ? 'External services you can reach. Connected ones expose tools you can call now. For one that is NOT ' +
       'connected, call request_connection with the provider name — you get a secure link to share; the ' +
@@ -69,6 +76,9 @@ function connectionDetail(provider: string, config: Record<string, unknown>): st
 export function connectionTools(
   state: ConnectionState[],
   secrets: Record<string, ResolvedConnection>,
+  /** Nango platform key — routes the proxy-fallback profile for generic providers. Optional: without
+   *  it (or a connectionRef), a generic provider without a direct-call spec is simply toolless. */
+  nangoSecretKey?: string,
 ): ToolDefinition[] {
   const tools: ToolDefinition[] = [];
 
@@ -79,15 +89,21 @@ export function connectionTools(
 
     // Generic path (default unless a provider has typed tools and isn't opted into generic): one
     // <provider>_call_api tool driven by the provider's API profile. The model composes the call.
-    const profile = PROVIDER_API_PROFILES[s.provider];
+    // Profile precedence: hand-written (cribs, tuned policy) → dynamic direct (persisted Nango spec,
+    // Bearer auth) → Nango proxy (exotic auth; Nango resolves it from its own catalog per call).
+    const profile = PROVIDER_API_PROFILES[s.provider] ?? dynamicApiProfile(s.provider, creds.config);
     // A Nango-backed credential is a lazy thunk; the typed tools (githubReadTools) take a string PAT
     // and cannot consume it. Route any thunk secret through the generic call_api path (genericApiTool
-    // resolves the thunk at call time). A provider with a thunk secret but NO api profile would be
-    // toolless — that can't happen today (catalog ⊆ providers-with-a-profile), but the guard degrades
-    // to "no tool" rather than a crash.
+    // resolves the thunk at call time).
     const isLazy = typeof creds.secret === 'function';
     if ((providerUsesGenericApi(s.provider, creds.config) || isLazy) && profile) {
       tools.push(genericApiTool(profile, creds.secret, creds.config));
+      continue;
+    }
+    if (!profile && nangoSecretKey && s.connectionRef) {
+      const proxy = nangoProxyProfile(s.provider, { connectionRef: s.connectionRef, providerConfigKey: connectionProviderConfigKey(s.provider, creds.config) });
+      // The proxy authenticates with the NANGO key; the provider credential never touches us.
+      tools.push(genericApiTool(proxy, nangoSecretKey, creds.config));
       continue;
     }
 
@@ -110,27 +126,41 @@ export function connectionTools(
  *  `deps.startConnectSession` is injectable for tests. */
 export function requestConnectionTool(
   args: { nangoSecretKey: string; projectId: string; catalog?: ProviderCatalogEntry[]; nangoIntegrationKeys?: NangoIntegrationKeys },
-  deps: { startConnectSession?: typeof startConnectSession } = {},
+  deps: { startConnectSession?: typeof startConnectSession; listIntegrations?: typeof listIntegrations } = {},
 ): ToolDefinition {
   const catalog = args.catalog ?? PROVIDER_CATALOG;
   const allowed = catalog.map((c) => c.provider);
   const start = deps.startConnectSession ?? startConnectSession;
+  const listEnabled = deps.listIntegrations ?? listIntegrations;
   return defineTool({
     name: 'request_connection',
     description:
       'Start connecting an external service for THIS channel. Pass the provider name; you get back a ' +
       'secure authorization link to share with the person. They click it and authorize off-Slack — you ' +
       "NEVER receive or handle the credential. Once they finish, that provider's tools appear " +
-      `automatically. For GitHub, prefer authMode "app" (a bot install with short-lived, repo-scoped tokens); "oauth" and "pat" (with repo "owner/name") also work. Connectable providers: ${allowed.join(', ')}.`,
+      `automatically. For GitHub, prefer authMode "app" (a bot install with short-lived, repo-scoped tokens); "oauth" and "pat" (with repo "owner/name") also work. Known providers: ${allowed.join(', ')} — but ANY integration enabled in the workspace's Nango project is connectable; pass its name and it is checked live.`,
     parameters: Type.Object({
-      provider: Type.String({ description: `The provider to connect. One of: ${allowed.join(', ')}.` }),
+      provider: Type.String({ description: `The provider to connect, e.g. ${allowed.join(', ')}, or any other integration enabled in Nango.` }),
       authMode: Type.Optional(Type.String({ description: 'Optional auth mode. For GitHub: "app" (bot install, recommended), "oauth" (default), or "pat". Other providers use "oauth".' })),
       repo: Type.Optional(Type.String({ description: 'Optional GitHub owner/name. Required when provider="github" and authMode="pat".' })),
     }),
     async execute({ provider, authMode, repo }) {
       const p = String(provider).toLowerCase();
       if (!allowed.includes(p)) {
-        return `Cannot connect "${provider}" — not a supported provider. Supported: ${allowed.join(', ')}.`;
+        // Not curated — accept anything actually enabled in Nango (the dashboard IS the catalog).
+        const enabled = await listEnabled({ secretKey: args.nangoSecretKey }).catch(() => []);
+        const match = enabled.find((i) => i.uniqueKey.toLowerCase() === p || i.provider.toLowerCase() === p);
+        if (!match) {
+          const names = enabled.map((i) => i.uniqueKey).join(', ');
+          return `Cannot connect "${provider}" — not enabled in this workspace's Nango project. ${names ? `Enabled: ${names}. ` : ''}An operator can enable it in the Nango dashboard first.`;
+        }
+        const { connectLink } = await start({
+          secretKey: args.nangoSecretKey,
+          endUserId: args.projectId,
+          integrationId: match.uniqueKey,
+          tags: { provider: p, auth_mode: 'oauth' },
+        });
+        return connectionRequestCopy(p, 'oauth', connectLink, null);
       }
       const mode = normalizeAuthMode(p, authMode);
       if (!mode) {
@@ -201,9 +231,9 @@ export function disconnectConnectionTool(
     description:
       'Disconnect an external service from THIS channel — revokes access and removes its tools. Pass ' +
       'the provider name. Use when the user asks to disconnect, remove, revoke, or unlink a connection. ' +
-      `Connectable/disconnectable providers: ${allowed.join(', ')}.`,
+      `Works for ANY connected provider (e.g. ${allowed.join(', ')}).`,
     parameters: Type.Object({
-      provider: Type.String({ description: `The provider to disconnect. One of: ${allowed.join(', ')}.` }),
+      provider: Type.String({ description: 'The provider to disconnect — any currently connected provider name.' }),
     }),
     async execute({ provider }) {
       const p = String(provider).toLowerCase();
