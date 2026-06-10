@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
 import type { D1Like } from '../skills/repository';
 import {
+  completeSlackTurnActivity,
   createSlackTurnActivity,
   handleObservedSlackActivity,
   loadSlackTurnActivity,
@@ -220,6 +221,40 @@ test('throttles normal updates but not the first update', async () => {
   assert.equal(third?.shouldPost, true);
 });
 
+test('renders active receipts with elapsed time and current phase', async () => {
+  const db = new FakeD1();
+  await createSlackTurnActivity(db, input({ now: 0 }));
+
+  await recordSlackToolActivity(db, {
+    projectId: 'P',
+    sessionId: 'conv:slack:T:C:100.000',
+    toolName: 'execute_code',
+    now: 12 * 60 * 1000,
+  });
+
+  const activity = await loadSlackTurnActivity(db, 'P', 'conv:slack:T:C:100.000');
+  const rendered = renderSlackActivityReceipt(activity!, { now: 12 * 60 * 1000 });
+
+  assert.match(rendered, /^⏳ Working — 12 min — running code/);
+});
+
+test('renders completed receipts with elapsed time frozen at completion', async () => {
+  const db = new FakeD1();
+  await createSlackTurnActivity(db, input({ now: 0 }));
+  await recordSlackToolActivity(db, {
+    projectId: 'P',
+    sessionId: 'conv:slack:T:C:100.000',
+    toolName: 'setup_status',
+    now: 60 * 1000,
+  });
+
+  const completed = await completeSlackTurnActivity(db, 'P', 'conv:slack:T:C:100.000', 'completed', 2 * 60 * 1000);
+  const rendered = renderSlackActivityReceipt(completed!, { now: 30 * 60 * 1000 });
+
+  assert.match(rendered, /^✅ Activity — 2 min/);
+  assert.doesNotMatch(rendered, /30 min/);
+});
+
 test('final replies post below only when the receipt has visible activity', async () => {
   const db = new FakeD1();
   await createSlackTurnActivity(db, input());
@@ -270,6 +305,34 @@ test('Flue observer edits the ack with friendly labels for known tool starts', a
   assert.equal(calls[0].body.channel, 'C');
   assert.equal(calls[0].body.ts, '101.000');
   assert.match(String(calls[0].body.text), /Running code/);
+});
+
+test('Flue observer shows stream-response phase only after visible work exists', async () => {
+  const db = new FakeD1();
+  await createSlackTurnActivity(db, input());
+  const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const restore = installFetchCapture(calls);
+  try {
+    await handleObservedSlackActivity(
+      { type: 'message_start', instanceId: 'project:P:agent:default/conv:slack:T:C:100.000', session: 'default' } as never,
+      { env: { DB: db, SLACK_BOT_TOKEN_DEFAULT: 'xoxb-test' } } as never,
+    );
+    await handleObservedSlackActivity(
+      { type: 'tool_start', instanceId: 'project:P:agent:default/conv:slack:T:C:100.000', session: 'default', toolName: 'execute_code', toolCallId: 'tc1' } as never,
+      { env: { DB: db, SLACK_BOT_TOKEN_DEFAULT: 'xoxb-test' } } as never,
+    );
+    await handleObservedSlackActivity(
+      { type: 'message_start', instanceId: 'project:P:agent:default/conv:slack:T:C:100.000', session: 'default' } as never,
+      { env: { DB: db, SLACK_BOT_TOKEN_DEFAULT: 'xoxb-test' } } as never,
+    );
+  } finally {
+    restore();
+  }
+
+  assert.equal(calls.length, 2);
+  assert.doesNotMatch(String(calls[0].body.text), /Receiving stream response/);
+  assert.match(String(calls[1].body.text), /Receiving stream response/);
+  assert.match(String(calls[1].body.text), /^⏳ Working .* receiving stream response/m);
 });
 
 test('Flue observer hides unknown tools and never posts args or results', async () => {
