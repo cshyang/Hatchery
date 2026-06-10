@@ -15,7 +15,6 @@ import {
 export interface DispatchRequest {
   agent: string;
   id: string;
-  session: string;
   input: Record<string, unknown>;
 }
 
@@ -125,8 +124,7 @@ export async function handleInternalWorkItemRequest(
   const run = await createWorkRun(req.db, { workItemId: created.item.id, runner: 'flue', dispatchStatus: 'pending' }, deps);
   const dispatchInput: DispatchRequest = {
     agent: 'project',
-    id: agentInstanceId(created.item.projectId),
-    session: `work:${created.item.projectId}:${created.item.id}`,
+    id: agentInstanceId(created.item.projectId, `work:${created.item.id}`),
     input: {
       kind: 'work_item',
       workItemId: created.item.id,

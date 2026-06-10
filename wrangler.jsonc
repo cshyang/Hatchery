@@ -22,16 +22,12 @@
   "d1_databases": [
     { "binding": "DB", "database_name": "hatchery-skills", "database_id": "6ac5de79-a8c0-4e08-aab8-b9b636278a9d" }
   ],
-  // Flue 0.9 stops owning Durable Object migrations implicitly. Keep the
-  // deployed Flue classes in ordered project config so Wrangler owns the
-  // migration history instead of relying on generated build output.
+  // Flue 0.11 generates + merges the agent DO bindings itself (FLUE_PROJECT_AGENT,
+  // FLUE_REGISTRY) — only application-owned DOs are declared here. The Sandbox class
+  // is exported from .flue/cloudflare.ts (0.11 dropped the auto-wiring).
   "durable_objects": {
     "bindings": [
-      { "name": "Project", "class_name": "Project" },
-      { "name": "FLUE_REGISTRY", "class_name": "FlueRegistry" },
-      // Workspace sandbox: real container with shell/fs/git for coordinator
-      // workspace tasks. Flue re-exports @cloudflare/sandbox's class for any
-      // binding whose class_name ends with "Sandbox".
+      // Workspace sandbox: real container with shell/fs/git for coordinator workspace tasks.
       { "name": "SANDBOX", "class_name": "Sandbox" }
     ]
   },
@@ -46,6 +42,10 @@
   "migrations": [
     { "tag": "flue-class-FlueRegistry", "new_sqlite_classes": ["FlueRegistry"] },
     { "tag": "flue-class-Project", "new_sqlite_classes": ["Project"] },
-    { "tag": "sandbox-class", "new_sqlite_classes": ["Sandbox"] }
+    { "tag": "sandbox-class", "new_sqlite_classes": ["Sandbox"] },
+    // Flue 0.11: agent DOs are generated as Flue<Name>Agent. The old per-project
+    // `Project` class is deleted (its session histories are rejected by 0.11 anyway;
+    // the D1 `messages` transcript keeps the durable record — threads cold-start once).
+    { "tag": "flue-011", "deleted_classes": ["Project"], "new_sqlite_classes": ["FlueProjectAgent"] }
   ]
 }
