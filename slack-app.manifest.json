@@ -9,12 +9,22 @@
     "bot_user": {
       "display_name": "hatchery",
       "always_online": true
-    }
+    },
+    "slash_commands": [
+      {
+        "command": "/hatchery",
+        "url": "https://REPLACE-WITH-YOUR-WORKER-URL/slack/commands",
+        "description": "Hatchery status and read-only views",
+        "usage_hint": "status | runs | reminders | skills | help",
+        "should_escape": false
+      }
+    ]
   },
   "oauth_config": {
     "scopes": {
       "bot": [
         "app_mentions:read",
+        "commands",
         "channels:history",
         "channels:read",
         "groups:history",

@@ -8,6 +8,7 @@ import { postWorkingAck } from '../src/slack/ack';
 import { createSlackTurnActivity, handleObservedSlackActivity } from '../src/slack/activity';
 import { recordSlackConversationFiles } from '../src/slack/file-authorizations';
 import { dispatchSlackTurnWithFallback } from '../src/slack/dispatch';
+import { parseSlashCommandPayload, runSlashCommand } from '../src/slack/commands';
 import {
   parseSlackEventEnvelope,
   slackEventId,
@@ -695,6 +696,38 @@ app.post('/slack/events', async (c) => {
   );
 
   return c.body(null, 200); // ack within Slack's 3s window; agent replies async
+});
+
+// Slash commands (/hatchery <subcommand>): read-only observability views, answered ephemerally
+// in the direct slash response (all fast D1 reads — inside Slack's 3s window, no response_url).
+// Same signature verification as /slack/events; the command must also be declared in the Slack
+// app manifest or Slack won't deliver it.
+app.post('/slack/commands', async (c) => {
+  const raw = await c.req.text();
+
+  const verified = await verifySlackSignature(
+    c.env.SLACK_SIGNING_SECRET ?? '',
+    raw,
+    c.req.header('x-slack-request-timestamp'),
+    c.req.header('x-slack-signature'),
+  );
+  if (!verified) return c.text('unauthorized', 401);
+
+  const payload = parseSlashCommandPayload(raw);
+  const binding = await bindingBySlack(payload.teamId, payload.channelId, c.env.DB);
+  if (!binding) {
+    return c.json({
+      response_type: 'ephemeral',
+      text: 'This channel is not bound to a Hatchery project yet. @mention the bot first to create the binding.',
+    });
+  }
+
+  const text = await runSlashCommand(payload.text, {
+    binding,
+    db: c.env.DB,
+    env: c.env as Record<string, unknown>,
+  });
+  return c.json({ response_type: 'ephemeral', text });
 });
 
 // Everything else → Flue's built-in agent / workflow / run routes.
