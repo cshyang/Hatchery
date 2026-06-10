@@ -139,7 +139,7 @@ export async function completeSlackTurnActivity(
   now: number = Date.now(),
 ): Promise<SlackTurnActivity | null> {
   const activity = await loadSlackTurnActivity(db, projectId, sessionId);
-  if (!activity || activity.activities.length === 0) return activity;
+  if (!activity) return null;
   activity.status = status;
   activity.updatedAt = now;
   activity.completedAt = now;

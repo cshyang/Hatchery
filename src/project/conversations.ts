@@ -197,6 +197,9 @@ export async function sendFinalToConversationTarget(
 
   if (!shouldPreserveReceipt) {
     await sendToConversationTarget(env, target, text, ackMessageTs);
+    if (ackMessageTs && opts.db) {
+      await completeSlackTurnActivity(opts.db, opts.projectId, opts.sessionId).catch(() => null);
+    }
     return;
   }
 
