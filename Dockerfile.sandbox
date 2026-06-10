@@ -1,0 +1,5 @@
+# -python variant: pandas/numpy/matplotlib for spreadsheet/data work (default has no Python)
+FROM docker.io/cloudflare/sandbox:0.12.1-python
+
+# Documents the ports this application uses (standard Docker convention)
+EXPOSE 8080

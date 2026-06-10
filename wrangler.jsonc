@@ -28,11 +28,24 @@
   "durable_objects": {
     "bindings": [
       { "name": "Project", "class_name": "Project" },
-      { "name": "FLUE_REGISTRY", "class_name": "FlueRegistry" }
+      { "name": "FLUE_REGISTRY", "class_name": "FlueRegistry" },
+      // Workspace sandbox: real container with shell/fs/git for coordinator
+      // workspace tasks. Flue re-exports @cloudflare/sandbox's class for any
+      // binding whose class_name ends with "Sandbox".
+      { "name": "SANDBOX", "class_name": "Sandbox" }
     ]
   },
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile.sandbox",
+      "instance_type": "lite",
+      "max_instances": 1
+    }
+  ],
   "migrations": [
     { "tag": "flue-class-FlueRegistry", "new_sqlite_classes": ["FlueRegistry"] },
-    { "tag": "flue-class-Project", "new_sqlite_classes": ["Project"] }
+    { "tag": "flue-class-Project", "new_sqlite_classes": ["Project"] },
+    { "tag": "sandbox-class", "new_sqlite_classes": ["Sandbox"] }
   ]
 }
