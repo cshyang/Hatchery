@@ -4,15 +4,18 @@
 
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
-import { logMessage, projectsWithUnreflected, takeUnreflectedBatch } from './reflection';
+import { logMessage, projectsWithUnreflected, projectsWithUnreflectedRuns, takeUnreflectedBatch, takeUnreflectedRuns, buildReflectInstructions } from './reflection';
 import type { D1Like } from '../skills/repository';
 
 interface MsgRow { id: number; project_id: string; conversation_id: string; sender_id: string; role: string; text: string; ambient: number; created_at: number; }
+interface RunRow { project_id: string; status: string; source_type: string; linear_identifier: string | null; target_repo: string; kit: string; summary: string | null; error: string | null; pr_url: string | null; completed_at: number | null; }
 
-// Minimal D1 fake covering the fixed queries in reflection.ts (messages + reflection_state).
+// Minimal D1 fake covering the fixed queries in reflection.ts (messages + runs + reflection_state).
 class FakeD1 implements D1Like {
   msgs: MsgRow[] = [];
+  runs: RunRow[] = [];
   state = new Map<string, number>(); // project_id -> last_message_id
+  runState = new Map<string, number>(); // project_id -> last_run_completed_at
   private nextId = 1;
 
   prepare(query: string) {
@@ -36,6 +39,33 @@ class FakeD1 implements D1Like {
   }
 
   private select(q: string, v: unknown[]): Record<string, unknown>[] {
+    if (q.includes('FROM agent_runs_m1 r')) {
+      // projectsWithUnreflectedRuns: terminal runs past max(run watermark, lookback cutoff).
+      const [cutoff] = v as [number];
+      const seen = new Set<string>();
+      const out: { project_id: string }[] = [];
+      for (const r of this.runs) {
+        const since = Math.max(this.runState.get(r.project_id) ?? 0, cutoff);
+        if (r.completed_at != null && ['completed', 'failed', 'cancelled'].includes(r.status) && r.completed_at > since && !seen.has(r.project_id)) {
+          seen.add(r.project_id);
+          out.push({ project_id: r.project_id });
+        }
+      }
+      return out;
+    }
+    if (q.includes('SELECT last_run_completed_at FROM reflection_state')) {
+      const [pid] = v as [string];
+      return this.runState.has(pid) ? [{ last_run_completed_at: this.runState.get(pid) }] : [];
+    }
+    if (q.includes('FROM agent_runs_m1') && q.includes('WHERE project_id=?')) {
+      const [pid, since] = v as [string, number];
+      const limit = Number((q.match(/LIMIT (\d+)/) ?? [])[1] ?? 1e9);
+      return this.runs
+        .filter((r) => r.project_id === pid && r.completed_at != null && r.completed_at > since && ['completed', 'failed', 'cancelled'].includes(r.status))
+        .sort((a, b) => a.completed_at! - b.completed_at!)
+        .slice(0, limit)
+        .map((r) => ({ ...r }));
+    }
     if (q.includes('LEFT JOIN reflection_state')) {
       const seen = new Set<string>();
       const out: { project_id: string }[] = [];
@@ -67,6 +97,11 @@ class FakeD1 implements D1Like {
     if (q.startsWith('INSERT INTO messages')) {
       const [project_id, conversation_id, sender_id, role, text, ambient, created_at] = v as [string, string, string, string, string, number, number];
       this.msgs.push({ id: this.nextId++, project_id, conversation_id, sender_id, role, text, ambient, created_at });
+    } else if (q.includes('last_run_completed_at, last_reflected_at) VALUES')) {
+      // Run-watermark upsert: touches ONLY the run watermark (update arm), never last_message_id.
+      // Binds are (project_id, last_run_completed_at, last_reflected_at) — last_message_id is a SQL literal 0.
+      const [project_id, last_run_completed_at] = v as [string, number];
+      this.runState.set(project_id, last_run_completed_at);
     } else if (q.includes('INSERT INTO reflection_state')) {
       const [project_id, last_message_id] = v as [string, number];
       this.state.set(project_id, last_message_id);
@@ -143,6 +178,59 @@ test('reflection gate ignores ambient-only projects (no REM turn for pure chatte
   await logMessage(db, { projectId: 'B', conversationId: 'c1', senderId: 'slack:T:U1', role: 'user', text: 'just chatter', ambient: true });
   assert.deepEqual(await projectsWithUnreflected(db), [], 'ambient-only project does not trigger REM');
   assert.equal(await takeUnreflectedBatch(db, 'B'), null, 'nothing to consolidate');
+});
+
+// ── The run record (rung one) ───────────────────────────────────────────────────────────────────
+
+const NOW = 1_750_000_000_000;
+const run_ = (over: Partial<RunRow>): RunRow => ({
+  project_id: 'A', status: 'completed', source_type: 'linear', linear_identifier: 'FRD-1',
+  target_repo: 'acme/api', kit: 'delivery', summary: 'shipped', error: null, pr_url: null,
+  completed_at: NOW - 1000, ...over,
+});
+
+test('run gate: a project with only terminal runs (no messages) still surfaces for REM', async () => {
+  const db = new FakeD1();
+  db.runs.push(run_({}));
+  assert.deepEqual(await projectsWithUnreflected(db), [], 'no messages');
+  assert.deepEqual(await projectsWithUnreflectedRuns(db, NOW), ['A']);
+});
+
+test('run watermark: each terminal run reflects exactly once; message watermark untouched', async () => {
+  const db = new FakeD1();
+  await log(db, 'A', 'hello');
+  db.runs.push(run_({ linear_identifier: 'FRD-7' }));
+  const digest1 = (await takeUnreflectedRuns(db, 'A', NOW))!;
+  assert.match(digest1, /FRD-7/);
+  assert.equal(await takeUnreflectedRuns(db, 'A', NOW), null, 'consumed');
+  assert.deepEqual(await projectsWithUnreflectedRuns(db, NOW), [], 'gate quiet after consume');
+  // Taking runs must not consume the conversation stream.
+  assert.ok((await takeUnreflectedBatch(db, 'A'))!.includes('hello'), 'message stream independent');
+});
+
+test('run digest: failed runs carry the error, completed carry summary + pr; non-terminal and stale runs excluded', async () => {
+  const db = new FakeD1();
+  db.runs.push(run_({ status: 'failed', linear_identifier: 'FRD-2', error: 'npm install exploded\nstack...' }));
+  db.runs.push(run_({ status: 'completed', linear_identifier: 'FRD-3', summary: 'fixed slugify', pr_url: 'https://github.com/x/pr/1', completed_at: NOW - 500 }));
+  db.runs.push(run_({ status: 'running', linear_identifier: 'FRD-4', completed_at: null }));
+  db.runs.push(run_({ linear_identifier: 'FRD-OLD', completed_at: NOW - 8 * 24 * 60 * 60 * 1000 }));
+  const digest = (await takeUnreflectedRuns(db, 'A', NOW))!;
+  assert.match(digest, /\[failed\] linear FRD-2 → acme\/api \(kit delivery\): error: npm install exploded stack\.\.\./);
+  assert.match(digest, /\[completed\] linear FRD-3 .* fixed slugify \(https:\/\/github\.com\/x\/pr\/1\)/);
+  assert.ok(!digest.includes('FRD-4'), 'running run not reflected');
+  assert.ok(!digest.includes('FRD-OLD'), 'older than the lookback window');
+});
+
+test('buildReflectInstructions: sections appear only for streams with material', async () => {
+  const both = buildReflectInstructions('a: hi', '[failed] linear FRD-1 → r (kit delivery): error: x');
+  assert.match(both, /RUN RECORD → memory ONLY/);
+  assert.match(both, /--- CONVERSATION TO CONSOLIDATE ---/);
+  assert.match(both, /--- RUN RECORD TO CONSOLIDATE ---/);
+  const chatOnly = buildReflectInstructions('a: hi', null);
+  assert.ok(!chatOnly.includes('RUN RECORD'), 'no run section without a digest');
+  const runsOnly = buildReflectInstructions(null, '[failed] …');
+  assert.match(runsOnly, /NO NEW CONVERSATION TONIGHT/);
+  assert.match(runsOnly, /--- RUN RECORD TO CONSOLIDATE ---/);
 });
 
 await run();
