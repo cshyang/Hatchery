@@ -1,7 +1,7 @@
 // run-coding-task pure-helper tests — run: npx tsx trigger/run-coding-task.test.ts
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../src/shared/test-utils';
-import { runBranchName, deliveryBranchName, deliveryIssueId, stripFrontmatter, conductorModelFromDefaults, extensionEntriesFromManifest, extensionFlags, parsePiStream, piRuntime } from './run-coding-task';
+import { runBranchName, harnessBranchName, harnessIssueId, stripFrontmatter, conductorModelFromDefaults, extensionEntriesFromManifest, extensionFlags, parsePiStream, piRuntime } from './run-coding-task';
 
 const { test, run } = createTestRunner();
 
@@ -140,26 +140,26 @@ test('piRuntime: opts into rpc only on exact HATCHERY_PI_RUNTIME=rpc', () => {
 
 
 // ---------------------------------------------------------------------------
-// delivery-kit helpers
+// harness-kit helpers
 // ---------------------------------------------------------------------------
 
-test('deliveryBranchName: deterministic issue-scoped branch, case preserved', () => {
+test('harnessBranchName: deterministic issue-scoped branch, case preserved', () => {
   const d = { targetBranch: null, issue: { id: '1', identifier: 'FRD-12', url: '', title: 't', description: null }, runId: 'r1' };
-  assert.equal(deliveryBranchName(d), 'harness/FRD-12');
-  assert.equal(deliveryBranchName(d), deliveryBranchName(d)); // same issue -> same branch, no randomness
+  assert.equal(harnessBranchName(d), 'harness/FRD-12');
+  assert.equal(harnessBranchName(d), harnessBranchName(d)); // same issue -> same branch, no randomness
 });
 
-test('deliveryBranchName: continuation returns targetBranch as-is', () => {
-  assert.equal(deliveryBranchName({ targetBranch: 'harness/FRD-12', issue: null, runId: 'r1' }), 'harness/FRD-12');
+test('harnessBranchName: continuation returns targetBranch as-is', () => {
+  assert.equal(harnessBranchName({ targetBranch: 'harness/FRD-12', issue: null, runId: 'r1' }), 'harness/FRD-12');
 });
 
-test('deliveryBranchName: falls back to runId; unsafe chars sanitized', () => {
-  assert.equal(deliveryBranchName({ targetBranch: null, issue: null, runId: 'run 7/x' }), 'harness/run-7-x');
+test('harnessBranchName: falls back to runId; unsafe chars sanitized', () => {
+  assert.equal(harnessBranchName({ targetBranch: null, issue: null, runId: 'run 7/x' }), 'harness/run-7-x');
 });
 
-test('deliveryIssueId: sanitizes but preserves case and dots', () => {
-  assert.equal(deliveryIssueId({ issue: { id: '1', identifier: 'ABC-9.1', url: '', title: '', description: null }, runId: 'r' }), 'ABC-9.1');
-  assert.equal(deliveryIssueId({ issue: null, runId: 'a b!c' }), 'a-b-c');
+test('harnessIssueId: sanitizes but preserves case and dots', () => {
+  assert.equal(harnessIssueId({ issue: { id: '1', identifier: 'ABC-9.1', url: '', title: '', description: null }, runId: 'r' }), 'ABC-9.1');
+  assert.equal(harnessIssueId({ issue: null, runId: 'a b!c' }), 'a-b-c');
 });
 
 test('stripFrontmatter: removes a leading YAML block only', () => {

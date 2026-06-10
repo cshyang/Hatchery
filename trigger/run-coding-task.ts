@@ -46,20 +46,20 @@ export function runBranchName(d: Pick<RunnerDispatch, 'targetBranch' | 'issue' |
   return `hatchery/${slug(d.issue?.identifier ?? d.runId)}-${short}`;
 }
 
-/** Issue id used for delivery-kit paths and the branch — sanitized, case preserved (FRD-12 stays FRD-12). */
-export function deliveryIssueId(d: Pick<RunnerDispatch, 'issue' | 'runId'>): string {
+/** Issue id used for harness-kit paths and the branch — sanitized, case preserved (FRD-12 stays FRD-12). */
+export function harnessIssueId(d: Pick<RunnerDispatch, 'issue' | 'runId'>): string {
   return (d.issue?.identifier ?? d.runId).replace(/[^A-Za-z0-9._-]+/g, '-');
 }
 
 /**
- * Deterministic issue-scoped branch for the delivery kit: `harness/<identifier|runId>`.
+ * Deterministic issue-scoped branch for the harness kit: `harness/<identifier|runId>`.
  * Same issue → same branch on every dispatch — the resume/HITL/crash re-dispatch story
  * (handoff cursor + committed artifacts) depends on the branch being computable from the
  * issue alone, unlike coding-default's run-scoped `hatchery/<slug>-<uuid8>`.
  */
-export function deliveryBranchName(d: Pick<RunnerDispatch, 'targetBranch' | 'issue' | 'runId'>): string {
+export function harnessBranchName(d: Pick<RunnerDispatch, 'targetBranch' | 'issue' | 'runId'>): string {
   if (d.targetBranch) return d.targetBranch;
-  return `harness/${deliveryIssueId(d)}`;
+  return `harness/${harnessIssueId(d)}`;
 }
 
 /** Strip a leading YAML frontmatter block — pi agent files carry one; a --system-prompt file must not. */
@@ -138,13 +138,13 @@ async function installKitAgents(wsDir: string, kitDir: string): Promise<void> {
 }
 
 /**
- * Install the delivery kit into the clone: agents + skills + extensions under `.pi/`
+ * Install the harness kit into the clone: agents + skills + extensions under `.pi/`
  * (pi auto-discovers all three from cwd — including `gated_dispatch`), and the kit's
  * `defaults.yaml` → `.harness/defaults.yaml` unless the target repo ships its own.
  * `.pi/` and the runner-provided config/scratch are git-excluded; the artifact ledger
  * (`.harness/issues/`) stays committable — it IS the work envelope.
  */
-async function installDeliveryKit(wsDir: string, kitDir: string): Promise<void> {
+async function installHarnessKit(wsDir: string, kitDir: string): Promise<void> {
   await mkdir(path.join(wsDir, '.pi'), { recursive: true });
   for (const part of ['agents', 'skills', 'extensions'] as const) {
     await cp(path.join(kitDir, part), path.join(wsDir, '.pi', part), { recursive: true });
@@ -156,7 +156,7 @@ async function installDeliveryKit(wsDir: string, kitDir: string): Promise<void> 
   }
   await appendFile(
     path.join(wsDir, '.git', 'info', 'exclude'),
-    '\n# Hatchery delivery kit + scratch — not part of the change\n.pi/\n.harness/defaults.yaml\n.harness/runs/\n.harness/worktrees/\n',
+    '\n# Hatchery harness kit + scratch — not part of the change\n.pi/\n.harness/defaults.yaml\n.harness/runs/\n.harness/worktrees/\n',
   );
 }
 
@@ -290,30 +290,30 @@ export function runAgent(runtime: PiRuntime, opts: AgentRunOpts): Promise<AgentR
 }
 
 // ---------------------------------------------------------------------------
-// Delivery-kit path (kit === 'delivery'): conductor-as-parent, gated pipeline
+// Harness-kit path (kit === 'harness'): conductor-as-parent, gated pipeline
 // ---------------------------------------------------------------------------
 
 /**
- * Run one issue through the delivery kit. Ownership split (v1, deliberate):
+ * Run one issue through the harness kit. Ownership split (v1, deliberate):
  * - CONDUCTOR owns: pipeline, all gates, commits to the issue branch (code + artifact ledger + cursor).
  * - RUNNER owns: clone, deterministic branch, kit install, push + PR (keeps the GitHub token
  *   out of the agent's env — full git-ownership flip is a later hardening decision), callbacks.
  * Trust gate at exit: clean worktree required (a live Step-1 run reported success with the fix
  * uncommitted — this check exists because of that run), cursor read for park routing.
  */
-async function runDelivery(d: RunnerDispatch): Promise<{ ok: boolean; prUrl?: string }> {
+async function runHarness(d: RunnerDispatch): Promise<{ ok: boolean; prUrl?: string }> {
   let ws: Workspace | undefined;
   try {
     // --- Kit resolution (fail fast) ---
     const KIT_ROOT = process.env.KIT_ROOT ?? process.cwd();
-    const kitDir = path.resolve(KIT_ROOT, 'agent-kits/delivery');
+    const kitDir = path.resolve(KIT_ROOT, 'agent-kits/harness');
     for (const p of [
       path.join(kitDir, 'agents/conductor.md'),
       path.join(kitDir, 'skills/reviewing/SKILL.md'),
       path.join(kitDir, 'extensions/gated-dispatch.ts'),
       path.join(kitDir, 'defaults.yaml'),
     ]) {
-      if (!(await fileExists(p))) throw new Error(`delivery kit not found at ${p} — set KIT_ROOT`);
+      if (!(await fileExists(p))) throw new Error(`harness kit not found at ${p} — set KIT_ROOT`);
     }
 
     // --- Workspace + deterministic branch ---
@@ -324,8 +324,8 @@ async function runDelivery(d: RunnerDispatch): Promise<{ ok: boolean; prUrl?: st
       githubToken: d.githubToken,
       policy: d.workspacePolicy,
     });
-    const issueId = deliveryIssueId(d);
-    const branch = deliveryBranchName(d);
+    const issueId = harnessIssueId(d);
+    const branch = harnessBranchName(d);
     if (!d.targetBranch) {
       // The branch may already exist remotely (crashed prior run the control plane doesn't know
       // about). Resume it instead of recreating from base — committed artifacts ARE the state.
@@ -342,7 +342,7 @@ async function runDelivery(d: RunnerDispatch): Promise<{ ok: boolean; prUrl?: st
     await execFile('git', ['-C', ws.dir, 'config', 'user.name', 'Hatchery Runner']);
 
     // --- Kit install + conductor boot material ---
-    await installDeliveryKit(ws.dir, kitDir);
+    await installHarnessKit(ws.dir, kitDir);
     const defaultsText = await readFile(path.join(ws.dir, '.harness', 'defaults.yaml'), 'utf8');
     const conductorTier = conductorModelFromDefaults(defaultsText);
     if (!conductorTier) throw new Error('delivery defaults.yaml has no models.conductor tier — runner cannot pick the parent model');
@@ -455,7 +455,7 @@ export const runCodingTask = task({
   // Per-issue serialization: every dispatch carries a concurrencyKey (control plane:
   // dispatchConcurrencyKey — project:issue), and Trigger gives each distinct key its own
   // one-slot copy of this queue. Same issue → strictly serial (two concurrent runs would
-  // fight over the delivery kit's deterministic harness/<id> branch); different issues →
+  // fight over the harness kit's deterministic harness/<id> branch); different issues →
   // parallel as before. The limit only ever binds per key, never globally.
   queue: { concurrencyLimit: 1 },
   // pi/GLM coding runs OOM the default small-1x (0.5GB) — confirmed TASK_PROCESS_OOM_KILLED on a
@@ -466,9 +466,9 @@ export const runCodingTask = task({
     const d = v.parse(RunnerDispatchSchema, raw);                 // consumer↔contract assertion
     await callback(d, { contractVersion: RUNNER_CONTRACT_VERSION, runId: d.runId, status: 'running' });
 
-    // Delivery kit = its own path (conductor-as-parent, gated pipeline, conductor-owned commits).
+    // harness kit = its own path (conductor-as-parent, gated pipeline, conductor-owned commits).
     // Everything below this line is the prod-proven coding-default path, untouched.
-    if (d.kit === 'delivery') return runDelivery(d);
+    if (d.kit === 'harness') return runHarness(d);
 
     let ws: Workspace | undefined;
     try {
@@ -522,7 +522,7 @@ export const runCodingTask = task({
         // Unified on OpenRouter (one provider, one key — any model reachable). Same model as
         // before (GLM-5.1), now routed via OpenRouter as `z-ai/glm-5.1`, so coding-default's
         // behavior is unchanged while the provider stack is consolidated. Requires
-        // OPENROUTER_API_KEY in the Trigger env (replaces the zai key). The delivery kit's
+        // OPENROUTER_API_KEY in the Trigger env (replaces the zai key). The harness kit's
         // controller selects per-tier models through OpenRouter via .harness/defaults.yaml.
         provider: 'openrouter',
         model: 'z-ai/glm-5.1',

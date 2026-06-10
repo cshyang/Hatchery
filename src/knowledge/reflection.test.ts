@@ -185,7 +185,7 @@ test('reflection gate ignores ambient-only projects (no REM turn for pure chatte
 const NOW = 1_750_000_000_000;
 const run_ = (over: Partial<RunRow>): RunRow => ({
   project_id: 'A', status: 'completed', source_type: 'linear', linear_identifier: 'FRD-1',
-  target_repo: 'acme/api', kit: 'delivery', summary: 'shipped', error: null, pr_url: null,
+  target_repo: 'acme/api', kit: 'harness', summary: 'shipped', error: null, pr_url: null,
   completed_at: NOW - 1000, ...over,
 });
 
@@ -215,14 +215,14 @@ test('run digest: failed runs carry the error, completed carry summary + pr; non
   db.runs.push(run_({ status: 'running', linear_identifier: 'FRD-4', completed_at: null }));
   db.runs.push(run_({ linear_identifier: 'FRD-OLD', completed_at: NOW - 8 * 24 * 60 * 60 * 1000 }));
   const digest = (await takeUnreflectedRuns(db, 'A', NOW))!;
-  assert.match(digest, /\[failed\] linear FRD-2 → acme\/api \(kit delivery\): error: npm install exploded stack\.\.\./);
+  assert.match(digest, /\[failed\] linear FRD-2 → acme\/api \(kit harness\): error: npm install exploded stack\.\.\./);
   assert.match(digest, /\[completed\] linear FRD-3 .* fixed slugify \(https:\/\/github\.com\/x\/pr\/1\)/);
   assert.ok(!digest.includes('FRD-4'), 'running run not reflected');
   assert.ok(!digest.includes('FRD-OLD'), 'older than the lookback window');
 });
 
 test('buildReflectInstructions: sections appear only for streams with material', async () => {
-  const both = buildReflectInstructions('a: hi', '[failed] linear FRD-1 → r (kit delivery): error: x');
+  const both = buildReflectInstructions('a: hi', '[failed] linear FRD-1 → r (kit harness): error: x');
   assert.match(both, /RUN RECORD → memory ONLY/);
   assert.match(both, /--- CONVERSATION TO CONSOLIDATE ---/);
   assert.match(both, /--- RUN RECORD TO CONSOLIDATE ---/);

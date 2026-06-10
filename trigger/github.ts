@@ -44,7 +44,7 @@ export interface OpenOrUpdatePullRequestOpts {
   title: string;
   body: string;
   token: string;
-  /** Open as a draft PR (delivery-kit work envelopes are drafts). Existing PRs keep their state. */
+  /** Open as a draft PR (harness-kit work envelopes are drafts). Existing PRs keep their state. */
   draft?: boolean;
   fetchImpl?: typeof fetch;
 }

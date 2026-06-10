@@ -305,3 +305,12 @@ Tests: 6 new helper tests (deliveryBranchName/deliveryIssueId/stripFrontmatter/
 conductorModelFromDefaults), 21/21 pass, typecheck clean.
 Prereqs to go live: control plane sends `kit: 'delivery'` + per-issue concurrencyKey on
 the trigger call; `OPENROUTER_API_KEY` in the Trigger env.
+
+## Rename: delivery → harness (2026-06-11)
+
+The kit value and directory are now `harness`, matching the vocabulary the kit already used
+everywhere else (`.harness/`, `harness/<id>` branches, `defaults.yaml` location). "delivery" was
+the last autoship-era name standing. Same change flips `DEFAULT_KIT` to `harness` — this kit is
+now the default execution path; `coding-default` is legacy, scheduled for deletion once the
+harness kit has real-run mileage. Prose below this section predates the rename and says
+"delivery kit" — read it as this kit.
