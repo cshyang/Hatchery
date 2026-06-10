@@ -605,6 +605,25 @@ export async function findActiveAgentRunRoute(
   return row ? routeRowToRoute(row) : null;
 }
 
+/** The project's standing run authority: its highest-priority ACTIVE route, regardless of trigger.
+ *  The assigner tool reads repo/kit from here — an admin-activated route IS the grant that lets the
+ *  channel agent send coding runs at that repo; no route, no assigning. */
+export async function findActiveRouteForProject(db: D1Like, projectId: string): Promise<AgentRunRoute | null> {
+  const row = await db
+    .prepare(
+      `SELECT id, project_id, provider, external_key, trigger_type, trigger_value, github_owner, github_repo,
+              base_branch, kit, runtime, sandbox_provider, priority, status, created_by_type, created_by,
+              reason, created_at, updated_at, activated_by, activated_at, disabled_by, disabled_at
+         FROM agent_run_routes
+        WHERE project_id=? AND status='active'
+        ORDER BY priority DESC, activated_at DESC, created_at DESC
+        LIMIT 1`,
+    )
+    .bind(requireText(projectId, 'projectId', 256))
+    .first<AgentRunRouteRow>();
+  return row ? routeRowToRoute(row) : null;
+}
+
 export async function activateAgentRunRoute(db: D1Like, id: string, activatedBy: string, deps: ClockAndIds = {}): Promise<AgentRunRoute> {
   const route = await getAgentRunRoute(db, requireText(id, 'id', 256));
   if (!route) throw new Error('agent run route not found');
