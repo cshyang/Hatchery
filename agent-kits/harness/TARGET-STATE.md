@@ -227,3 +227,13 @@ path · ui-walker browser tooling (browser MCP in the image).
 - `OPENROUTER_API_KEY` missing = every run fails (hard prereq, now whole-runner).
 - Untrusted repo/Linear content → OpenRouter (SSRF/exfil), widened by `action:create`.
 - Cold-resume reboots the conductor model each iteration — real token cost (not a reliability concern; human latency dwarfs it).
+
+## Express lane (added 2026-06-11)
+
+The pipeline's planning leg is earn-or-skip, same idiom as the oracle: at state `new` a
+five-criterion triage may select express (`express.md` + inference record, issue body = the
+contract, straight to implementation). Uncertainty → full pipeline (inverted from the oracle
+test). Implementation review is mandatory in express; verification unchanged; escalation
+one-way to the full pipeline. See conductor.md § Express lane. This is the cost story for
+harness-as-default-kit: trivial issues stop paying full-pipeline latency without losing
+author≠judge separation or mechanical verification.
