@@ -16,6 +16,7 @@ import {
   slackUserMessageEvent,
 } from '../src/slack/events';
 import { bindings, bindingBySlack, bindingByProject, agentInstanceId, autoCreateBinding } from '../src/project/bindings';
+import { loadPersona } from '../src/project/persona';
 import { deploymentConfig, isKnownTeam } from '../src/config/deployment';
 import { normalizeSlackMessage } from '../src/shared/canonical';
 import { upsertConversationTarget } from '../src/project/conversations';
@@ -633,10 +634,14 @@ app.post('/slack/events', async (c) => {
   // and CAPTURE its ts, so the turn edits this same message into the real reply instead of stacking
   // ack + answer. Awaited because the dispatch input below carries the ts to the model; a Slack
   // hiccup returns undefined and the reply degrades to a fresh post — never a blocked turn.
+  // Persona on the ack: edits inherit the posted identity, so this one post is what makes the
+  // whole evolving message (receipts → final reply) wear the channel's hatched name.
+  const ackPersona = c.env.DB ? await loadPersona(c.env.DB, msg.projectId).catch(() => null) : null;
   const ackMessageTs = await postWorkingAck({
     token,
     channel: msg.externalSpaceId,
     threadTs: msg.externalConversationId,
+    persona: ackPersona,
   });
 
   if (c.env.DB && ackMessageTs) {

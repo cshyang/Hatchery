@@ -1,4 +1,5 @@
-import { postMessage as defaultPostMessage } from './post';
+import { postMessage as defaultPostMessage, type SlackPostOptions } from './post';
+import type { Persona } from '../project/persona';
 
 // The instant, deterministic "working" acknowledgement. Posted from the gateway into the reply's
 // thread the moment we engage, so a person never stares at silence while the agent turn spins up.
@@ -19,6 +20,7 @@ export type SlackPostMessageReturningTs = (
   channel: string,
   text: string,
   threadTs?: string,
+  options?: SlackPostOptions,
 ) => Promise<string | undefined>;
 
 export interface PostWorkingAckInput {
@@ -26,6 +28,9 @@ export interface PostWorkingAckInput {
   channel: string;
   threadTs: string;
   text?: string;
+  /** Persona identity for the ack. Edits inherit the posted identity, so putting the persona on
+   *  the ack is what makes the whole evolving message (receipts → final reply) wear it. */
+  persona?: Persona | null;
 }
 
 export interface PostWorkingAckDeps {
@@ -60,7 +65,7 @@ export interface QueueWorkingAckDeps {
 // dispatches anyway with the reply falling back to a fresh post. Returns undefined with no token too.
 // A redelivery after a slow post is deduped by the already-claimed event_id upstream.
 export async function postWorkingAck(
-  { token, channel, threadTs, text = WORKING_ACK }: PostWorkingAckInput,
+  { token, channel, threadTs, text = WORKING_ACK, persona }: PostWorkingAckInput,
   deps: PostWorkingAckDeps = {},
 ): Promise<string | undefined> {
   if (!token) return undefined;
@@ -68,10 +73,11 @@ export async function postWorkingAck(
   const postMessage = deps.postMessage ?? defaultPostMessage;
   const log = deps.log ?? console.log;
   const timeoutMs = deps.timeoutMs ?? ACK_POST_TIMEOUT_MS;
+  const identity = persona ? { username: persona.name, ...(persona.iconEmoji ? { iconEmoji: persona.iconEmoji } : {}) } : undefined;
 
   // .catch on the post itself (not a try/catch around the race) so a rejection AFTER the timeout has
   // already won can't surface as an unhandled rejection.
-  const post = postMessage(token, channel, text, threadTs).catch((e) => {
+  const post = postMessage(token, channel, text, threadTs, identity).catch((e) => {
     log(`[ack] working-ack failed to post: ${e instanceof Error ? e.message : 'error'}`);
     return undefined;
   });
