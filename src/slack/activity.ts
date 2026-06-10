@@ -51,8 +51,20 @@ export interface RecordSlackToolActivityInput {
   now?: number;
 }
 
+interface RecordSlackActivityLabelInput {
+  projectId: string;
+  sessionId: string;
+  label: string;
+  isError?: boolean;
+  terminal?: boolean;
+  forcePost?: boolean;
+  requireExistingActivity?: boolean;
+  now?: number;
+}
+
 const POST_THROTTLE_MS = 1500;
 const MAX_VISIBLE_ACTIVITY_ROWS = 6;
+const STREAM_RESPONSE_LABEL = 'Receiving stream response';
 
 export async function createSlackTurnActivity(db: D1Like, input: CreateSlackTurnActivityInput): Promise<SlackTurnActivity> {
   const now = input.now ?? Date.now();
@@ -109,11 +121,19 @@ export async function recordSlackToolActivity(
 ): Promise<{ activity: SlackTurnActivity; shouldPost: boolean } | null> {
   const label = toolActivityLabel(input.toolName);
   if (!label) return null;
+  return recordSlackActivityLabel(db, { ...input, label });
+}
+
+async function recordSlackActivityLabel(
+  db: D1Like,
+  input: RecordSlackActivityLabelInput,
+): Promise<{ activity: SlackTurnActivity; shouldPost: boolean } | null> {
   const activity = await loadSlackTurnActivity(db, input.projectId, input.sessionId);
   if (!activity || activity.status !== 'active') return null;
+  if (input.requireExistingActivity && activity.activities.length === 0) return null;
 
   const now = input.now ?? Date.now();
-  const existing = activity.activities.find((item) => item.label === label);
+  const existing = activity.activities.find((item) => item.label === input.label);
   const status = input.isError ? 'failed' : input.terminal ? 'completed' : 'running';
 
   if (existing) {
@@ -121,10 +141,11 @@ export async function recordSlackToolActivity(
     existing.status = status === 'running' && existing.status === 'failed' ? existing.status : status;
     existing.lastAt = now;
   } else {
-    activity.activities.push({ label, count: 1, status, firstAt: now, lastAt: now });
+    activity.activities.push({ label: input.label, count: 1, status, firstAt: now, lastAt: now });
   }
 
-  const shouldPost = activity.lastPostedAt == null || input.terminal === true || now - activity.lastPostedAt >= POST_THROTTLE_MS;
+  const shouldPost =
+    activity.lastPostedAt == null || input.terminal === true || input.forcePost === true || now - activity.lastPostedAt >= POST_THROTTLE_MS;
   activity.lastPostedAt = shouldPost ? now : activity.lastPostedAt;
   activity.updatedAt = now;
   await upsertActivity(db, activity);
@@ -176,16 +197,24 @@ export async function handleObservedSlackActivity(event: FlueEvent, ctx: FlueCon
     const { projectId, slug, scope } = parseAgentInstanceId(event.instanceId);
     if (slug !== 'default' || !scope?.startsWith('conv:')) return;
 
-    const toolEvent = observedToolEvent(event);
-    if (!toolEvent) return;
+    const activityEvent = observedSlackActivityEvent(event);
+    if (!activityEvent) return;
 
-    const recorded = await recordSlackToolActivity(db, {
+    const base = {
       projectId,
       sessionId: scope,
-      toolName: toolEvent.toolName,
-      isError: toolEvent.isError,
-      terminal: toolEvent.terminal,
-    });
+      isError: activityEvent.isError,
+      terminal: activityEvent.terminal,
+    };
+    const recorded =
+      'toolName' in activityEvent
+        ? await recordSlackToolActivity(db, { ...base, toolName: activityEvent.toolName })
+        : await recordSlackActivityLabel(db, {
+            ...base,
+            label: activityEvent.label,
+            forcePost: activityEvent.forcePost,
+            requireExistingActivity: activityEvent.requireExistingActivity,
+          });
     if (!recorded?.shouldPost) return;
     await postSlackActivityReceipt(ctx.env as Record<string, unknown>, recorded.activity).catch((e) =>
       console.log(`[activity] receipt update failed: ${e instanceof Error ? e.message : 'error'}`),
@@ -207,8 +236,8 @@ export function toolActivityLabel(toolName: string): string | null {
   return null;
 }
 
-export function renderSlackActivityReceipt(activity: SlackTurnActivity): string {
-  const heading = activity.status === 'active' ? '👀 Working…' : activity.status === 'failed' ? '⚠️ Activity' : '✅ Activity';
+export function renderSlackActivityReceipt(activity: SlackTurnActivity, options: { now?: number } = {}): string {
+  const heading = renderActivityHeading(activity, options.now ?? Date.now());
   const visible = activity.activities.slice(0, MAX_VISIBLE_ACTIVITY_ROWS);
   const rows = visible.map((item) => {
     const failed = item.status === 'failed' ? ' — failed' : '';
@@ -218,6 +247,37 @@ export function renderSlackActivityReceipt(activity: SlackTurnActivity): string 
   const hidden = activity.activities.length - visible.length;
   if (hidden > 0) rows.push(`• +${hidden} more`);
   return `${heading}\n${rows.join('\n')}`.trim();
+}
+
+function renderActivityHeading(activity: SlackTurnActivity, now: number): string {
+  const elapsed = formatActivityElapsed(activity.createdAt, activity.completedAt ?? now);
+  if (activity.status === 'active') {
+    const phase = currentActivityPhase(activity);
+    return `⏳ Working — ${elapsed}${phase ? ` — ${phase}` : ''}`;
+  }
+  return `${activity.status === 'failed' ? '⚠️' : '✅'} Activity — ${elapsed}`;
+}
+
+function currentActivityPhase(activity: SlackTurnActivity): string | null {
+  const latestRunning = [...activity.activities].reverse().find((item) => item.status === 'running');
+  const latest = latestRunning ?? activity.activities[activity.activities.length - 1];
+  if (!latest) return null;
+  return lowerFirst(latest.label);
+}
+
+function lowerFirst(value: string): string {
+  return value ? value.charAt(0).toLowerCase() + value.slice(1) : value;
+}
+
+function formatActivityElapsed(startMs: number, endMs: number): string {
+  const elapsedMs = Math.max(0, endMs - startMs);
+  const elapsedMinutes = Math.floor(elapsedMs / 60_000);
+  if (elapsedMinutes < 1) return '<1 min';
+  if (elapsedMinutes < 60) return `${elapsedMinutes} min`;
+
+  const hours = Math.floor(elapsedMinutes / 60);
+  const minutes = elapsedMinutes % 60;
+  return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
 }
 
 async function upsertActivity(db: D1Like, activity: SlackTurnActivity): Promise<void> {
@@ -308,12 +368,19 @@ function parseActivities(value: string): SlackActivityItem[] {
   }
 }
 
-function observedToolEvent(event: FlueEvent): { toolName: string; isError?: boolean; terminal?: boolean } | null {
+type ObservedSlackActivityEvent =
+  | { toolName: string; isError?: boolean; terminal?: boolean }
+  | { label: string; isError?: boolean; terminal?: boolean; forcePost?: boolean; requireExistingActivity?: boolean };
+
+function observedSlackActivityEvent(event: FlueEvent): ObservedSlackActivityEvent | null {
   if (event.type === 'tool_start') {
     return { toolName: event.toolName };
   }
   if (event.type === 'tool_call' && event.isError) {
     return { toolName: event.toolName, isError: true, terminal: true };
+  }
+  if (event.type === 'message_start') {
+    return { label: STREAM_RESPONSE_LABEL, requireExistingActivity: true, forcePost: true };
   }
   return null;
 }
