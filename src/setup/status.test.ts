@@ -221,4 +221,23 @@ test('setup_status tool returns structured JSON without exposing configured valu
   assert.doesNotMatch(out, /runner_secret|trigger_secret|github_secret|https:\/\/hatchery\.example|NANGO_SECRET_KEY|AGENT_RUNNER_TOKEN|TRIGGER_SECRET_KEY|RUNNER_GITHUB_PAT_TEMP|HATCHERY_PUBLIC_URL/);
 });
 
+test('setup_status surfaces the slash commands and the operator doctor check', async () => {
+  const db = new FakeD1();
+  const status = await buildSetupStatus({
+    db,
+    binding: binding(),
+    projectId: 'project_1',
+    env: {},
+    intent: 'run_agent',
+  });
+
+  assert.ok(status.tips.some((t) => t.includes('/hatchery')), 'tips should mention the /hatchery slash command');
+  assert.ok(status.tips.some((t) => t.includes('setup.sh doctor')), 'tips should mention the doctor check');
+  assert.match(status.slackText, /\/hatchery/);
+  assert.match(status.slackText, /setup\.sh doctor/);
+  // The runner gap points operators at doctor, which shows exactly what is missing.
+  const runnerGap = status.missing.find((m) => m.kind === 'runner');
+  assert.ok(runnerGap && /setup\.sh doctor/.test(runnerGap.nextAction));
+});
+
 await run();

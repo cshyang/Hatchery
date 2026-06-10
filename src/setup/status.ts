@@ -58,9 +58,18 @@ export interface SetupStatus {
   slack: { bound: boolean; teamId?: string; channelId?: string };
   githubRecommendation: { authMode: 'oauth' | 'pat'; repo?: string; reason: string };
   nextAction: SetupNextAction;
+  /** Standing pointers worth relaying when someone asks about setup — not gaps, just affordances. */
+  tips: string[];
   slackText: string;
   summary: string;
 }
+
+// Affordances that exist regardless of setup state; surfaced so the agent can mention them
+// instead of users discovering them from the repo docs.
+const SETUP_TIPS = [
+  'Slash commands give instant read-only views without an agent turn: `/hatchery status | runs | reminders | skills | help`.',
+  'Operators can verify the whole deployment leg by leg with `./scripts/setup.sh doctor`.',
+];
 
 interface AgentRunRouteRow {
   id: string;
@@ -145,7 +154,7 @@ export async function buildSetupStatus(args: {
     missing.push({
       kind: 'runner',
       reason: 'Agent runner dispatch is not configured.',
-      nextAction: 'Ask an operator to finish agent runner dispatch configuration.',
+      nextAction: 'Ask an operator to finish agent runner dispatch configuration (./scripts/setup.sh doctor shows exactly what is missing).',
     });
   }
 
@@ -166,7 +175,8 @@ export async function buildSetupStatus(args: {
     },
     githubRecommendation,
     nextAction,
-    slackText: renderSetupSlackText({ ready, connected, missing, routes, runner, nextAction, summary }),
+    tips: SETUP_TIPS,
+    slackText: renderSetupSlackText({ ready, connected, missing, routes, runner, nextAction, summary, tips: SETUP_TIPS }),
     summary,
   };
 }
@@ -334,6 +344,7 @@ function renderSetupSlackText(input: {
   runner: SetupRunnerSummary;
   nextAction: SetupNextAction;
   summary: string;
+  tips: string[];
 }): string {
   const lines = [`*Run Agent setup*`, input.ready ? `✅ Ready — ${input.summary}` : `⚠️ ${input.summary}`];
   const connected = input.connected.length
@@ -364,6 +375,10 @@ function renderSetupSlackText(input: {
     for (const item of input.missing) lines.push(`• ${item.reason}`);
   }
   lines.push('', `Next: ${input.nextAction.instruction}`);
+  if (input.tips.length) {
+    lines.push('', '*Tips*');
+    for (const tip of input.tips) lines.push(`• ${tip}`);
+  }
   return lines.join('\n');
 }
 
