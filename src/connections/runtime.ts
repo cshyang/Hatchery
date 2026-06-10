@@ -50,7 +50,7 @@ export async function buildConnectionRuntime(args: {
   const routeTools = db ? [proposeAgentRouteTool({ db, projectId })] : [];
 
   return {
-    tools: [...nangoTools, ...routeTools, ...connectionTools(state, secrets)],
+    tools: [...nangoTools, ...routeTools, ...connectionTools(state, secrets, nangoSecretKey || undefined)],
     connectionsBlock: state.length || canRequestConnect ? renderConnectionsBlock(state, PROVIDER_CATALOG, canRequestConnect) : null,
     state,
     canRequestConnections: canRequestConnect,

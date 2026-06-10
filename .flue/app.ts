@@ -22,7 +22,7 @@ import { claimEvent, type KVLike } from '../src/shared/idempotency';
 import type { D1Like } from '../src/skills/repository';
 import { logMessage, projectsWithUnreflected, takeUnreflectedBatch, buildReflectInstructions } from '../src/knowledge/reflection';
 import { upsertConnection, loadConnections, connectedNotice, disconnectedNotice, disableConnectionByRef } from '../src/connections/repository';
-import { verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook } from '../src/providers/nango';
+import { verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook, fetchProviderApiSpec } from '../src/providers/nango';
 import { isCatalogProvider } from '../src/connections/catalog';
 import { buildScheduledInput } from '../src/gateway/scheduled';
 import { hasMatchingSecretHeader } from '../src/gateway/auth';
@@ -486,12 +486,15 @@ app.post('/nango/webhook', async (c) => {
     return c.json({ ignored: true });
   }
 
-  // Convention guard: the Nango integration id MUST equal a catalog provider slug, else the row would
-  // be connected-but-toolless (no API profile / typed tools). Log loudly and skip rather than store a
-  // dead row. (See the runbook: operators name the Nango integration exactly the catalog slug.)
+  // Generic provider (not in the curated catalog): fetch its API spec from Nango's providers
+  // catalog ONCE and persist the non-secret subset in config. Call tools then go DIRECT to the
+  // provider (Bearer + base URL); no spec or non-Bearer auth → the per-call Nango proxy fallback,
+  // which needs nothing persisted. Spec fetch failure is non-fatal by design.
   if (!isCatalogProvider(event.provider)) {
-    console.log(`[nango] webhook for unknown provider "${event.provider}" (cfg "${event.providerConfigKey}") — skipping upsert; name the Nango integration to match a catalog slug`);
-    return c.json({ ignored: 'unknown provider' });
+    const nangoKey = c.env.NANGO_SECRET_KEY;
+    const spec = nangoKey ? await fetchProviderApiSpec({ secretKey: nangoKey, provider: event.provider }).catch(() => null) : null;
+    if (spec) event.config.api = spec;
+    console.log(`[nango] generic provider "${event.provider}" (cfg "${event.providerConfigKey}") — ${spec ? `direct profile persisted (${spec.baseUrl})` : 'no direct spec; proxy fallback'}`);
   }
 
   await upsertConnection(db, {
