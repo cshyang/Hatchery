@@ -1,5 +1,6 @@
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
 import type { D1Like } from '../skills/repository';
+import { byteLength as bytes, redactSecrets, safeJson, truncateToBytes } from '../shared/bounded';
 
 export type CodeLanguage = 'javascript' | 'python';
 export type CodeNetworkMode = 'open_public' | 'off';
@@ -458,43 +459,6 @@ async function updateAudit(
 
 function preview(value: string): string {
   return redactSecrets(truncateToBytes(value, PREVIEW_BYTES));
-}
-
-function safeJson(value: unknown): string {
-  try {
-    return JSON.stringify(value ?? null);
-  } catch {
-    return JSON.stringify(String(value));
-  }
-}
-
-function bytes(value: string): number {
-  return new TextEncoder().encode(value).length;
-}
-
-function truncateToBytes(value: string, maxBytes: number): string {
-  if (bytes(value) <= maxBytes) return value;
-  let out = '';
-  let total = 0;
-  for (const ch of value) {
-    const next = bytes(ch);
-    if (total + next > maxBytes) break;
-    out += ch;
-    total += next;
-  }
-  return out;
-}
-
-function redactSecrets(value: string): string {
-  return value
-    .replace(/github_pat_[A-Za-z0-9_]+/g, '[redacted]')
-    .replace(/\bgh[pousr]_[A-Za-z0-9_]+/g, '[redacted]')
-    .replace(/\bxox[baprs]-[A-Za-z0-9-]+/g, '[redacted]')
-    .replace(/\blin_wh_[A-Za-z0-9]+/g, '[redacted]')
-    .replace(/\be2b_[A-Za-z0-9]+/g, '[redacted]')
-    .replace(/\bnk_[A-Za-z0-9_]+/g, '[redacted]')
-    .replace(/\bsk-[A-Za-z0-9_-]+/g, '[redacted]')
-    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [redacted]');
 }
 
 async function hashText(value: string): Promise<string> {

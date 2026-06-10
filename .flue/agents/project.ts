@@ -15,6 +15,8 @@ import { logMessage } from '../../src/knowledge/reflection';
 import { buildConnectionRuntime } from '../../src/connections/runtime';
 import { setupStatusTool } from '../../src/setup/status';
 import { codeModeLimits, codeModeTools, hasCodeModeCapability, type DynamicWorkerLoaderLike } from '../../src/code-mode/code-mode';
+import { getSandbox } from '@cloudflare/sandbox';
+import { workspaceTools, type SandboxLike } from '../../src/workspace/workspace';
 
 // The project agent. Addressed at /agents/project/<id>, id = "project:<projectId>:agent:<slug>"
 // (slug = "default" until a channel hosts multiple personas). Each instance is a persistent
@@ -151,6 +153,12 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   const dynamicWorkerLoader = env.DYNAMIC_WORKER_LOADER as DynamicWorkerLoaderLike | undefined;
   const hasCodeMode = hasCodeModeCapability({ db, loader: dynamicWorkerLoader });
   const limits = codeModeLimits(env);
+  // One sandbox container per project, resolved lazily so the container only
+  // boots when a workspace tool actually runs (~6s cold start after idle).
+  const sandboxNamespace = env.SANDBOX as Parameters<typeof getSandbox>[0] | undefined;
+  const sandbox = sandboxNamespace
+    ? () => getSandbox(sandboxNamespace, projectId) as unknown as SandboxLike
+    : undefined;
 
   const tools: ToolDefinition[] = [
     replyToConversation,
@@ -180,6 +188,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     ...userTools(db, botToken),
     ...(db ? searchTools(db, projectId) : []),
     ...codeModeTools({ db, loader: dynamicWorkerLoader, projectId, env }),
+    ...workspaceTools({ db, sandbox, projectId, env }),
     ...(db ? workbenchTools(db, projectId) : []),
     ...(db ? sourceChangeTools({ db, projectId, runnerUrl: codingRunnerUrl, runnerToken: workbenchRunnerToken }) : []),
     ...connectionRuntime.tools,
