@@ -14,7 +14,7 @@ export interface SandboxLike {
     stdout: string;
     stderr: string;
   }>;
-  writeFile(path: string, content: string): Promise<{ success: boolean }>;
+  writeFile(path: string, content: string, options?: { encoding?: string }): Promise<{ success: boolean }>;
   readFile(path: string): Promise<{ success: boolean; content: string }>;
 }
 
@@ -76,7 +76,7 @@ export interface WorkspaceOpAuditRow {
   completedAt: number | null;
 }
 
-interface WorkspaceDeps {
+export interface WorkspaceDeps {
   db: D1Like;
   sandbox: SandboxFactory;
   projectId: string;
@@ -102,7 +102,7 @@ export async function workspaceExec(
 ): Promise<WorkspaceExecResult> {
   const limits = workspaceLimits(deps.env);
   const command = params.command?.trim();
-  const op = await beginOp(deps, {
+  const op = await beginWorkspaceOp(deps, {
     op: 'exec',
     detail: command || '(empty command)',
     conversationId: params.conversationId,
@@ -156,7 +156,7 @@ export async function workspaceWriteFile(
   const path = params.path?.trim() ?? '';
   const content = params.content ?? '';
   const contentBytes = byteLength(content);
-  const op = await beginOp(deps, {
+  const op = await beginWorkspaceOp(deps, {
     op: 'write_file',
     detail: path || '(missing path)',
     conversationId: params.conversationId,
@@ -184,7 +184,7 @@ export async function workspaceReadFile(
 ): Promise<WorkspaceFileResult> {
   const limits = workspaceLimits(deps.env);
   const path = params.path?.trim() ?? '';
-  const op = await beginOp(deps, {
+  const op = await beginWorkspaceOp(deps, {
     op: 'read_file',
     detail: path || '(missing path)',
     conversationId: params.conversationId,
@@ -312,7 +312,7 @@ export async function listWorkspaceOps(db: D1Like, projectId: string, limit = 20
   }));
 }
 
-interface OpHandle {
+export interface OpHandle {
   id: string;
   startedAt: number;
   complete(patch: { resultPreview: string; exitCode: number | null; bytesOut: number }): Promise<number>;
@@ -320,7 +320,7 @@ interface OpHandle {
   failFile(path: string, message: string): Promise<WorkspaceFileResult>;
 }
 
-async function beginOp(
+export async function beginWorkspaceOp(
   deps: WorkspaceDeps,
   args: { op: WorkspaceOp; detail: string; conversationId?: string; bytesIn: number },
 ): Promise<OpHandle> {

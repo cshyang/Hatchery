@@ -674,6 +674,9 @@ app.post('/slack/events', async (c) => {
         ...(threadReplies.length
           ? { threadContext: renderThreadBackscroll(threadReplies, binding.transportBotId, { excludeTs: ev.ts }) }
           : {}),
+        // Metadata only (id/name/mimetype/size) — bytes stay in Slack until the model
+        // pulls a file into the sandbox with workspace_load_slack_file.
+        ...(ev.files?.length ? { attachedFiles: ev.files } : {}),
       },
     },
     {

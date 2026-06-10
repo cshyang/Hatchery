@@ -21,7 +21,9 @@
         "im:history",
         "mpim:history",
         "chat:write",
-        "users:read"
+        "users:read",
+        "files:read",
+        "files:write"
       ]
     }
   },

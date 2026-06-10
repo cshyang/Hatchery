@@ -17,6 +17,7 @@ import { setupStatusTool } from '../../src/setup/status';
 import { codeModeLimits, codeModeTools, hasCodeModeCapability, type DynamicWorkerLoaderLike } from '../../src/code-mode/code-mode';
 import { getSandbox } from '@cloudflare/sandbox';
 import { workspaceTools, type SandboxLike } from '../../src/workspace/workspace';
+import { workspaceSlackFileTools } from '../../src/workspace/slack-files';
 
 // The project agent. Addressed at /agents/project/<id>, id = "project:<projectId>:agent:<slug>"
 // (slug = "default" until a channel hosts multiple personas). Each instance is a persistent
@@ -189,6 +190,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     ...(db ? searchTools(db, projectId) : []),
     ...codeModeTools({ db, loader: dynamicWorkerLoader, projectId, env }),
     ...workspaceTools({ db, sandbox, projectId, env }),
+    ...workspaceSlackFileTools({ db, sandbox, projectId, env, token: botToken }),
     ...(db ? workbenchTools(db, projectId) : []),
     ...(db ? sourceChangeTools({ db, projectId, runnerUrl: codingRunnerUrl, runnerToken: workbenchRunnerToken }) : []),
     ...connectionRuntime.tools,

@@ -60,6 +60,50 @@ test('slackUserMessageEvent: ignores non-user messages and incomplete messages',
   }
 });
 
+test('slackUserMessageEvent: file_share messages pass with safe file metadata only', async () => {
+  const event = slackUserMessageEvent({
+    type: 'event_callback',
+    event: {
+      type: 'message',
+      subtype: 'file_share',
+      channel: 'C1',
+      ts: '111.222',
+      user: 'U1',
+      text: 'here is the sheet',
+      files: [
+        { id: 'F123', name: 'report.xlsx', mimetype: 'application/vnd.ms-excel', size: 1234 },
+        // url_private and other fields must never survive parsing
+        { id: 'F456', name: 'notes.txt', mimetype: 'text/plain', size: 10, url_private: 'https://files.slack.com/secret' } as never,
+        { name: 'no-id-dropped.csv' },
+      ],
+    },
+  });
+
+  assert.deepEqual(event?.files, [
+    { id: 'F123', name: 'report.xlsx', mimetype: 'application/vnd.ms-excel', size: 1234 },
+    { id: 'F456', name: 'notes.txt', mimetype: 'text/plain', size: 10 },
+  ]);
+  assert.ok(!JSON.stringify(event).includes('url_private'));
+  assert.ok(!JSON.stringify(event).includes('files.slack.com'));
+});
+
+test('slackUserMessageEvent: messages without files carry no files key; other subtypes still drop', async () => {
+  const plain = slackUserMessageEvent({
+    event: { type: 'message', channel: 'C1', ts: '1.2', user: 'U1', text: 'hi' },
+  });
+  assert.equal('files' in (plain ?? {}), false);
+
+  const broadcast = slackUserMessageEvent({
+    event: { type: 'message', subtype: 'thread_broadcast', channel: 'C1', ts: '1.2', files: [{ id: 'F1' }] },
+  });
+  assert.equal(broadcast, null);
+
+  const botShare = slackUserMessageEvent({
+    event: { type: 'message', subtype: 'file_share', bot_id: 'B1', channel: 'C1', ts: '1.2', files: [{ id: 'F1' }] },
+  });
+  assert.equal(botShare, null);
+});
+
 test('slackEventId: uses Slack event_id and falls back to channel timestamp', async () => {
   const event = { channel: 'C1', ts: '111.222' };
   assert.equal(slackEventId({ event_id: 'Ev1' }, event), 'Ev1');
