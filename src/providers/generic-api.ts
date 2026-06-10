@@ -26,8 +26,12 @@ export interface ProviderApiProfile {
   /** Always-sent headers a provider requires (e.g. Notion-Version). */
   staticHeaders?: Record<string, string>;
   /** 'get-only' refuses writes with a pointer to the (not-yet-wired) approval gate. 'all' trusts
-   *  the token's own scope — use ONLY when the provisioned token is read-only at the provider. */
-  methodPolicy: 'get-only' | 'all';
+   *  the token's own scope — use ONLY when the provisioned token is read-only at the provider.
+   *  'get-post' (the generic-provider default) allows GET+POST — POST because many reads hide
+   *  behind it (the Notion lesson) — but blocks the destructive verbs DELETE/PUT/PATCH. Method is
+   *  a fence, not a guard: POST writes (GraphQL mutations…) pass; real write safety is the future
+   *  approval gate. A per-connection config `methodPolicy` overrides in either direction. */
+  methodPolicy: 'get-only' | 'get-post' | 'all';
   /** Provider hints injected into the tool description, computed from the connection's config. */
   crib: (config: Record<string, unknown>) => string;
 }
@@ -69,6 +73,67 @@ export const PROVIDER_API_PROFILES: Record<string, ProviderApiProfile> = {
   },
 };
 
+// ── Dynamic profiles (generic Nango providers) ─────────────────────────────────────────────────
+// Providers WITHOUT a hand-written entry above get a profile built at runtime from the connection's
+// persisted `config.api` (fetched from Nango's catalog at connect time — see fetchProviderApiSpec).
+// Direct calls when the auth is plain Bearer; everything else relays through Nango's proxy, which
+// resolves exotic auth (API keys in query params, templated domains) from its own catalog.
+
+interface PersistedApiSpec {
+  baseUrl?: string;
+  headers?: Record<string, string>;
+  authMode?: string;
+  docs?: string;
+}
+
+function persistedApiSpec(config: Record<string, unknown>): PersistedApiSpec | null {
+  const api = config.api;
+  return api && typeof api === 'object' && !Array.isArray(api) ? (api as PersistedApiSpec) : null;
+}
+
+const METHOD_POLICIES = new Set(['get-only', 'get-post', 'all']);
+
+/** Per-connection override: config.methodPolicy (admin-written, never agent-written) beats the
+ *  profile default in either direction. */
+export function effectiveMethodPolicy(profile: ProviderApiProfile, config: Record<string, unknown>): ProviderApiProfile['methodPolicy'] {
+  const override = config.methodPolicy;
+  return typeof override === 'string' && METHOD_POLICIES.has(override) ? (override as ProviderApiProfile['methodPolicy']) : profile.methodPolicy;
+}
+
+/** Build a DIRECT-call profile for a generic provider from its persisted Nango spec. Returns null
+ *  unless the auth is OAUTH2 (plain Bearer) and the base URL is concrete — callers then fall back
+ *  to nangoProxyProfile. No crib: the bet-on-intelligence path, the model knows popular APIs. */
+export function dynamicApiProfile(provider: string, config: Record<string, unknown>): ProviderApiProfile | null {
+  const spec = persistedApiSpec(config);
+  if (!spec?.baseUrl || spec.authMode !== 'OAUTH2') return null;
+  const baseUrl = spec.baseUrl;
+  const docs = spec.docs;
+  return {
+    provider,
+    baseUrl,
+    auth: (s) => ({ authorization: `Bearer ${s}` }),
+    ...(spec.headers && Object.keys(spec.headers).length ? { staticHeaders: spec.headers } : {}),
+    methodPolicy: 'get-post',
+    crib: () => `Base: ${baseUrl} (compose paths from your knowledge of the ${provider} API).${docs ? ` Docs: ${docs}` : ''}`,
+  };
+}
+
+/** Build a PROXY profile: every call relays through api.nango.dev/proxy, where Nango injects the
+ *  credential and base URL from its catalog. The `secret` passed to genericApiTool with this
+ *  profile is the NANGO platform key, NOT a provider token. Fallback for non-Bearer auth. */
+export function nangoProxyProfile(provider: string, routing: { connectionRef: string; providerConfigKey: string }): ProviderApiProfile {
+  return {
+    provider,
+    baseUrl: 'https://api.nango.dev/proxy',
+    auth: (s) => ({ authorization: `Bearer ${s}` }),
+    staticHeaders: { 'provider-config-key': routing.providerConfigKey, 'connection-id': routing.connectionRef },
+    methodPolicy: 'get-post',
+    crib: () =>
+      `Calls are relayed through Nango's proxy, which adds the ${provider} credential and base URL for you. ` +
+      `path is the ${provider} API path (after its own base origin), composed from your knowledge of that API.`,
+  };
+}
+
 const MAX_BODY = 8000; // keep tool results small for the chat context
 // Per-call fetch ceiling. A DO turn holds the input gate while it runs; if a turn drags past ~30s,
 // a concurrent hibernation-wake / alarm runs partyserver's blockConcurrencyWhile(onStart), which
@@ -79,10 +144,14 @@ const FETCH_TIMEOUT_MS = 12_000;
 /** The generic call tool for one connected provider. `secret` is the resolved credential; `config`
  *  is the connection's non-secret config (e.g. {repo}). Returns ONE tool named `<provider>_call_api`. */
 export function genericApiTool(profile: ProviderApiProfile, secret: string | (() => Promise<string>), config: Record<string, unknown>): ToolDefinition {
-  const getOnly = profile.methodPolicy === 'get-only';
-  const methodNote = getOnly
-    ? 'Read-only for now: only method "GET" is allowed (writes need human approval and are not wired yet). '
-    : 'Reads and writes share this tool; some reads use POST. ';
+  const policy = effectiveMethodPolicy(profile, config);
+  const getOnly = policy === 'get-only';
+  const methodNote =
+    policy === 'get-only'
+      ? 'Read-only for now: only method "GET" is allowed (writes need human approval and are not wired yet). '
+      : policy === 'get-post'
+        ? 'GET and POST are allowed (some reads use POST); DELETE/PUT/PATCH are blocked pending human approval. '
+        : 'Reads and writes share this tool; some reads use POST. ';
   return defineTool({
     name: `${profile.provider}_call_api`,
     description:
@@ -102,6 +171,9 @@ export function genericApiTool(profile: ProviderApiProfile, secret: string | (()
       const m = String(method).toUpperCase();
       if (getOnly && m !== 'GET') {
         throw new Error(`Only GET is allowed for ${profile.provider} via ${profile.provider}_call_api; "${m}" is a write and needs approval (not wired yet).`);
+      }
+      if (policy === 'get-post' && m !== 'GET' && m !== 'POST') {
+        throw new Error(`"${m}" is blocked for ${profile.provider} via ${profile.provider}_call_api — destructive verbs need an operator to set methodPolicy:"all" on this connection.`);
       }
       // Resolve the credential at the network boundary: a literal Worker secret, or a lazy Nango
       // token fetched (and per-turn-memoized) only now that a call is actually being made.

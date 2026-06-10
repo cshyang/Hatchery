@@ -19,6 +19,7 @@ import {
   disableConnectionByRef,
 } from './repository';
 import { connectionTools, connectionsBlock, requestConnectionTool, disconnectConnectionTool } from './tools';
+import { dynamicApiProfile, nangoProxyProfile, effectiveMethodPolicy, genericApiTool } from '../providers/generic-api';
 import { buildConnectionRuntime } from './runtime';
 import { PROVIDER_CATALOG } from './catalog';
 import { nangoIntegrationKey, normalizeAuthMode, supportedAuthModes } from './integrations';
@@ -503,13 +504,30 @@ test('request_connection: GitHub PAT requires a repo and stores the repo as meta
   assert.ok(!Object.keys(calls[0].tags ?? {}).some((k) => /secret|token|key|credential/i.test(k)));
 });
 
-test('request_connection: refuses a provider not in the catalog (no session started)', async () => {
+test('request_connection: refuses a non-catalog provider NOT enabled in Nango (no session started)', async () => {
   let started = 0;
   const fakeStart = async () => { started++; return { connectLink: 'x', token: 't', expiresAt: 'e' }; };
-  const tool = requestConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123' }, { startConnectSession: fakeStart });
+  const fakeList = async () => [{ uniqueKey: 'airtable', provider: 'airtable', displayName: 'Airtable' }];
+  const tool = requestConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123' }, { startConnectSession: fakeStart, listIntegrations: fakeList });
   const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'salesforce' });
-  assert.match(out, /not a supported provider/i);
-  assert.equal(started, 0, 'no Nango session for an unsupported provider');
+  assert.match(out, /not enabled in this workspace/i);
+  assert.match(out, /airtable/i, 'tells the agent what IS enabled');
+  assert.equal(started, 0, 'no Nango session for a provider Nango does not have');
+});
+
+test('request_connection: accepts a non-catalog provider that IS enabled in Nango (generic path)', async () => {
+  const sessions: { integrationId: string; tags?: Record<string, string> }[] = [];
+  const fakeStart = async (a: { integrationId: string; tags?: Record<string, string> }) => {
+    sessions.push({ integrationId: a.integrationId, tags: a.tags });
+    return { connectLink: 'https://connect.nango.dev/air', token: 't', expiresAt: 'e' };
+  };
+  const fakeList = async () => [{ uniqueKey: 'airtable', provider: 'airtable', displayName: 'Airtable' }];
+  const tool = requestConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123' }, { startConnectSession: fakeStart, listIntegrations: fakeList });
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'Airtable' });
+  assert.match(out, /connect\.nango\.dev\/air/);
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0].integrationId, 'airtable', 'session locked to the Nango integration key');
+  assert.equal(sessions[0].tags?.provider, 'airtable', 'tags carry the provider slug for the webhook');
 });
 
 // A fake DB for the disconnect tool: supports loadConnections (SELECT provider, token_ref…) and
@@ -610,6 +628,81 @@ test('connectionsBlock: canRequest=true tells the agent to use request_connectio
   const without = connectionsBlock(connectionState(GH, {}), PROVIDER_CATALOG);
   assert.doesNotMatch(without, /request_connection/);
   assert.match(without, /wired by an operator first/);
+});
+
+// ── Generic Nango providers (anything enabled in the Nango dashboard) ───────────────────────────
+
+test('dynamicApiProfile: builds a direct Bearer profile from the persisted Nango spec', async () => {
+  const config = { api: { baseUrl: 'https://api.airtable.com', headers: { 'x-airtable-thing': 'v1' }, authMode: 'OAUTH2', docs: 'https://nango.dev/docs/api-integrations/airtable' } };
+  const profile = dynamicApiProfile('airtable', config)!;
+  assert.equal(profile.baseUrl, 'https://api.airtable.com');
+  assert.deepEqual(profile.auth('tok'), { authorization: 'Bearer tok' });
+  assert.deepEqual(profile.staticHeaders, { 'x-airtable-thing': 'v1' });
+  assert.equal(profile.methodPolicy, 'get-post', 'generic default blocks destructive verbs');
+  assert.match(profile.crib(config), /api\.airtable\.com/);
+});
+
+test('dynamicApiProfile: null without a persisted spec or for non-Bearer auth (→ proxy fallback)', async () => {
+  assert.equal(dynamicApiProfile('airtable', {}), null, 'no spec persisted');
+  assert.equal(dynamicApiProfile('onepassword', { api: { baseUrl: 'https://x.test', authMode: 'API_KEY' } }), null, 'API_KEY auth cannot go direct');
+});
+
+test('nangoProxyProfile: routes via api.nango.dev with connection-id + provider-config-key headers', async () => {
+  const profile = nangoProxyProfile('salesforce', { connectionRef: 'conn-9', providerConfigKey: 'salesforce' });
+  assert.equal(profile.baseUrl, 'https://api.nango.dev/proxy');
+  assert.deepEqual(profile.staticHeaders, { 'provider-config-key': 'salesforce', 'connection-id': 'conn-9' });
+  assert.equal(profile.methodPolicy, 'get-post');
+});
+
+test('get-post policy: POST passes the gate, DELETE/PUT/PATCH are blocked with the operator hint', async () => {
+  const profile = nangoProxyProfile('salesforce', { connectionRef: 'c', providerConfigKey: 'salesforce' });
+  const tool = genericApiTool(profile, 'nk', {});
+  for (const method of ['DELETE', 'PUT', 'PATCH']) {
+    await assert.rejects(
+      () => (tool.execute as (a: unknown) => Promise<unknown>)({ method, path: '/v1/things/1' }),
+      /blocked .* methodPolicy/i,
+      `${method} must be blocked`,
+    );
+  }
+});
+
+test('effectiveMethodPolicy: per-connection config override beats the profile default both ways', async () => {
+  const profile = nangoProxyProfile('x', { connectionRef: 'c', providerConfigKey: 'x' });
+  assert.equal(effectiveMethodPolicy(profile, {}), 'get-post');
+  assert.equal(effectiveMethodPolicy(profile, { methodPolicy: 'all' }), 'all', 'operator opt-in to writes');
+  assert.equal(effectiveMethodPolicy(profile, { methodPolicy: 'get-only' }), 'get-only', 'operator lockdown');
+  assert.equal(effectiveMethodPolicy(profile, { methodPolicy: 'bogus' }), 'get-post', 'garbage override ignored');
+  // Enforcement follows the override: get-only via config blocks even POST.
+  const lockedTool = genericApiTool(profile, 'nk', { methodPolicy: 'get-only' });
+  await assert.rejects(
+    () => (lockedTool.execute as (a: unknown) => Promise<unknown>)({ method: 'POST', path: '/v1/q' }),
+    /Only GET is allowed/,
+  );
+});
+
+test('connectionTools: generic provider gets the direct tool with a spec, the proxy tool without one', async () => {
+  const env = { NANGO_SECRET_KEY: 'nk_secret' };
+  // With a persisted spec → direct dynamic profile.
+  const DIRECT: ConnectionSpec[] = [{ provider: 'airtable', connectionRef: 'conn-1', config: { nangoIntegrationKey: 'airtable', api: { baseUrl: 'https://api.airtable.com', authMode: 'OAUTH2' } } }];
+  const directCreds = resolveConnection(DIRECT, env, 'airtable')!;
+  const directNames = connectionTools(connectionState(DIRECT, env), { airtable: directCreds }, 'nk_secret').map((t) => t.name as string);
+  assert.deepEqual(directNames, ['airtable_call_api']);
+  // Without a spec → proxy fallback (needs the Nango key + connectionRef).
+  const PROXIED: ConnectionSpec[] = [{ provider: 'salesforce', connectionRef: 'conn-2', config: { nangoIntegrationKey: 'salesforce' } }];
+  const proxiedCreds = resolveConnection(PROXIED, env, 'salesforce')!;
+  const proxiedNames = connectionTools(connectionState(PROXIED, env), { salesforce: proxiedCreds }, 'nk_secret').map((t) => t.name as string);
+  assert.deepEqual(proxiedNames, ['salesforce_call_api']);
+  // Without the Nango key arg the proxy fallback cannot route → degrades to toolless, not a crash.
+  assert.equal(connectionTools(connectionState(PROXIED, env), { salesforce: proxiedCreds }).length, 0);
+});
+
+test('connectionsBlock: a connected provider outside the curated catalog still gets a line', async () => {
+  const state = connectionState(
+    [{ provider: 'airtable', connectionRef: 'conn-1', config: {} }] as ConnectionSpec[],
+    { NANGO_SECRET_KEY: 'nk' },
+  );
+  const block = connectionsBlock(state, PROVIDER_CATALOG, true);
+  assert.match(block, /✅ airtable \(connected\) — generic API access via airtable_call_api/);
 });
 
 await run();

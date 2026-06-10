@@ -99,6 +99,77 @@ export async function fetchToken(args: FetchTokenArgs, deps: FetchDeps = {}): Pr
   return token;
 }
 
+// ── Provider catalog (generic-provider support) ────────────────────────────────────────────────
+// Nango's providers.yaml is queryable: GET /providers/<name> returns the provider's API shape
+// (proxy.base_url, required headers, auth_mode). We fetch it ONCE at connection time and persist
+// the non-secret subset in the connection's config, so call tools can go DIRECT to the provider
+// (token from fetchToken) instead of relaying every call through Nango's proxy. Verified live
+// 2026-06-10 against /providers/notion — the entry matches our hand-written profile byte for byte.
+
+export interface NangoProviderApiSpec {
+  baseUrl: string;
+  /** Static headers the provider requires on every call (e.g. Notion-Version). Templated values
+   *  (`${...}`) are dropped — those need Nango-side resolution and force the proxy path. */
+  headers?: Record<string, string>;
+  /** Nango auth_mode (OAUTH2, API_KEY, BASIC, …). Only OAUTH2 goes direct (Bearer); the rest proxy. */
+  authMode: string;
+  docs?: string;
+}
+
+/** Fetch a provider's API spec from Nango's catalog. Returns null when the provider is unknown or
+ *  its base URL is templated (`${connectionConfig.…}`) — callers fall back to the Nango proxy. */
+export async function fetchProviderApiSpec(
+  args: { secretKey: string; provider: string },
+  deps: FetchDeps = {},
+): Promise<NangoProviderApiSpec | null> {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const res = await nangoFetch(
+    `${NANGO_API}/providers/${encodeURIComponent(args.provider)}`,
+    { method: 'GET', headers: { authorization: `Bearer ${args.secretKey}` } },
+    fetchImpl,
+  );
+  if (!res.ok) return null;
+  const json = nangoBody<{ auth_mode?: string; docs?: string; proxy?: { base_url?: string; headers?: Record<string, string> } }>(
+    JSON.parse(await res.text()),
+  );
+  const baseUrl = json.proxy?.base_url;
+  if (!baseUrl || baseUrl.includes('${')) return null;
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(json.proxy?.headers ?? {})) {
+    if (typeof v === 'string' && !v.includes('${')) headers[k.toLowerCase()] = v;
+  }
+  return {
+    baseUrl: baseUrl.replace(/\/$/, ''),
+    ...(Object.keys(headers).length ? { headers } : {}),
+    authMode: json.auth_mode ?? '',
+    ...(json.docs ? { docs: json.docs } : {}),
+  };
+}
+
+export interface NangoIntegration {
+  uniqueKey: string;
+  provider: string;
+  displayName: string;
+}
+
+/** List the integrations enabled in OUR Nango project — the dynamic half of the provider catalog.
+ *  Enabling an integration in the Nango dashboard makes it connectable here, no Hatchery change. */
+export async function listIntegrations(args: { secretKey: string }, deps: FetchDeps = {}): Promise<NangoIntegration[]> {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const res = await nangoFetch(
+    `${NANGO_API}/integrations`,
+    { method: 'GET', headers: { authorization: `Bearer ${args.secretKey}` } },
+    fetchImpl,
+  );
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Nango integrations list failed (${res.status}): ${text.slice(0, 200)}`);
+  const json = nangoBody<Array<{ unique_key?: string; provider?: string; display_name?: string }>>(JSON.parse(text));
+  if (!Array.isArray(json)) return [];
+  return json
+    .filter((i) => i.unique_key)
+    .map((i) => ({ uniqueKey: String(i.unique_key), provider: String(i.provider ?? i.unique_key), displayName: String(i.display_name ?? i.unique_key) }));
+}
+
 // "Connection doesn't exist" is reported by error CODE, and Nango is inconsistent about the HTTP
 // status: DELETE of a gone connection → 400 {code:'unknown_connection'} (verified live 2026-06-01),
 // while GET → 404 {code:'not_found'}. So we key idempotent-success off the code, NOT the status.

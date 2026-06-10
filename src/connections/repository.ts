@@ -24,6 +24,8 @@ export interface ConnectionState {
   provider: string;
   status: 'connected' | 'not_connected';
   config: Record<string, unknown>;
+  /** Nango connection id (non-secret) — present on managed-OAuth rows; routes the proxy fallback. */
+  connectionRef?: string;
 }
 
 /** Derive each declared connection's state from its specs + whether its Worker secret is present.
@@ -43,6 +45,7 @@ export function connectionState(specs: ConnectionSpec[], env: Record<string, unk
       provider: s.provider,
       status: hasWorkerSecret || hasNango ? 'connected' : 'not_connected',
       config: s.config ?? {},
+      ...(s.connectionRef ? { connectionRef: s.connectionRef } : {}),
     };
   });
 }
