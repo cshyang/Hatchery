@@ -19,7 +19,7 @@ import { bindings, bindingBySlack, bindingByProject, agentInstanceId, autoCreate
 import { loadPersona } from '../src/project/persona';
 import { deploymentConfig, isKnownTeam } from '../src/config/deployment';
 import { normalizeSlackMessage } from '../src/shared/canonical';
-import { upsertConversationTarget } from '../src/project/conversations';
+import { upsertConversationTarget, loadAgentEpoch, bumpAgentEpoch, conversationScope } from '../src/project/conversations';
 import { claimEvent, type KVLike } from '../src/shared/idempotency';
 import type { D1Like } from '../src/skills/repository';
 import { logMessage, projectsWithUnreflected, projectsWithUnreflectedRuns, takeUnreflectedBatch, takeUnreflectedRuns, buildReflectInstructions } from '../src/knowledge/reflection';
@@ -332,7 +332,9 @@ app.post('/__internal/agent-runs/reconcile', async (c) => {
   const notifications = await deliverPendingSlackRunNotifications({ db, env: c.env as Record<string, unknown> });
   // Dead-turn reaper: a receipt stuck 'active' past the stale window is a died turn — mark it
   // failed and edit the eternal "⏳ Working" into an honest retry prompt. Failure-isolated.
-  const reapedTurns = await reapStaleTurnActivities(db, c.env as Record<string, unknown>).catch((e) => {
+  const reapedTurns = await reapStaleTurnActivities(db, c.env as Record<string, unknown>, {
+    bumpEpoch: (projectId, conversationId) => bumpAgentEpoch(db, projectId, conversationId),
+  }).catch((e) => {
     console.log(`[activity] reap sweep failed: ${e instanceof Error ? e.message : 'error'}`);
     return 0;
   });
@@ -399,6 +401,21 @@ app.post('/__internal/review-sweep', async (c) => {
 function requireAdmin(c: { env: Env; req: { header(n: string): string | undefined } }): boolean {
   return hasMatchingSecretHeader(c.env.ADMIN_CONNECTIONS_TOKEN, c.req.header('x-hatchery-admin-token'));
 }
+
+// Manual wedged-session reset: bump a conversation's epoch so its next turn starts a fresh
+// session DO. The reaper does this automatically after two consecutive dead-on-arrival turns;
+// this route is the operator override for anything it misses.
+app.post('/__admin/conversations/reset', async (c) => {
+  if (!requireAdmin(c)) return c.body(null, 404);
+  const db = c.env.DB;
+  if (!db) return c.json({ error: 'no DB binding' }, 500);
+  const body = await readJsonOrNull<{ projectId?: string; conversationId?: string }>(() => c.req.json());
+  if (!body?.projectId || !body.conversationId) return c.json({ error: 'projectId and conversationId are required' }, 400);
+  const epoch = await bumpAgentEpoch(db, body.projectId, body.conversationId);
+  if (!epoch) return c.json({ error: 'no conversation target found to reset' }, 404);
+  console.log(`[admin] session reset project=${body.projectId} conv=${body.conversationId} epoch=${epoch}`);
+  return c.json({ projectId: body.projectId, conversationId: body.conversationId, epoch });
+});
 
 app.post('/__admin/connections', async (c) => {
   if (!requireAdmin(c)) return c.body(null, 404); // inert/invisible unless the admin token matches
@@ -703,10 +720,14 @@ app.post('/slack/events', async (c) => {
     }).catch(() => {});
   }
 
+  // Epoch-aware instance id: a wedged conversation's epoch was bumped (by the reaper or the
+  // admin reset route), so this turn lands in a FRESH session DO instead of the poisoned one.
+  const agentEpoch = c.env.DB ? await loadAgentEpoch(c.env.DB, msg.projectId, msg.conversationId).catch(() => 0) : 0;
+
   await dispatchSlackTurnWithFallback(
     {
       agent: 'project',
-      id: agentInstanceId(msg.projectId, `conv:${msg.conversationId}`),
+      id: agentInstanceId(msg.projectId, conversationScope(msg.conversationId, agentEpoch)),
       // Forward the author identity in neutral terms so history retains who said what — the
       // future reflection job reads senderId from it to attribute facts. (The initializer itself
       // can't see this; only the model does.)

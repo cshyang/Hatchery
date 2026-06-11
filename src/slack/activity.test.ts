@@ -12,7 +12,9 @@ import {
   renderSlackActivityReceipt,
   reapStaleTurnActivities,
   shouldPostFinalBelowActivity,
+  TURN_DIED_RESET_TEXT,
   TURN_DIED_TEXT,
+  TURN_DOA_STALE_MS,
   TURN_STALE_MS,
   toolActivityLabel,
 } from './activity';
@@ -36,7 +38,8 @@ class FakeD1 implements D1Like {
           async all<T = Row>(): Promise<{ results: T[] }> {
             if (query.includes("status='active' AND updated_at <")) {
               const [cutoff] = values as [number];
-              return { results: db.rows.filter((row) => row.status === 'active' && (row.updated_at as number) < cutoff) as T[] };
+              // Detached copies, like real D1 — the reaper's own updates must not mutate what it read.
+              return { results: db.rows.filter((row) => row.status === 'active' && (row.updated_at as number) < cutoff).map((row) => ({ ...row })) as T[] };
             }
             if (query.includes('FROM slack_turn_activity')) {
               const [projectId, sessionId] = values;
@@ -98,10 +101,22 @@ class FakeD1 implements D1Like {
               return { meta: { changes: 1 } };
             }
             if (query.includes("SET status='failed', completed_at=")) {
-              const [completedAt, updatedAt, projectId, sessionId] = values;
+              const [completedAt, updatedAt, doaInc, projectId, sessionId] = values;
               const row = db.rows.find((item) => item.project_id === projectId && item.session_id === sessionId && item.status === 'active');
               if (!row) return { meta: { changes: 0 } };
-              Object.assign(row, { status: 'failed', completed_at: completedAt, updated_at: updatedAt });
+              Object.assign(row, {
+                status: 'failed',
+                completed_at: completedAt,
+                updated_at: updatedAt,
+                doa_count: ((row.doa_count as number) ?? 0) + (doaInc as number),
+              });
+              return { meta: { changes: 1 } };
+            }
+            if (query.includes('SET doa_count=0')) {
+              const [projectId, sessionId] = values;
+              const row = db.rows.find((item) => item.project_id === projectId && item.session_id === sessionId);
+              if (!row || (query.includes('doa_count>0') && !((row.doa_count as number) > 0))) return { meta: { changes: 0 } };
+              row.doa_count = 0;
               return { meta: { changes: 1 } };
             }
             if (query.startsWith('UPDATE slack_turn_activity')) {
@@ -433,6 +448,58 @@ test('reapStaleTurnActivities: leaves fresh and completed turns alone; edit fail
   assert.equal(reaped, 1, 'edit failure does not block the reap');
   assert.equal((await loadSlackTurnActivity(db, 'P', 'conv:slack:T:C:100.000'))?.status, 'failed');
   assert.equal(await reapStaleTurnActivities(db, {}, { now: TURN_STALE_MS + 9000, editMessage: async () => {} }), 0, 'already-failed row not re-reaped');
+});
+
+test('reaper two-tier: zero-beat turn reaps at the DOA window; mid-flight turn waits for the long one', async () => {
+  const db = new FakeD1();
+  await createSlackTurnActivity(db, input({ now: 0 }));
+  await createSlackTurnActivity(db, input({ now: 0, sessionId: 'conv:slack:T:C:200.000', conversationId: 'slack:T:C:200.000', ackMessageTs: '201.000' }));
+  await recordSlackToolActivity(db, { projectId: 'P', sessionId: 'conv:slack:T:C:200.000', toolName: 'execute_code', now: 1000 });
+
+  const edits: Array<{ text: string }> = [];
+  const reaped = await reapStaleTurnActivities(db, { SLACK_BOT_TOKEN_DEFAULT: 'xoxb-1' }, {
+    now: TURN_DOA_STALE_MS + 5000, // past the DOA window, well inside the 10-min one
+    editMessage: async (_t, _c, _ts, text) => { edits.push({ text }); },
+    log: () => {},
+  });
+  assert.equal(reaped, 1, 'only the zero-beat turn reaps early');
+  assert.equal((await loadSlackTurnActivity(db, 'P', 'conv:slack:T:C:100.000'))?.status, 'failed');
+  assert.equal((await loadSlackTurnActivity(db, 'P', 'conv:slack:T:C:200.000'))?.status, 'active', 'turn with beats survives the DOA window');
+  assert.equal(edits[0].text, TURN_DIED_TEXT);
+});
+
+test('reaper self-heal: second consecutive DOA bumps the session epoch and says so', async () => {
+  const db = new FakeD1();
+  const bumps: string[] = [];
+  const edits: string[] = [];
+  const deps = {
+    editMessage: async (_t: string, _c: string, _ts: string, text: string) => { edits.push(text); },
+    bumpEpoch: async (projectId: string, conversationId: string) => { bumps.push(`${projectId}/${conversationId}`); return bumps.length; },
+    log: () => {},
+  };
+
+  await createSlackTurnActivity(db, input({ now: 0 }));
+  await reapStaleTurnActivities(db, { SLACK_BOT_TOKEN_DEFAULT: 'x' }, { ...deps, now: TURN_DOA_STALE_MS + 1000 });
+  assert.equal(bumps.length, 0, 'first DOA is treated as a transient flake');
+  assert.equal(edits[0], TURN_DIED_TEXT);
+
+  // The user retries; the turn dies on arrival again.
+  await createSlackTurnActivity(db, input({ now: TURN_DOA_STALE_MS + 60_000, ackMessageTs: '102.000' }));
+  await reapStaleTurnActivities(db, { SLACK_BOT_TOKEN_DEFAULT: 'x' }, { ...deps, now: 2 * TURN_DOA_STALE_MS + 120_000 });
+  assert.deepEqual(bumps, ['P/slack:T:C:100.000'], 'second consecutive DOA declares the session wedged');
+  assert.equal(edits[1], TURN_DIED_RESET_TEXT);
+  assert.equal((await loadSlackTurnActivity(db, 'P', 'conv:slack:T:C:100.000'))?.status, 'failed');
+});
+
+test('completed turn resets the DOA streak', async () => {
+  const db = new FakeD1();
+  await createSlackTurnActivity(db, input({ now: 0 }));
+  await reapStaleTurnActivities(db, {}, { now: TURN_DOA_STALE_MS + 1000, editMessage: async () => {}, log: () => {} });
+  // Retry succeeds this time.
+  await createSlackTurnActivity(db, input({ now: TURN_DOA_STALE_MS + 60_000, ackMessageTs: '102.000' }));
+  await completeSlackTurnActivity(db, 'P', 'conv:slack:T:C:100.000', 'completed', TURN_DOA_STALE_MS + 90_000);
+  const row = db.rows.find((r) => r.session_id === 'conv:slack:T:C:100.000');
+  assert.equal(row?.doa_count, 0, 'success clears the wedge counter');
 });
 
 await run();

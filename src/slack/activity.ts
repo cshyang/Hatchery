@@ -169,6 +169,15 @@ export async function completeSlackTurnActivity(
     if (item.status === 'running') item.status = 'completed';
   }
   await upsertActivity(db, activity);
+  if (status === 'completed') {
+    // A successful turn proves the session healthy — the dead-on-arrival streak (the reaper's
+    // wedged-session signal) resets. Targeted update; the receipt upsert never touches doa_count.
+    await db
+      .prepare('UPDATE slack_turn_activity SET doa_count=0 WHERE project_id=? AND session_id=? AND doa_count>0')
+      .bind(projectId, sessionId)
+      .run()
+      .catch(() => {});
+  }
   return activity;
 }
 
@@ -392,15 +401,23 @@ function observedSlackActivityEvent(event: FlueEvent): ObservedSlackActivityEven
 // beat/tool call, so a long-stale active row is unambiguous death. The reaper (riding the */2
 // reconcile tick) marks it failed and edits the receipt into an honest retry prompt.
 
-export const TURN_STALE_MS = 10 * 60_000;
+export const TURN_STALE_MS = 10 * 60_000; // a turn that showed life gets the long benefit of the doubt
+export const TURN_DOA_STALE_MS = 3 * 60_000; // zero beats by now = the model request never started
+export const DOA_WEDGE_THRESHOLD = 2; // consecutive dead-on-arrival turns before the session is declared wedged
 export const TURN_DIED_TEXT = '⚠️ This turn died unexpectedly — mention me again to retry.';
+export const TURN_DIED_RESET_TEXT =
+  "⚠️ This turn died before it could start, twice in a row — I've reset this thread's session. Mention me again to retry.";
 
 export interface ReapStaleTurnsDeps {
   /** Injectable for tests; defaults to the Slack chat.update helper. */
   editMessage?: typeof editMessage;
+  /** Bump the conversation's session epoch (abandon a wedged session DO). Wired by the caller
+   *  (app.ts) to bumpAgentEpoch — injected to avoid an activity↔conversations import cycle. */
+  bumpEpoch?: (projectId: string, conversationId: string) => Promise<number>;
   log?: (message: string) => void;
   now?: number;
   staleMs?: number;
+  doaStaleMs?: number;
 }
 
 export async function reapStaleTurnActivities(
@@ -410,32 +427,64 @@ export async function reapStaleTurnActivities(
 ): Promise<number> {
   const now = deps.now ?? Date.now();
   const staleMs = deps.staleMs ?? TURN_STALE_MS;
+  const doaStaleMs = deps.doaStaleMs ?? TURN_DOA_STALE_MS;
   const edit = deps.editMessage ?? editMessage;
   const log = deps.log ?? console.log;
 
   const { results } = await db
     .prepare(
-      `SELECT project_id, session_id, slack_channel_id, ack_message_ts, transport_token_ref
+      `SELECT project_id, session_id, conversation_id, slack_channel_id, ack_message_ts, transport_token_ref, activities_json, updated_at, doa_count
          FROM slack_turn_activity WHERE status='active' AND updated_at < ?`,
     )
-    .bind(now - staleMs)
-    .all<{ project_id: string; session_id: string; slack_channel_id: string; ack_message_ts: string; transport_token_ref: string }>();
+    .bind(now - doaStaleMs)
+    .all<{
+      project_id: string;
+      session_id: string;
+      conversation_id: string;
+      slack_channel_id: string;
+      ack_message_ts: string;
+      transport_token_ref: string;
+      activities_json: string;
+      updated_at: number;
+      doa_count: number | null;
+    }>();
 
   let reaped = 0;
   for (const row of results ?? []) {
+    const doa = parseActivities(row.activities_json).length === 0; // never even a first beat
+    if (!doa && now - row.updated_at < staleMs) continue; // mid-flight turn, still within its window
+
     // Mark failed FIRST (guarded on status so a racing live update wins); the Slack edit is
     // best-effort chrome — a failed edit must never leave the row eternally re-reapable.
     const res = (await db
-      .prepare(`UPDATE slack_turn_activity SET status='failed', completed_at=?, updated_at=? WHERE project_id=? AND session_id=? AND status='active'`)
-      .bind(now, now, row.project_id, row.session_id)
+      .prepare(
+        `UPDATE slack_turn_activity SET status='failed', completed_at=?, updated_at=?, doa_count=doa_count+? WHERE project_id=? AND session_id=? AND status='active'`,
+      )
+      .bind(now, now, doa ? 1 : 0, row.project_id, row.session_id)
       .run()) as { meta?: { changes?: number } };
     if (!(res?.meta?.changes ?? 0)) continue;
     reaped++;
-    log(`[activity] reaped dead turn project=${row.project_id} session=${row.session_id}`);
+    log(`[activity] reaped dead turn project=${row.project_id} session=${row.session_id} doa=${doa}`);
+
+    // Two consecutive DOA turns = the session DO is wedged (poisoned history rejects every model
+    // request before its first token) — abandon it so the thread self-heals.
+    let resetSession = false;
+    if (doa && (row.doa_count ?? 0) + 1 >= DOA_WEDGE_THRESHOLD && deps.bumpEpoch && row.conversation_id) {
+      const epoch = await deps.bumpEpoch(row.project_id, row.conversation_id).catch(() => 0);
+      if (epoch > 0) {
+        resetSession = true;
+        await db
+          .prepare('UPDATE slack_turn_activity SET doa_count=0 WHERE project_id=? AND session_id=?')
+          .bind(row.project_id, row.session_id)
+          .run()
+          .catch(() => {});
+        log(`[activity] wedged session reset project=${row.project_id} conv=${row.conversation_id} epoch=${epoch}`);
+      }
+    }
 
     const token = env[row.transport_token_ref];
     if (typeof token === 'string' && token && row.ack_message_ts) {
-      await edit(token, row.slack_channel_id, row.ack_message_ts, TURN_DIED_TEXT).catch((e) =>
+      await edit(token, row.slack_channel_id, row.ack_message_ts, resetSession ? TURN_DIED_RESET_TEXT : TURN_DIED_TEXT).catch((e) =>
         log(`[activity] reaper edit failed: ${e instanceof Error ? e.message : 'error'}`),
       );
     }

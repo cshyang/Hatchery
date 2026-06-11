@@ -63,6 +63,49 @@ export async function upsertConversationTarget(db: D1Like, input: UpsertConversa
     .run();
 }
 
+// ── Session epoch (wedged-thread cure) ──────────────────────────────────────────────────────────
+// A conversation's Flue session lives in a DO whose instance-id scope WE construct. The epoch
+// versions that scope: bumping it abandons a poisoned session (a mid-stream death can corrupt the
+// DO-internal history so every later model request dies before its first token) and the next turn
+// starts fresh, rehydrated from D1 + backscroll. Bumped automatically by the dead-turn reaper
+// after two consecutive dead-on-arrival turns, or manually via /__admin/conversations/reset.
+
+/** The DO scope for a conversation at an epoch. Epoch 0 keeps the legacy shape so existing
+ *  healthy sessions survive the rollout untouched. */
+export function conversationScope(conversationId: string, epoch: number): string {
+  return epoch > 0 ? `conv:${conversationId}~e${epoch}` : `conv:${conversationId}`;
+}
+
+export async function loadAgentEpoch(
+  db: D1Like,
+  projectId: string,
+  conversationId: string,
+  agentSlug: string = DEFAULT_AGENT_SLUG,
+): Promise<number> {
+  const row = await db
+    .prepare('SELECT agent_epoch FROM conversation_targets WHERE project_id=? AND agent_slug=? AND conversation_id=?')
+    .bind(projectId, agentSlug, conversationId)
+    .first<{ agent_epoch: number }>();
+  return row?.agent_epoch ?? 0;
+}
+
+/** Abandon the conversation's current session DO. Returns the new epoch (0 = no target row to
+ *  bump, nothing to abandon). */
+export async function bumpAgentEpoch(
+  db: D1Like,
+  projectId: string,
+  conversationId: string,
+  agentSlug: string = DEFAULT_AGENT_SLUG,
+): Promise<number> {
+  await db
+    .prepare(
+      'UPDATE conversation_targets SET agent_epoch=agent_epoch+1, updated_at=? WHERE project_id=? AND agent_slug=? AND conversation_id=?',
+    )
+    .bind(Date.now(), projectId, agentSlug, conversationId)
+    .run();
+  return loadAgentEpoch(db, projectId, conversationId, agentSlug);
+}
+
 export async function loadConversationTarget(
   db: D1Like,
   projectId: string,
