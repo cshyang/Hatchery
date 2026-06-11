@@ -1,6 +1,6 @@
 import type { Binding } from './bindings';
 import { DEFAULT_AGENT_SLUG } from './bindings';
-import type { Persona } from './persona';
+import { personaIdentity, type Persona } from './persona';
 import type { D1Like } from '../skills/repository';
 import { postMessage, editMessage } from '../slack/post';
 import { chunkSlackText, formatSlackText, SLACK_TEXT_LIMIT } from '../slack/format';
@@ -151,7 +151,7 @@ export async function sendToConversationTarget(
 
   if (target.provider === 'slack') {
     // Identity rides on fresh posts only — edits (chat.update) inherit the posted identity.
-    const identity = persona ? { username: persona.name, ...(persona.iconEmoji ? { iconEmoji: persona.iconEmoji } : {}) } : {};
+    const identity = personaIdentity(persona);
     const maxChars =
       typeof env.SLACK_REPLY_MAX_CHARS === 'number'
         ? env.SLACK_REPLY_MAX_CHARS

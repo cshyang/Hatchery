@@ -1,5 +1,5 @@
 import { bindingByProject as defaultBindingByProject, type Binding } from '../project/bindings';
-import { loadPersona } from '../project/persona';
+import { loadPersona, personaIdentity } from '../project/persona';
 import type { D1Like } from '../skills/repository';
 import { postMessage as defaultPostMessage, type SlackPostOptions } from '../slack/post';
 import { agentRunNotificationBlocks, agentRunNotificationText } from '../slack/blocks';
@@ -103,10 +103,7 @@ export async function deliverPendingSlackRunNotifications(
       const blocks = agentRunNotificationBlocks(notification.notification_type, run);
       const channel = run.slackChannelId ?? binding.externalSpaceId;
       const persona = await loadPersona(args.db, notification.project_id).catch(() => null);
-      const ts = await postMessage(token, channel, text, threadFor(run), {
-        blocks,
-        ...(persona ? { username: persona.name, ...(persona.iconEmoji ? { iconEmoji: persona.iconEmoji } : {}) } : {}),
-      });
+      const ts = await postMessage(token, channel, text, threadFor(run), { blocks, ...personaIdentity(persona) });
       await markNotification(args.db, notification.id, { status: 'sent', providerMessageId: ts ?? null, sentAt: now });
       summary.sent++;
     } catch (e) {

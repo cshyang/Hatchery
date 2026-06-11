@@ -18,6 +18,7 @@ export interface SlackPostOptions {
    *  inherit whatever the message was posted as, so the ack→reply chain keeps the persona. */
   username?: string;
   iconEmoji?: string;
+  iconUrl?: string;
 }
 
 async function slackCall(method: 'chat.postMessage' | 'chat.update', token: string, body: Record<string, unknown>): Promise<SlackApiResponse> {
@@ -48,13 +49,15 @@ export async function postMessage(
     ...(options.blocks ? { blocks: options.blocks } : {}),
     ...(options.username ? { username: options.username } : {}),
     ...(options.iconEmoji ? { icon_emoji: options.iconEmoji } : {}),
+    ...(options.iconUrl ? { icon_url: options.iconUrl } : {}),
   };
   let data = await slackCall('chat.postMessage', token, body);
   // Persona identity is best-effort: an app without chat:write.customize must still reply.
-  if (!data.ok && data.error === 'missing_scope' && (body.username || body.icon_emoji)) {
+  if (!data.ok && data.error === 'missing_scope' && (body.username || body.icon_emoji || body.icon_url)) {
     console.log('[post] chat:write.customize scope missing — posting without persona identity');
     delete body.username;
     delete body.icon_emoji;
+    delete body.icon_url;
     data = await slackCall('chat.postMessage', token, body);
   }
   if (!data.ok) throw new Error(`slack chat.postMessage failed: ${data.error ?? 'unknown_error'}`);
