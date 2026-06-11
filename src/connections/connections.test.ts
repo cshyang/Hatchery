@@ -201,9 +201,35 @@ test('buildConnectionRuntime: assembles connected provider tools and prompt bloc
 });
 
 test('buildConnectionRuntime: exposes self-service connection tools when Nango is configured', async () => {
-  const runtime = await buildConnectionRuntime({ db: new FakeD1(), binding: binding([]), env: { NANGO_SECRET_KEY: 'nk' }, projectId: 'demo' });
+  const runtime = await buildConnectionRuntime({
+    db: new FakeD1(),
+    binding: binding([]),
+    env: { NANGO_SECRET_KEY: 'nk' },
+    projectId: 'demo',
+    listIntegrationsImpl: async () => [],
+  });
   assert.deepEqual(runtime.tools.map((t) => t.name).sort(), ['assign_coding_run', 'disconnect_connection', 'propose_agent_route', 'request_connection']);
   assert.match(runtime.connectionsBlock ?? '', /request_connection/);
+});
+
+test('buildConnectionRuntime: surfaces Nango-enabled integrations as connectable in the prompt block', async () => {
+  const runtime = await buildConnectionRuntime({
+    db: new FakeD1(),
+    binding: binding([]),
+    env: { NANGO_SECRET_KEY: 'nk-avail' },
+    projectId: 'demo',
+    listIntegrationsImpl: async () => [
+      { uniqueKey: 'google-mail', provider: 'google-mail', displayName: 'Gmail' },
+      { uniqueKey: 'github-app', provider: 'github-app', displayName: 'GitHub App' },
+      { uniqueKey: 'github', provider: 'github', displayName: 'GitHub' },
+    ],
+  });
+  const block = runtime.connectionsBlock ?? '';
+  // The enabled-but-uncatalogued integration is offered to the agent…
+  assert.match(block, /⚪ google-mail \(Gmail\) \(not connected; enabled in Nango\) — request_connection "google-mail" to connect/);
+  // …while auth-mode variants and exact matches of curated providers fold into their catalog line.
+  assert.doesNotMatch(block, /github-app/);
+  assert.equal(block.match(/⚪ github /g)?.length, 1);
 });
 
 test('D1 layer: loadConnectionSpecs merges live rows over the binding seed (D1 wins, disabled removes)', async () => {

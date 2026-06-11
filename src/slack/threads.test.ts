@@ -1,7 +1,7 @@
 // Thread backscroll: fetch + render for context hydration — run: npx tsx src/slack/threads.test.ts
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
-import { renderThreadBackscroll, fetchThreadReplies, type ThreadMessage } from './threads';
+import { renderThreadBackscroll, fetchThreadReplies, fetchChannelHistory, type ThreadMessage } from './threads';
 
 const { test, run } = createTestRunner();
 
@@ -63,6 +63,27 @@ test('fetchThreadReplies: GETs conversations.replies with Bearer, parses message
 test('fetchThreadReplies: ok:false → empty array', async () => {
   const { fn } = fakeFetch(() => new Response(JSON.stringify({ ok: false, error: 'thread_not_found' }), { status: 200 }));
   assert.deepEqual(await fetchThreadReplies('t', 'C1', '1.0', { fetchImpl: fn }), []);
+});
+
+test('fetchChannelHistory: GETs conversations.history and reverses to chronological order', async () => {
+  const { fn, calls } = fakeFetch(() =>
+    new Response(JSON.stringify({ ok: true, messages: [
+      { user: 'U2', text: 'newest', ts: '2.0' },
+      { user: 'U1', text: 'oldest', ts: '1.0' },
+    ] }), { status: 200 }),
+  );
+  const out = await fetchChannelHistory('xoxb-tok', 'C1', { fetchImpl: fn });
+  assert.deepEqual(out.map((m) => m.text), ['oldest', 'newest']);
+  assert.match(calls[0].url, /conversations\.history\?channel=C1&limit=30/);
+  assert.equal((calls[0].init.headers as Record<string, string>).authorization, 'Bearer xoxb-tok');
+});
+
+test('fetchChannelHistory: ok:false → empty array; limit clamps to 200', async () => {
+  const { fn } = fakeFetch(() => new Response(JSON.stringify({ ok: false, error: 'channel_not_found' }), { status: 200 }));
+  assert.deepEqual(await fetchChannelHistory('t', 'C1', { fetchImpl: fn }), []);
+  const { fn: fn2, calls } = fakeFetch(() => new Response(JSON.stringify({ ok: true, messages: [] }), { status: 200 }));
+  await fetchChannelHistory('t', 'C1', { fetchImpl: fn2, limit: 999 });
+  assert.match(calls[0].url, /limit=200/);
 });
 
 await run();

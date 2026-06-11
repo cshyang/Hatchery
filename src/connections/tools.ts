@@ -16,11 +16,15 @@ import {
 } from './integrations';
 
 // The CONNECTIONS prompt block (mirrors the skills catalog injection). Tells the agent what it
-// can reach and what is connectable but not yet wired by an operator.
+// can reach and what is connectable but not yet wired by an operator. `available` is the live
+// list of integrations enabled in the workspace's Nango project — without it the agent only
+// knows the curated catalog and wrongly tells people a perfectly connectable service (e.g.
+// gmail) isn't supported.
 export function connectionsBlock(
   state: ConnectionState[],
   catalog: ProviderCatalogEntry[],
   canRequest = false,
+  available: Array<{ uniqueKey: string; displayName: string }> = [],
 ): string {
   const byProvider = new Map(state.map((s) => [s.provider, s]));
   const lines = catalog.map((c) => {
@@ -37,6 +41,15 @@ export function connectionsBlock(
     if (s.status === 'connected' && !curated.has(s.provider)) {
       lines.push(`  ✅ ${s.provider} (connected) — generic API access via ${s.provider}_call_api`);
     }
+  }
+  // Enabled-in-Nango integrations beyond the catalog: connectable RIGHT NOW via request_connection.
+  // Auth-mode variants of curated providers (github-app, github-pat) fold into their base line.
+  const shown = new Set([...curated, ...state.map((s) => s.provider)]);
+  for (const i of available) {
+    if (shown.has(i.uniqueKey) || [...curated].some((p) => i.uniqueKey.startsWith(`${p}-`))) continue;
+    shown.add(i.uniqueKey);
+    const label = i.displayName && i.displayName !== i.uniqueKey ? ` (${i.displayName})` : '';
+    lines.push(`  ⚪ ${i.uniqueKey}${label} (not connected; enabled in Nango) — request_connection "${i.uniqueKey}" to connect`);
   }
   const intro = canRequest
     ? 'External services you can reach. Connected ones expose tools you can call now. For one that is NOT ' +

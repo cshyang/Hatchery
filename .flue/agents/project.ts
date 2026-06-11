@@ -3,6 +3,7 @@ import { bindingByProject, parseAgentInstanceId, DEFAULT_MODEL, resolveModel } f
 import { loadPersona, personaTools } from '../../src/project/persona';
 import { assignSoul, SOUL_NAME_PREFIX } from '../../src/project/souls';
 import { resolveTarget, sendFinalToConversationTarget, sendToConversationTarget } from '../../src/project/conversations';
+import { fetchChannelHistory, fetchThreadReplies, renderThreadBackscroll } from '../../src/slack/threads';
 import { withToolLogging, withReplyReminder } from '../../src/agent/observability';
 import { skillTools, loadSkillCatalog, loadActiveSkillBody, skillBody, type D1Like } from '../../src/skills/repository';
 import { reminderTools } from '../../src/agent/reminders';
@@ -157,6 +158,32 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
 
   // Bot token (for resolving Slack user names via users.info). Same ref the reply path uses.
   const botToken = env[binding.transportTokenRef] as string | undefined;
+
+  // Real Slack history on demand — the channel's actual past (conversations.history/replies),
+  // not the bot's own transcript, which only holds turns the bot saw. This is what makes
+  // "what happened in this channel?" and "catch up on this thread" answerable.
+  const readChannelHistory = defineTool({
+    name: 'read_channel_history',
+    description:
+      'Read the REAL recent message history of this Slack channel (or one thread) straight from Slack — ' +
+      'includes messages from before you joined and threads you never participated in. Your own transcript ' +
+      'search only covers turns you were part of; use THIS when asked about channel activity, to catch up on ' +
+      'a thread, or whenever someone references a discussion you do not remember. Pass threadTs (a thread ' +
+      "root ts) to read that thread; omit it for the channel's recent top-level messages.",
+    parameters: Type.Object({
+      threadTs: Type.Optional(Type.String({ description: 'Thread root ts (e.g. "1718000000.123456") to read one thread instead of the channel.' })),
+      limit: Type.Optional(Type.Number({ description: 'Max channel messages to fetch (default 50, cap 200). Ignored for threads.' })),
+    }),
+    async execute({ threadTs, limit }) {
+      if (!botToken) throw new Error('No Slack token available for history reads.');
+      const channel = binding.externalSpaceId;
+      const messages = threadTs
+        ? await fetchThreadReplies(botToken, channel, String(threadTs))
+        : await fetchChannelHistory(botToken, channel, { limit: Number(limit) || 50 });
+      const rendered = renderThreadBackscroll(messages, binding.transportBotId, { maxChars: 12_000 });
+      return rendered || 'No messages found (empty history, or the bot lacks access to this channel).';
+    },
+  });
   const model = resolveModel(binding.model);
   const codingRunnerUrl = typeof env.CODING_RUNNER_URL === 'string' ? env.CODING_RUNNER_URL : '';
   const workbenchRunnerToken = typeof env.WORKBENCH_RUNNER_TOKEN === 'string' ? env.WORKBENCH_RUNNER_TOKEN : '';
@@ -209,6 +236,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     ...(db ? memoryTools(db, projectId) : []),
     ...peopleTools(db, projectId),
     ...userTools(db, botToken),
+    readChannelHistory,
     ...(db ? searchTools(db, projectId) : []),
     ...codeModeTools({ db, loader: dynamicWorkerLoader, projectId, env }),
     ...workspaceTools({ db, sandbox, projectId, env }),

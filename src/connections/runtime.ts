@@ -12,6 +12,21 @@ import type { D1Like } from '../skills/repository';
 import { proposeAgentRouteTool } from '../agent-runs/route-tools';
 import { assignCodingRunTool } from '../agent-runs/assign-tool';
 import { parseNangoIntegrationKeys } from './integrations';
+import { listIntegrations, type NangoIntegration } from '../providers/nango';
+
+// Enabled-integrations cache: the connections block wants the live Nango list every turn, but one
+// HTTP round-trip per turn in the DO initializer is real latency. Cache per secret key for a few
+// minutes; on fetch failure serve the last good list (stale beats blank).
+const INTEGRATIONS_TTL_MS = 5 * 60_000;
+const integrationsCache = new Map<string, { at: number; list: NangoIntegration[] }>();
+
+async function enabledIntegrations(secretKey: string, fetchList: typeof listIntegrations): Promise<NangoIntegration[]> {
+  const hit = integrationsCache.get(secretKey);
+  if (hit && Date.now() - hit.at < INTEGRATIONS_TTL_MS) return hit.list;
+  const list = await fetchList({ secretKey }).catch(() => hit?.list ?? []);
+  integrationsCache.set(secretKey, { at: Date.now(), list });
+  return list;
+}
 
 export interface ConnectionRuntime {
   tools: ToolDefinition[];
@@ -29,6 +44,8 @@ export async function buildConnectionRuntime(args: {
   binding: Binding;
   env: Record<string, unknown>;
   projectId: string;
+  /** Injectable for tests; defaults to the live Nango list (cached a few minutes). */
+  listIntegrationsImpl?: typeof listIntegrations;
 }): Promise<ConnectionRuntime> {
   const { db, binding, env, projectId } = args;
   const specs = await loadConnectionSpecs(db, binding).catch(() => binding.connections ?? []);
@@ -51,9 +68,12 @@ export async function buildConnectionRuntime(args: {
   const autoActivate = env.ROUTES_AUTO_ACTIVATE === 'true'; // dogfood flag: skip the admin counter-signature on routes
   const routeTools = db ? [proposeAgentRouteTool({ db, projectId, autoActivate }), assignCodingRunTool({ db, projectId })] : [];
 
+  const available = canRequestConnect ? await enabledIntegrations(nangoSecretKey, args.listIntegrationsImpl ?? listIntegrations) : [];
+
   return {
     tools: [...nangoTools, ...routeTools, ...connectionTools(state, secrets, nangoSecretKey || undefined)],
-    connectionsBlock: state.length || canRequestConnect ? renderConnectionsBlock(state, PROVIDER_CATALOG, canRequestConnect) : null,
+    connectionsBlock:
+      state.length || canRequestConnect ? renderConnectionsBlock(state, PROVIDER_CATALOG, canRequestConnect, available) : null,
     state,
     canRequestConnections: canRequestConnect,
     providerCatalog: PROVIDER_CATALOG,

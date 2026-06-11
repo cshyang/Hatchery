@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { flue } from '@flue/runtime/routing';
 import { dispatch, observe } from '@flue/runtime';
 import { verifySlackSignature } from '../src/slack/verify';
-import { fetchThreadReplies, renderThreadBackscroll } from '../src/slack/threads';
+import { fetchChannelHistory, fetchThreadReplies, renderThreadBackscroll } from '../src/slack/threads';
 import { mentionsBot, stripMention } from '../src/slack/mentions';
 import { postWorkingAck } from '../src/slack/ack';
 import { createSlackTurnActivity, handleObservedSlackActivity } from '../src/slack/activity';
@@ -686,6 +686,17 @@ app.post('/slack/events', async (c) => {
         senderId: msg.senderId,
         ...(threadReplies.length
           ? { threadContext: renderThreadBackscroll(threadReplies, binding.transportBotId, { excludeTs: ev.ts }) }
+          : {}),
+        // Top-level turns get channel backscroll the same way threaded turns get the thread —
+        // recent room history straight from Slack (including messages from before the bot joined),
+        // so "what's been going on here" isn't answered from the bot's own transcript alone.
+        ...(!ev.thread_ts && token
+          ? await fetchChannelHistory(token, ev.channel)
+              .then((h) => {
+                const rendered = renderThreadBackscroll(h, binding.transportBotId, { excludeTs: ev.ts });
+                return rendered ? { channelContext: rendered } : {};
+              })
+              .catch(() => ({}))
           : {}),
         // Metadata only (id/name/mimetype/size) — bytes stay in Slack until the model
         // pulls a file into the sandbox with workspace_load_slack_file.

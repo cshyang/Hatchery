@@ -153,6 +153,9 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
       `• "threadContext" field (when present) → the earlier messages in this Slack thread, oldest first, ` +
       `with your own past replies marked "you (earlier)". Read it as the conversation so far before you ` +
       `answer the "message"; it is context, not a new request, and you've already seen it.\n` +
+      `• "channelContext" field (when present) → the channel's recent messages (real Slack history, may ` +
+      `predate you). Same rules as threadContext: background, not a request. For more or older history, ` +
+      `call read_channel_history.\n` +
       `• "kind":"heartbeat" → a scheduled/self-triggered run, nobody waiting. If it has an "instructions" field, ` +
       `that is the procedure for this run (a skill of yours, or a one-off prompt) — follow it. Else address the ` +
       `"topic" if one is given. If there is nothing meaningful to do, stay silent. When you do post, omit conversationId.\n` +
