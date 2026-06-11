@@ -16,6 +16,7 @@ import {
   slackEventId,
   slackUrlVerification,
   slackUserMessageEvent,
+  isDirectMessage,
 } from '../src/slack/events';
 import { bindings, bindingBySlack, bindingByProject, agentInstanceId, autoCreateBinding } from '../src/project/bindings';
 import { loadPersona } from '../src/project/persona';
@@ -25,7 +26,16 @@ import { upsertConversationTarget, loadAgentEpoch, bumpAgentEpoch, conversationS
 import { claimEvent, type KVLike } from '../src/shared/idempotency';
 import type { D1Like } from '../src/skills/repository';
 import { agentPostedInConversation, logMessage, projectsWithUnreflected, projectsWithUnreflectedRuns, takeUnreflectedBatch, takeUnreflectedRuns, buildReflectInstructions } from '../src/knowledge/reflection';
-import { isReviewCandidate, projectsToReview, takeReviewBatch, buildReviewInstructions } from '../src/review';
+import {
+  isTrivialChatter,
+  projectsToReview,
+  takeReviewBatch,
+  buildReviewInstructions,
+  buildOverhearInstructions,
+  overheardLine,
+  loadReviewState,
+  answerBudgetFree,
+} from '../src/review';
 import { upsertConnection, loadConnections, connectedNotice, disconnectedNotice, disableConnectionByRef } from '../src/connections/repository';
 import { verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook, fetchProviderApiSpec } from '../src/providers/nango';
 import { isCatalogProvider } from '../src/connections/catalog';
@@ -755,20 +765,22 @@ app.post('/slack/events', async (c) => {
     binding,
   );
 
-  // Engage when @mentioned anywhere, or when replying in a thread the bot already posted in.
-  // Participation is checked against Slack authorship AND our own transcript: persona posts
-  // (chat:write.customize) are bot_message subtypes with NO `user` field, so the Slack-side
-  // check stops matching the moment a channel hatches — the D1 record is authorship we own.
+  // Engage when @mentioned, when replying in a thread the bot already posted in, or when this is a
+  // DM (a 1:1 is implicitly addressed to the agent — every non-trivial message is for it, no
+  // @mention needed). Participation is checked against Slack authorship AND our own transcript:
+  // persona posts (chat:write.customize) are bot_message subtypes with NO `user` field, so the
+  // Slack-side check stops matching the moment a channel hatches — the D1 record is authorship we own.
+  const isDm = isDirectMessage(ev);
   const engaged =
     mentionsBot(text, binding.transportBotId) ||
+    (isDm && !isTrivialChatter(text)) ||
     threadReplies.some((m) => m.user === binding.transportBotId) ||
     (!!ev.thread_ts && !!c.env.DB && (await agentPostedInConversation(c.env.DB, msg.projectId, msg.conversationId).catch(() => false)));
 
   if (!engaged) {
     // Ambient ingestion (Layer 2): remember every message in a bound channel even when we won't
     // answer it, so the cross-thread index (Layer 3) and proactive review (Layer 4) can see the
-    // whole room — not just threads the bot was pulled into. NO dispatch, NO LLM turn; the agent
-    // stays silent. Flagged ambient:true so nightly REM keeps consolidating ONLY bot conversations.
+    // whole room. Flagged ambient:true so nightly REM keeps consolidating ONLY bot conversations.
     // Deduped against Slack's at-least-once retries with the same KV claim the engaged path uses
     // (an event is ambient XOR engaged, so the two claim sites never fire on the same event_id).
     if (c.env.DB && (await claimEvent(c.env.SLACK_EVENTS, eventId))) {
@@ -779,10 +791,29 @@ app.post('/slack/events', async (c) => {
         role: 'user',
         text: msg.text,
         ambient: true,
-        // Layer 4 wake signal: does this overheard message look like an answerable question?
-        // Cheap regex at ingest; the review sweep's gate reads the flag, no LLM until then.
-        reviewCandidate: isReviewCandidate(msg.text),
       }).catch(() => {});
+
+      // Overhearing (Layer 4 v2): in an opt-in channel, evaluate this fresh message instantly and
+      // capability-judged — reply only if the agent can genuinely help (the turn decides via
+      // proactive_reply, which enforces venue + budget + REVIEW_MODE). The daily answer budget is
+      // checked HERE, before spending any LLM judgment: once it's exhausted the agent stops
+      // evaluating entirely (no proactive spend) until the UTC reset. @mentions always still engage.
+      const overhearing = binding.overhear === true && !isDm && !isTrivialChatter(msg.text);
+      if (overhearing) {
+        const state = await loadReviewState(c.env.DB, msg.projectId).catch(() => null);
+        if (answerBudgetFree(state, Date.now())) {
+          await dispatch({
+            agent: 'project',
+            // Fresh instance keyed to the message — no thread/session carryover, idempotent per message.
+            id: agentInstanceId(msg.projectId, `overhear:${ev.ts}`),
+            input: {
+              kind: 'heartbeat',
+              now: new Date().toISOString(),
+              instructions: buildOverhearInstructions(overheardLine(msg.conversationId, msg.senderId, msg.text)),
+            },
+          }).catch((e) => console.log(`[overhear] dispatch failed project=${msg.projectId}: ${e instanceof Error ? e.message : 'error'}`));
+        }
+      }
     }
     return c.body(null, 200);
   }

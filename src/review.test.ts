@@ -4,12 +4,16 @@ import assert from 'node:assert/strict';
 import { createTestRunner } from './shared/test-utils';
 import {
   isReviewCandidate,
+  isTrivialChatter,
   answerBudgetFree,
+  answerBudgetRemaining,
   observationBudgetFree,
   recordProactivePost,
   projectsToReview,
   takeReviewBatch,
   buildReviewInstructions,
+  buildOverhearInstructions,
+  overheardLine,
   threadTargetFromConversationId,
   proactiveReplyTool,
   ANSWER_BUDGET_PER_DAY,
@@ -40,9 +44,39 @@ test('isReviewCandidate: chatter, fragments, and person-addressed messages are s
   assert.ok(!isReviewCandidate('shipping the fix now, will update the thread'));
 });
 
+test('isTrivialChatter: bare acks/emoji/empty are trivial; substance is not (no question-shape needed)', () => {
+  assert.ok(isTrivialChatter(''));
+  assert.ok(isTrivialChatter('   '));
+  assert.ok(isTrivialChatter('thanks!'));
+  assert.ok(isTrivialChatter('👍'));
+  assert.ok(isTrivialChatter('lol'));
+  // Statements (no '?') are NOT trivial — overhearing judges capability, not grammar.
+  assert.ok(!isTrivialChatter('the deploy is broken on main'));
+  assert.ok(!isTrivialChatter('delete the Koomi project from Linear'));
+});
+
+// ── Overhearing instructions ─────────────────────────────────────────────────────────────────────
+
+test('buildOverhearInstructions: capability-forward framing carries the message + its conversationId', () => {
+  const line = overheardLine('slack:T1:C1:9.0', 'U_ALICE', 'can you create a Linear issue for this bug');
+  const instr = buildOverhearInstructions(line);
+  assert.match(instr, /OVERHEARING/);
+  assert.match(instr, /GENUINELY help/);
+  assert.match(instr, /proactive_reply/);
+  assert.match(instr, /slack:T1:C1:9\.0/);
+  assert.match(instr, /U_ALICE: can you create a Linear issue/);
+});
+
 // ── Budgets ─────────────────────────────────────────────────────────────────────────────────────
 
 const NOW = Date.parse('2026-06-11T10:00:00Z');
+
+test('answerBudgetRemaining: full when empty/new day, counts down, floors at 0', () => {
+  assert.equal(answerBudgetRemaining(null, NOW), ANSWER_BUDGET_PER_DAY);
+  assert.equal(answerBudgetRemaining({ answer_posts_today: 99, answer_posts_day: '2026-06-10' }, NOW), ANSWER_BUDGET_PER_DAY);
+  assert.equal(answerBudgetRemaining({ answer_posts_today: 2, answer_posts_day: '2026-06-11' }, NOW), ANSWER_BUDGET_PER_DAY - 2);
+  assert.equal(answerBudgetRemaining({ answer_posts_today: 99, answer_posts_day: '2026-06-11' }, NOW), 0);
+});
 
 test('answerBudgetFree: free when empty, free on a new day, spent at the cap', () => {
   assert.ok(answerBudgetFree(null, NOW));
@@ -285,6 +319,28 @@ test('proactive_reply: live mode posts into the thread and consumes the right bu
 
   await tool.execute({ conversationId: 'slack:T1:C1:9.0', kind: 'observation', text: 'related thread' });
   assert.equal(db.stateFor('P1').last_observation_post_at, NOW);
+});
+
+test('proactive_reply: the budget-spending reply tacks on a quiet "last for today" heads-up', async () => {
+  const db = new FakeD1();
+  const s = db.stateFor('P1');
+  s.answer_posts_today = ANSWER_BUDGET_PER_DAY - 1; // this post spends the last unit
+  s.answer_posts_day = '2026-06-11';
+  const sent: Array<{ target: ConversationTarget; text: string }> = [];
+  const tool = makeTool(db, 'live', sent);
+  await tool.execute({ conversationId: 'slack:T1:C1:9.0', kind: 'answer', text: 'the runbook is at /docs' });
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /the runbook is at \/docs/);
+  assert.match(sent[0].text, /last unprompted reply for today/);
+  assert.match(sent[0].text, /@mention me/);
+});
+
+test('proactive_reply: a non-final reply carries no heads-up', async () => {
+  const db = new FakeD1();
+  const sent: Array<{ target: ConversationTarget; text: string }> = [];
+  const tool = makeTool(db, 'live', sent); // empty budget state → plenty remaining
+  await tool.execute({ conversationId: 'slack:T1:C1:9.0', kind: 'answer', text: 'plain answer' });
+  assert.equal(sent[0].text, 'plain answer');
 });
 
 test('proactive_reply: refuses when the budget is spent', async () => {

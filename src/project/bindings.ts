@@ -127,6 +127,11 @@ export interface Binding {
    *  token (like transportTokenRef) + non-secret config (e.g. the pinned repo). The secret is set
    *  with `wrangler secret put`; a connection is "connected" once its secret is present. */
   connections?: ConnectionSpec[];
+  /** Overhearing (Layer 4 v2): when true, the agent proactively evaluates every non-trivial
+   *  message in this channel and replies (budgeted) when it can genuinely help, without an
+   *  @mention. Default false — mention-only. The agent flips this via set_overhearing when asked.
+   *  Irrelevant in DMs (always engaged). */
+  overhear?: boolean;
   status: 'active' | 'disabled';
 }
 
@@ -206,6 +211,7 @@ export interface BindingRecord {
   transportBotId: string;
   transportTokenRef: string;
   model?: string;
+  overhear?: boolean;
   status: 'active' | 'disabled';
 }
 
@@ -223,6 +229,7 @@ export function bindingRecordToBinding(r: BindingRecord): Binding {
     // connections come from the D1 connections table (loadConnectionSpecs merges over this seed);
     // an auto-created channel starts with none until an operator/self-serve flow adds them.
     connections: undefined,
+    overhear: r.overhear,
     status: r.status,
   };
 }
@@ -230,12 +237,12 @@ export function bindingRecordToBinding(r: BindingRecord): Binding {
 /** Live binding rows. Pass a projectId to filter to one; omit for all. Metadata only — never a token. */
 export async function loadBindings(db: D1Like, projectId?: string): Promise<BindingRecord[]> {
   const cols =
-    'SELECT project_id, external_account_id, external_space_id, transport_bot_id, transport_token_ref, model, status FROM bindings';
+    'SELECT project_id, external_account_id, external_space_id, transport_bot_id, transport_token_ref, model, overhear, status FROM bindings';
   const sql = projectId ? `${cols} WHERE project_id=?` : cols;
   const stmt = projectId ? db.prepare(sql).bind(projectId) : db.prepare(sql).bind();
   const { results } = await stmt.all<{
     project_id: string; external_account_id: string; external_space_id: string;
-    transport_bot_id: string; transport_token_ref: string; model: string | null; status: string;
+    transport_bot_id: string; transport_token_ref: string; model: string | null; overhear: number | null; status: string;
   }>();
   return (results ?? []).map((r) => ({
     projectId: r.project_id,
@@ -245,8 +252,18 @@ export async function loadBindings(db: D1Like, projectId?: string): Promise<Bind
     transportBotId: r.transport_bot_id,
     transportTokenRef: r.transport_token_ref,
     model: r.model ?? undefined,
+    overhear: r.overhear === 1,
     status: r.status === 'disabled' ? 'disabled' : 'active',
   }));
+}
+
+/** Flip a channel's overhearing mode. The agent calls this (via set_overhearing) when a user asks
+ *  it to start/stop chiming in unprompted on a channel — self-service, no redeploy. */
+export async function setBindingOverhear(db: D1Like, projectId: string, on: boolean): Promise<void> {
+  await db
+    .prepare('UPDATE bindings SET overhear=?, updated_at=? WHERE project_id=?')
+    .bind(on ? 1 : 0, Date.now(), projectId)
+    .run();
 }
 
 export interface AutoCreateBindingInput {

@@ -10,6 +10,7 @@ import {
   loadBindings,
   upsertBinding,
   autoCreateBinding,
+  setBindingOverhear,
   bindingRecordToBinding,
   bindingBySlack,
   bindingByProject,
@@ -40,6 +41,13 @@ class FakeD1 implements D1Like {
     };
   }
   #mutate(sql: string, a: unknown[]) {
+    if (sql.startsWith('UPDATE bindings SET overhear')) {
+      // setBindingOverhear: [overhear, updated_at, project_id]
+      const [overhear, updatedAt, projectId] = a;
+      const row = this.rows.find((r) => r.project_id === projectId);
+      if (row) Object.assign(row, { overhear, updated_at: updatedAt });
+      return;
+    }
     if (!sql.startsWith('INSERT INTO bindings')) return;
     // Both inserts share the same 11-bind column order:
     // [project_id, 'slack', account, space, bot, tokenRef, model, status, created_by, created_at, updated_at]
@@ -95,6 +103,25 @@ test('autoCreateBinding is race-safe: a second call for the same channel is a no
   await autoCreateBinding(db, args);
   const rows = await loadBindings(db, 'C_DUP');
   assert.equal(rows.length, 1, 'exactly one row after two creates');
+});
+
+test('overhear defaults off, setBindingOverhear flips it, and loadBindings reads it back', async () => {
+  const db = new FakeD1();
+  await autoCreateBinding(db, { teamId: 'T', channelId: 'C_OH', transportBotId: 'U', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT' });
+  assert.equal((await loadBindings(db, 'C_OH'))[0].overhear, false, 'defaults off');
+
+  await setBindingOverhear(db, 'C_OH', true);
+  assert.equal((await loadBindings(db, 'C_OH'))[0].overhear, true, 'turned on');
+
+  await setBindingOverhear(db, 'C_OH', false);
+  assert.equal((await loadBindings(db, 'C_OH'))[0].overhear, false, 'turned back off');
+});
+
+test('bindingRecordToBinding carries overhear through', () => {
+  assert.equal(bindingRecordToBinding({
+    projectId: 'C_X', provider: 'slack', externalAccountId: 'T', externalSpaceId: 'C_X',
+    transportBotId: 'U', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT', overhear: true, status: 'active',
+  }).overhear, true);
 });
 
 test('bindingRecordToBinding maps a D1 row to the Binding shape the app consumes', async () => {

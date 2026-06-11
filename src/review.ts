@@ -38,6 +38,14 @@ export function isReviewCandidate(text: string): boolean {
   return t.includes('?') || QUESTION_OPENER_RE.test(t) || ASK_PHRASE_RE.test(t);
 }
 
+/** Not worth a turn: empty, or a bare ack/emoji ("thanks", "👍"). Used to skip free in DMs and
+ *  overhearing channels before spending an LLM judgment — unlike isReviewCandidate, it does NOT
+ *  require question-shape (overhearing judges capability, not grammar). */
+export function isTrivialChatter(text: string): boolean {
+  const t = (text ?? '').trim();
+  return t.length === 0 || CHATTER_RE.test(t);
+}
+
 // ── Budgets ─────────────────────────────────────────────────────────────────────────────────────
 
 export interface ReviewState {
@@ -52,8 +60,14 @@ export function utcDay(now: number): string {
 }
 
 export function answerBudgetFree(state: Pick<ReviewState, 'answer_posts_today' | 'answer_posts_day'> | null, now: number): boolean {
-  if (!state || state.answer_posts_day !== utcDay(now)) return true; // new day resets the counter
-  return state.answer_posts_today < ANSWER_BUDGET_PER_DAY;
+  return answerBudgetRemaining(state, now) > 0;
+}
+
+/** Proactive answers left today (resets at UTC midnight). Drives both the ingest-time "stop
+ *  evaluating to save money" gate and the "last reply for today" heads-up. */
+export function answerBudgetRemaining(state: Pick<ReviewState, 'answer_posts_today' | 'answer_posts_day'> | null, now: number): number {
+  if (!state || state.answer_posts_day !== utcDay(now)) return ANSWER_BUDGET_PER_DAY; // new day resets the counter
+  return Math.max(0, ANSWER_BUDGET_PER_DAY - state.answer_posts_today);
 }
 
 export function observationBudgetFree(state: Pick<ReviewState, 'last_observation_post_at'> | null, now: number): boolean {
@@ -207,6 +221,36 @@ export function buildReviewInstructions(batch: string): string {
   return REVIEW_PROCEDURE + batch;
 }
 
+// Instant overhearing (Layer 4 v2): one fresh message just arrived in an opt-in channel — not
+// addressed to you. Capability-forward (does my toolset let me genuinely help?), not the batch
+// sweep's silence-first framing, but still restrained: most overheard messages aren't for you.
+const OVERHEAR_PROCEDURE =
+  `OVERHEARING (background — you are watching this channel, but this message was NOT addressed to you). ` +
+  `Decide in one pass whether to chime in.\n\n` +
+  `Reply ONLY if you can GENUINELY help with your actual capabilities — e.g.:\n` +
+  `• a question you can really answer (from a connected tool, channel history/memory you can cite, or ` +
+  `objective technical knowledge you are certain of);\n` +
+  `• a task you have the tools to do (e.g. create/look up a Linear issue, search Gmail) — for anything ` +
+  `destructive or significant, OFFER and ask for confirmation, never just do it;\n` +
+  `• a strong, specific link to earlier discussion — verify with search_channel/read_channel_history first.\n\n` +
+  `Stay SILENT for: chatter, opinions and open-ended "what do you all think", anything addressed to a ` +
+  `specific person or team, or anything you would only be vaguely/plausibly helpful on. When unsure, stay silent.\n\n` +
+  `To speak: call proactive_reply once with this message's conversationId, kind "answer" (answering/ ` +
+  `offering) or "observation" (a link or follow-up), and 1–2 sentences. It threads onto the message. ` +
+  `Do NOT use reply_to_conversation or update_status here. If it doesn't clear the bar, call no tool and ` +
+  `produce no output — that is the common, correct outcome.\n\n` +
+  `MESSAGE:\n`;
+
+/** Format a single overheard message the way takeReviewBatch formats a batch line, so the turn's
+ *  proactive_reply call can reference its conversationId. */
+export function overheardLine(conversationId: string, senderId: string, text: string): string {
+  return `(${conversationId}) ${senderId}: ${text}`;
+}
+
+export function buildOverhearInstructions(line: string): string {
+  return OVERHEAR_PROCEDURE + line;
+}
+
 // ── proactive_reply: the only mouth Layer 4 has ─────────────────────────────────────────────────
 
 /** Build the thread target for a conversationId ("slack:<team>:<channel>:<ts>") from TRUSTED
@@ -281,7 +325,15 @@ export function proactiveReplyTool(deps: ProactiveReplyDeps): ToolDefinition {
         return 'not posted: the 24h observation budget is spent. Stay silent.';
       }
 
-      await deps.send(target, body);
+      // When this answer spends the last of the daily budget, tack a quiet heads-up onto it so the
+      // silence that follows (the agent stops evaluating overheard messages until reset) isn't a
+      // mystery. @mentions always still work — that's the escape hatch we point them to.
+      const lastOfDay = k === 'answer' && answerBudgetRemaining(state, now) <= 1;
+      const outgoing = lastOfDay
+        ? `${body}\n\n_(That's my last unprompted reply for today — @mention me anytime and I'll always answer.)_`
+        : body;
+
+      await deps.send(target, outgoing);
       await recordProactivePost(deps.db, deps.projectId, k, now);
       log(`[review] proactive ${k} posted project=${deps.projectId} conv=${conv}`);
       return `posted (${k}) into the thread.`;

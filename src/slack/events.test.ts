@@ -7,6 +7,7 @@ import {
   slackEventId,
   slackUrlVerification,
   slackUserMessageEvent,
+  isDirectMessage,
   type SlackEventEnvelope,
 } from './events';
 
@@ -43,6 +44,27 @@ test('slackUserMessageEvent: accepts plain user messages with required routing f
     user: 'U1',
     text: '<@Ubot> hi',
   });
+});
+
+test('slackUserMessageEvent: carries channel_type, and isDirectMessage detects DMs', async () => {
+  const dm = slackUserMessageEvent({
+    type: 'event_callback',
+    event: { type: 'message', channel: 'D1', ts: '1.0', user: 'U1', text: 'hi', channel_type: 'im' },
+  });
+  assert.equal(dm?.channelType, 'im');
+  assert.ok(isDirectMessage(dm!));
+
+  const inChannel = slackUserMessageEvent({
+    type: 'event_callback',
+    event: { type: 'message', channel: 'C1', ts: '1.0', user: 'U1', text: 'hi', channel_type: 'channel' },
+  });
+  assert.equal(inChannel?.channelType, 'channel');
+  assert.ok(!isDirectMessage(inChannel!));
+
+  // No channel_type present → not a DM (no channelType key emitted).
+  const bare = slackUserMessageEvent({ type: 'event_callback', event: { type: 'message', channel: 'C1', ts: '1.0', user: 'U1', text: 'hi' } });
+  assert.equal(bare?.channelType, undefined);
+  assert.ok(!isDirectMessage(bare!));
 });
 
 test('slackUserMessageEvent: ignores non-user messages and incomplete messages', async () => {

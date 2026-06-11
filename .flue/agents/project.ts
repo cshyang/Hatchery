@@ -1,6 +1,7 @@
 import { createAgent, defineTool, Type, type AgentRuntimeConfig, type ToolDefinition } from '@flue/runtime';
 import { bindingByProject, parseAgentInstanceId, DEFAULT_MODEL, resolveModel } from '../../src/project/bindings';
 import { loadPersona, personaTools } from '../../src/project/persona';
+import { overhearingTools } from '../../src/project/overhearing';
 import { assignSoul, SOUL_NAME_PREFIX } from '../../src/project/souls';
 import { resolveTarget, sendFinalToConversationTarget, sendToConversationTarget } from '../../src/project/conversations';
 import { fetchChannelHistory, fetchThreadReplies, renderThreadBackscroll } from '../../src/slack/threads';
@@ -239,6 +240,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     setupStatusTool({ db, binding, projectId, env }),
     ...(db ? skillTools(db, projectId) : []),
     ...personaTools(db, projectId),
+    ...overhearingTools(db, projectId),
     ...reminderTools(db, projectId),
     ...(db ? memoryTools(db, projectId) : []),
     ...peopleTools(db, projectId),

@@ -12,6 +12,7 @@ export interface SlackEventEnvelope {
     thread_ts?: string;
     user?: string;
     text?: string;
+    channel_type?: string;
     files?: Array<{ id?: string; name?: string; mimetype?: string; size?: number }>;
   };
 }
@@ -31,7 +32,14 @@ export interface SlackUserMessageEvent {
   thread_ts?: string;
   user?: string;
   text?: string;
+  /** Slack channel type: 'im' (DM), 'channel', 'group', 'mpim'. Drives DM-vs-channel engagement. */
+  channelType?: string;
   files?: SlackFileMeta[];
+}
+
+/** A DM (1:1) is always engaged — every non-trivial message is for the agent, no @mention needed. */
+export function isDirectMessage(ev: Pick<SlackUserMessageEvent, 'channelType'>): boolean {
+  return ev.channelType === 'im';
 }
 
 export function parseSlackEventEnvelope(raw: string): SlackEventEnvelope {
@@ -68,6 +76,7 @@ export function slackUserMessageEvent(body: SlackEventEnvelope): SlackUserMessag
     thread_ts: ev.thread_ts,
     user: ev.user,
     text: ev.text,
+    ...(ev.channel_type ? { channelType: ev.channel_type } : {}),
     ...(files.length ? { files } : {}),
   };
 }
