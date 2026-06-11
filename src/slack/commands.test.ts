@@ -163,17 +163,17 @@ test('unknown subcommand points at help', async () => {
 test('status reports project, default model, and unconfigured wiring', async () => {
   const out = await runSlashCommand('status', { binding, env: {} });
   assert.ok(out.includes('proj-1'));
-  assert.ok(out.includes('zai/glm-5.1'));
+  assert.ok(out.includes('openrouter/xiaomi/mimo-v2.5-pro'));
   assert.ok(out.includes('default'));
   assert.ok(/Linear ingress.*not configured/.test(out));
   assert.ok(/Trigger\.dev runner.*not configured/.test(out));
 });
 
 test('status reports a pinned model and configured wiring', async () => {
-  const pinned: Binding = { ...binding, model: 'zai/glm-4.6' };
+  const pinned: Binding = { ...binding, model: 'openrouter/moonshotai/kimi-k2.6' };
   const env = { LINEAR_WEBHOOK_SECRET: 's', TRIGGER_SECRET_KEY: 's', NANGO_SECRET_KEY: 's' };
   const out = await runSlashCommand('status', { binding: pinned, env });
-  assert.ok(out.includes('zai/glm-4.6'));
+  assert.ok(out.includes('openrouter/moonshotai/kimi-k2.6'));
   assert.ok(out.includes('pinned'));
   assert.ok(!/Linear ingress.*not configured/.test(out));
 });

@@ -11,18 +11,19 @@ import type { D1Like } from '../skills/repository';
 export type SandboxMode = 'virtual' | 'cloudflare-sandbox' | 'daytona' | 'e2b';
 
 /** Default model when a binding doesn't pin one. */
-export const DEFAULT_MODEL = 'zai/glm-5.1';
+export const DEFAULT_MODEL = 'openrouter/xiaomi/mimo-v2.5-pro';
 
 // Models whose context window we've VALIDATED — either present in pi-ai's catalog (Flue resolves
-// the window from there, e.g. zai/glm-5.1 → 202800) or registered via registerProvider() in app.ts.
+// the window from there, e.g. openrouter/xiaomi/mimo-v2.5-pro → 1048576) or registered via
+// registerProvider() in app.ts.
 // A model OUTSIDE this set may resolve to an unknown (0) window, which silently disables Flue's
 // THRESHOLD compaction and leaves only reactive overflow-recovery (compaction after the provider
 // rejects for length — late and lossy). This guard turns that silent cliff into a loud log line.
 // Keep it in sync with the models you actually run; when adding an uncatalogued model (e.g. a
 // specific OpenRouter id), also register its window via registerProvider so the window is KNOWN.
 export const VALIDATED_MODELS: ReadonlySet<string> = new Set([
-  'zai/glm-5.1', // catalog contextWindow 202800
-  'zai/glm-4.6', // catalog contextWindow 200000
+  'openrouter/xiaomi/mimo-v2.5-pro', // catalog contextWindow 1048576
+  'openrouter/moonshotai/kimi-k2.6', // catalog contextWindow 262144 — upgrade path if mimo fumbles tools
 ]);
 
 // Warn at most once per model id per process — visibility in `wrangler tail` without per-turn spam
@@ -102,7 +103,7 @@ export interface Binding {
    *  Consumed by provider-specific engagement logic (e.g. Slack @mention parsing). From auth.test. */
   transportBotId: string;
   projectId: string;
-  /** Model id passed to Flue (e.g. "zai/glm-5.1"). Optional → DEFAULT_MODEL. Per-project so a
+  /** Model id passed to Flue (e.g. "openrouter/xiaomi/mimo-v2.5-pro"). Optional → DEFAULT_MODEL. Per-project so a
    *  project can run a different model; the prompt itself is model-agnostic. NOTE: a non-default
    *  model also needs Flue provider routing + creds to actually run — this field is just the seam. */
   model?: string;
@@ -136,7 +137,6 @@ export const bindings: readonly Binding[] = [
     externalSpaceId: 'C0B6VFMVCUW', // the bound channel id
     transportBotId: 'U0B6UB2E5HT', // hatch_agent's bot user id (auth.test)
     projectId: 'demo',
-    model: 'zai/glm-5.1',
     sandboxMode: 'virtual',
     transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
     // GitHub connection (ADR 0003). Shows as "not connected" until the GITHUB_PAT_ECODARK Worker

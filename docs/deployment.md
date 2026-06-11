@@ -17,8 +17,9 @@ merge, or production deploy authority.
 - `npm install`
 - Cloudflare account + Wrangler auth.
 - Trigger.dev project and secret key.
-- Z.ai key for the Worker agent (Flue runs `zai/glm-5.1` inside the DO).
-- OpenRouter key for the Pi runner (both kits run through OpenRouter; the runner no longer uses Z.ai).
+- OpenRouter key — the ONE model credential: the Worker agent (Flue runs
+  `openrouter/xiaomi/mimo-v2.5-pro` inside the DO) and the Pi runner (both kits) all route
+  through OpenRouter.
 - Slack, Nango, Linear, and GitHub access for the workspace you are wiring.
 
 ## Cloudflare Setup
@@ -69,7 +70,7 @@ Everything account-specific lives in `.env.deploy` and is pushed as Worker secre
 
 | Secret / var | Worker | Required for |
 |---|---|---|
-| `ZAI_API_KEY` | hatchery | model turns inside the Cloudflare agent |
+| `OPENROUTER_API_KEY` | hatchery | model turns inside the Cloudflare agent |
 | `HEARTBEAT_TOKEN` | hatchery | guards the internal cron-fired routes |
 | `SLACK_SIGNING_SECRET` | hatchery | `/slack/events` verification |
 | `SLACK_BOT_TOKEN_DEFAULT` | hatchery | Slack replies |

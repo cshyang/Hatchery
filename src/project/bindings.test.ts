@@ -152,12 +152,12 @@ test('upsertBinding overwrites an existing row (DO UPDATE), preserving project_i
   await upsertBinding(db, {
     projectId: 'C_UP', provider: 'slack', externalAccountId: 'T0B6VB415TQ', externalSpaceId: 'C_UP',
     transportBotId: 'U2_CHANGED', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
-    model: 'zai/glm-5.1', status: 'active',
+    model: 'openrouter/xiaomi/mimo-v2.5-pro', status: 'active',
   });
   const rows = await loadBindings(db, 'C_UP');
   assert.equal(rows.length, 1, 'still one row (overwrite, not insert)');
   assert.equal(rows[0].transportBotId, 'U2_CHANGED', 'DO UPDATE overwrote the bot id');
-  assert.equal(rows[0].model, 'zai/glm-5.1', 'DO UPDATE applied the model pin');
+  assert.equal(rows[0].model, 'openrouter/xiaomi/mimo-v2.5-pro', 'DO UPDATE applied the model pin');
 });
 
 // Capture console.warn for the duration of a call, then restore it.
@@ -170,9 +170,9 @@ function captureWarn(): { lines: string[]; restore: () => void } {
 
 test('resolveModel: a validated model passes through with no warning', async () => {
   const w = captureWarn();
-  const out = resolveModel('zai/glm-5.1');
+  const out = resolveModel('openrouter/xiaomi/mimo-v2.5-pro');
   w.restore();
-  assert.equal(out, 'zai/glm-5.1');
+  assert.equal(out, 'openrouter/xiaomi/mimo-v2.5-pro');
   assert.equal(w.lines.length, 0, 'no warning for a catalogued/validated model');
 });
 
@@ -203,7 +203,7 @@ test('resolveModel: warns at most once per model id (no per-turn log spam)', asy
 });
 
 test('assertValidModel: validated and unpinned (null/undefined/empty) all pass', async () => {
-  assert.doesNotThrow(() => assertValidModel('zai/glm-5.1'));
+  assert.doesNotThrow(() => assertValidModel('openrouter/xiaomi/mimo-v2.5-pro'));
   assert.doesNotThrow(() => assertValidModel(undefined));
   assert.doesNotThrow(() => assertValidModel(null));
   assert.doesNotThrow(() => assertValidModel(''));
@@ -231,11 +231,11 @@ test('upsertBinding accepts a validated model pin', async () => {
   await upsertBinding(db, {
     projectId: 'C_OK', provider: 'slack', externalAccountId: 'T0B6VB415TQ', externalSpaceId: 'C_OK',
     transportBotId: 'U', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
-    model: 'zai/glm-4.6', status: 'active',
+    model: 'openrouter/moonshotai/kimi-k2.6', status: 'active',
   });
   const rows = await loadBindings(db, 'C_OK');
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].model, 'zai/glm-4.6', 'validated pin is stored');
+  assert.equal(rows[0].model, 'openrouter/moonshotai/kimi-k2.6', 'validated pin is stored');
 });
 
 test('autoCreateBinding rejects an unvalidated model pin', async () => {
