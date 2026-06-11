@@ -5,6 +5,7 @@ import type { D1Like } from '../skills/repository';
 import { claimRunForDispatch, createAgentRun, findLatestRunByLinearIssue, getActiveAgentRunByBranch, getAgentRun, getAgentRunById, handleAgentRunCallback, updateAgentRun } from './repository';
 import { buildRunnerDispatch, claimAndDispatchRun, DISPATCH_MAX_ATTEMPTS, dispatchConcurrencyKey, reconcileAgentRuns, resolveDispatchGithubToken } from './dispatch';
 import { adHocIdentifier, assignCodingRunTool } from './assign-tool';
+import { checkAgentRunsTool } from './status-tool';
 import type { AgentRun } from './repository';
 
 const { test, run } = createTestRunner();
@@ -92,6 +93,21 @@ class FakeD1 implements D1Like {
                 const rows = db.agentRuns
                   .filter((r) => r.status === 'running' && liveness(r) < Number(cutoff))
                   .sort((a, b) => Number(a.updated_at) - Number(b.updated_at))
+                  .slice(0, Number(limit));
+                return { results: rows as T[] };
+              }
+              if (query.includes('(linear_identifier=? OR linear_issue_id=?)')) {
+                const [projectId, identifier, issueId] = values;
+                const rows = db.agentRuns
+                  .filter((r) => r.project_id === projectId && (r.linear_identifier === identifier || r.linear_issue_id === issueId))
+                  .sort((a, b) => Number(b.created_at) - Number(a.created_at));
+                return { results: rows as T[] };
+              }
+              if (query.includes('WHERE project_id=? ORDER BY created_at DESC')) {
+                const [projectId, limit] = values;
+                const rows = db.agentRuns
+                  .filter((r) => r.project_id === projectId)
+                  .sort((a, b) => Number(b.created_at) - Number(a.created_at))
                   .slice(0, Number(limit));
                 return { results: rows as T[] };
               }
@@ -1008,6 +1024,53 @@ test('assign_coding_run: ad-hoc work gets a generated branch-safe identifier', a
   assert.match(out.issueKey, /^A-tidy-the-readme-badges-[a-z0-9]+$/);
   assert.equal(out.branch, `harness/${out.issueKey}`);
   assert.equal(adHocIdentifier('!!!', 99), `A-task-${(99).toString(36).slice(-4)}`, 'all-punctuation titles fall back to "task"');
+});
+
+// ── check_agent_runs (the run-status visibility tool) ───────────────────────────────────────────
+
+const execCheck = (db: FakeD1, input: Record<string, unknown>, nowMs = 1_750_000_000_000) =>
+  (checkAgentRunsTool({ db, projectId: 'P', now: () => nowMs }).execute as (a: unknown) => Promise<string>)(input);
+
+test('check_agent_runs: lists recent runs newest first with receipts, never the dispatch payload', async () => {
+  const db = new FakeD1();
+  db.routes.push(activeRoute());
+  await execAssign(db, { title: 'First', description: 'D' }, 1000);
+  await execAssign(db, { title: 'Second', description: 'D', identifier: 'FRD-2' }, 2000);
+  db.agentRuns[0].created_at = 1000; // createAgentRun stamps wall-clock time; pin the order
+  db.agentRuns[1].created_at = 2000;
+  db.agentRuns[1].status = 'running';
+  db.agentRuns[1].pr_url = 'https://github.com/acme/api/pull/7';
+  db.agentRuns[1].last_heartbeat_at = 2000;
+
+  const out = await execCheck(db, {}, 2000 + 5 * 60_000);
+  const runs = JSON.parse(out) as Array<Record<string, unknown>>;
+  assert.equal(runs.length, 2);
+  assert.equal(runs[0].issueKey, 'FRD-2', 'newest first');
+  assert.equal(runs[0].status, 'running');
+  assert.equal(runs[0].prUrl, 'https://github.com/acme/api/pull/7');
+  assert.equal(runs[0].minutesSinceHeartbeat, 5);
+  assert.equal(runs[1].minutesSinceHeartbeat, null, 'no heartbeat yet → null, not 0');
+  assert.doesNotMatch(out, /dispatchPayload|idempotency|sandbox_id/i, 'model-safe projection only');
+});
+
+test('check_agent_runs: issueKey matches the tracker identifier even when linear_issue_id is a UUID', async () => {
+  const db = new FakeD1();
+  db.routes.push(activeRoute());
+  await execAssign(db, { title: 'T', description: 'D', identifier: 'KOO-71' }, 1000);
+  // Webhook-created runs keep the Linear UUID in linear_issue_id and the key in linear_identifier.
+  db.agentRuns[0].linear_issue_id = 'uuid-123';
+
+  const single = JSON.parse(await execCheck(db, { issueKey: 'KOO-71' })) as Record<string, unknown>;
+  assert.equal(single.issueKey, 'KOO-71');
+  assert.match(await execCheck(db, { issueKey: 'KOO-99' }), /No runs for "KOO-99"/);
+});
+
+test('check_agent_runs: empty project reports plainly and clamps the limit', async () => {
+  const db = new FakeD1();
+  assert.match(await execCheck(db, {}), /No agent runs/);
+  db.routes.push(activeRoute());
+  for (let i = 0; i < 12; i++) await execAssign(db, { title: `T${i}`, description: 'D', identifier: `FRD-${i}` }, 1000 + i);
+  assert.equal((JSON.parse(await execCheck(db, { limit: 50 })) as unknown[]).length, 10, 'limit clamps to 10');
 });
 
 await run();

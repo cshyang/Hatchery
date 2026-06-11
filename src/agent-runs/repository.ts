@@ -432,6 +432,20 @@ export async function getLatestAgentRunByLinearIssue(db: D1Like, projectId: stri
   return row ? rowToAgentRun(row) : null;
 }
 
+/** Latest run for a human issue key like "KOO-71". Matches the tracker identifier OR the raw
+ *  linear_issue_id: assign-tool runs store the key in both columns, webhook runs keep the
+ *  Linear UUID in linear_issue_id and the key in linear_identifier. */
+export async function getLatestAgentRunByIssueKey(db: D1Like, projectId: string, key: string): Promise<AgentRun | null> {
+  const row = await db
+    .prepare(
+      `SELECT ${AGENT_RUN_SELECT}
+         FROM agent_runs WHERE project_id=? AND (linear_identifier=? OR linear_issue_id=?) ORDER BY created_at DESC LIMIT 1`,
+    )
+    .bind(projectId, key, key)
+    .first<AgentRunRow>();
+  return row ? rowToAgentRun(row) : null;
+}
+
 /** Newest run for a Linear issue id, any project (a comment attaches to the run's own project). */
 export async function findLatestRunByLinearIssue(db: D1Like, linearIssueId: string): Promise<AgentRun | null> {
   const row = await db

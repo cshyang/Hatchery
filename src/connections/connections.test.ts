@@ -208,7 +208,7 @@ test('buildConnectionRuntime: exposes self-service connection tools when Nango i
     projectId: 'demo',
     listIntegrationsImpl: async () => [],
   });
-  assert.deepEqual(runtime.tools.map((t) => t.name).sort(), ['assign_coding_run', 'disconnect_connection', 'propose_agent_route', 'request_connection']);
+  assert.deepEqual(runtime.tools.map((t) => t.name).sort(), ['assign_coding_run', 'check_agent_runs', 'disconnect_connection', 'propose_agent_route', 'request_connection']);
   assert.match(runtime.connectionsBlock ?? '', /request_connection/);
 });
 

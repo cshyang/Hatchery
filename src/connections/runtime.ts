@@ -11,6 +11,7 @@ import { PROVIDER_CATALOG, type ProviderCatalogEntry } from './catalog';
 import type { D1Like } from '../skills/repository';
 import { proposeAgentRouteTool } from '../agent-runs/route-tools';
 import { assignCodingRunTool } from '../agent-runs/assign-tool';
+import { checkAgentRunsTool } from '../agent-runs/status-tool';
 import { parseNangoIntegrationKeys } from './integrations';
 import { listIntegrations, type NangoIntegration } from '../providers/nango';
 
@@ -66,7 +67,9 @@ export async function buildConnectionRuntime(args: {
       ? [requestConnectionTool({ nangoSecretKey, projectId, nangoIntegrationKeys }), disconnectConnectionTool({ nangoSecretKey, projectId, db })]
       : [];
   const autoActivate = env.ROUTES_AUTO_ACTIVATE === 'true'; // dogfood flag: skip the admin counter-signature on routes
-  const routeTools = db ? [proposeAgentRouteTool({ db, projectId, autoActivate }), assignCodingRunTool({ db, projectId })] : [];
+  const routeTools = db
+    ? [proposeAgentRouteTool({ db, projectId, autoActivate }), assignCodingRunTool({ db, projectId }), checkAgentRunsTool({ db, projectId })]
+    : [];
 
   const available = canRequestConnect ? await enabledIntegrations(nangoSecretKey, args.listIntegrationsImpl ?? listIntegrations) : [];
 
