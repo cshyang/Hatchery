@@ -373,8 +373,8 @@ test('route proposal accepts the harness kit and rejects unknown kits', async ()
     reason: 'delivery kit route',
   };
 
-  const route = await createAgentRunRoute(db, { ...base, kit: 'harness' }, deps);
-  assert.equal(route.kit, 'harness');
+  const route = await createAgentRunRoute(db, { ...base, kit: 'coding-default' }, deps);
+  assert.equal(route.kit, 'coding-default');
 
   await assert.rejects(
     () => createAgentRunRoute(db, { ...base, kit: 'no-such-kit' }, deps),
@@ -427,7 +427,7 @@ test('propose_agent_route tool creates a pending Pi route only', async () => {
   );
 
   assert.equal(output.status, 'pending');
-  assert.equal(output.kit, 'harness');
+  assert.equal(output.kit, 'coding-default');
   assert.equal(output.runtime, 'pi');
   assert.equal(output.sandboxProvider, 'e2b');
   assert.equal(db.routes.length, 1);

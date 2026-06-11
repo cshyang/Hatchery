@@ -948,7 +948,7 @@ test('dispatchConcurrencyKey: same identifier in different projects never collid
 const activeRoute = (over: Row = {}): Row => ({
   id: 'route-1', project_id: 'P', provider: 'linear', external_key: 'EDK', trigger_type: 'state',
   trigger_value: 'Run Agent', github_owner: 'acme', github_repo: 'api', base_branch: 'main',
-  kit: 'harness', runtime: 'pi', sandbox_provider: 'e2b', priority: 0, status: 'active',
+  kit: 'coding-default', runtime: 'pi', sandbox_provider: 'e2b', priority: 0, status: 'active',
   created_by_type: 'admin', created_by: 'admin-1', reason: 'r', created_at: 1, updated_at: 1,
   activated_by: 'admin-1', activated_at: 1, disabled_by: null, disabled_at: null, ...over,
 });
@@ -973,7 +973,7 @@ test('assign_coding_run: queues a run on the route grant, and the stored payload
   }));
   assert.equal(out.issueKey, 'FRD-9');
   assert.equal(out.branch, 'harness/FRD-9');
-  assert.equal(out.kit, 'harness');
+  assert.equal(out.kit, 'coding-default');
   assert.equal(out.status, 'queued');
   assert.equal(db.agentRuns.length, 1);
   const row = db.agentRuns[0];
@@ -982,7 +982,7 @@ test('assign_coding_run: queues a run on the route grant, and the stored payload
   // Producer↔contract assertion: the row dispatches through the SAME mapper the cron uses.
   const run = (await getAgentRunById(db, String(row.id)))!;
   const dispatch = buildRunnerDispatch(run, { githubToken: 'tok', runnerToken: 'rt', hatcheryPublicUrl: 'https://h.dev' });
-  assert.equal(dispatch.kit, 'harness');
+  assert.equal(dispatch.kit, 'coding-default');
   assert.equal(dispatch.issue?.identifier, 'FRD-9');
   assert.match(dispatch.issue?.description ?? '', /bun test/);
   assert.equal(dispatchConcurrencyKey(dispatch), 'P:FRD-9', 'serializes with any Linear-triggered run for the same issue');

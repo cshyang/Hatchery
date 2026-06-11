@@ -98,7 +98,7 @@ The Trigger runner is configured by [trigger.config.ts](../trigger.config.ts). I
 
 - `git`
 - `@earendil-works/pi-coding-agent` (+ capability extensions)
-- `agent-kits/coding-default` and `agent-kits/harness`
+- `agent-kits/coding-default`
 
 Deploys happen automatically: a push to `main` touching `trigger/**`, `trigger.config.ts`,
 `agent-kits/**`, or `package-lock.json` runs [.github/workflows/deploy-runner.yml](../.github/workflows/deploy-runner.yml)
@@ -108,7 +108,7 @@ Set Trigger.dev environment variables for the task (dashboard → Environment Va
 
 | Secret / var | Required for |
 |---|---|
-| `OPENROUTER_API_KEY` | all Pi model calls — both kits route through OpenRouter |
+| `OPENROUTER_API_KEY` | all Pi model calls — kits route through OpenRouter |
 | `KIT_ROOT` | optional override when packaged kit lookup differs |
 | `HATCHERY_PI_RUNTIME` | optional; `rpc` switches the pi channel, default is `cli` — runtime var, no redeploy needed |
 
@@ -117,16 +117,10 @@ not need to be standing Trigger.dev secrets.
 
 ### Agent kits
 
-The dispatch payload's `kit` field (from the agent-run route config, default `harness`)
+The dispatch payload's `kit` field (from the agent-run route config, default `coding-default`)
 selects the execution path inside `run-coding-task`:
 
-- `harness` — the default: a conductor parent drives plan → review → implement →
-  verify through the `gated_dispatch` extension. Deterministic issue-scoped branch `harness/<id>`
-  (re-dispatch resumes from the committed artifact ledger + `handoff.json` cursor), draft PRs,
-  per-issue serialization via Trigger `concurrencyKey`, model tiers from the kit's
-  `.harness/defaults.yaml`. The runner owns push + PR so the GitHub token never enters the agent env.
-- `coding-default` — legacy single Pi agent, run-scoped branch `hatchery/<slug>-<uuid8>`, regular
-  PR. Scheduled for deletion once the harness kit has real-run mileage.
+- `coding-default` — a single Pi agent, run-scoped branch `hatchery/<slug>-<uuid8>`, regular PR.
 
 Kit names are validated at route creation against `SUPPORTED_KITS` in `src/agent-runs/events.ts` —
 unknown kits fail fast in the control plane instead of inside a Trigger run.

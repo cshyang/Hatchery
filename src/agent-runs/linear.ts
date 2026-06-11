@@ -6,7 +6,7 @@ import { continuationBlockReason, createContinuationRun } from './continuation';
 
 const WEBHOOK_MAX_AGE_MS = 60_000;
 const DEFAULT_RUN_STATE_NAME = 'Run Agent';
-const DEFAULT_KIT = 'harness';
+const DEFAULT_KIT = 'coding-default';
 const DEFAULT_RUNTIME = 'pi';
 const DEFAULT_SANDBOX_PROVIDER = 'e2b';
 

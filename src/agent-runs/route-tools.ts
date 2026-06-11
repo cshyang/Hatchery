@@ -34,7 +34,7 @@ export function proposeAgentRouteTool(args: { db: D1Like; projectId: string; cre
         githubOwner: input.githubOwner,
         githubRepo: input.githubRepo,
         baseBranch: input.baseBranch,
-        kit: input.kit ?? 'harness',
+        kit: input.kit ?? 'coding-default',
         runtime: 'pi',
         sandboxProvider: 'e2b',
         reason: input.reason,

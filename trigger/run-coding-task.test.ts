@@ -1,7 +1,7 @@
 // run-coding-task pure-helper tests — run: npx tsx trigger/run-coding-task.test.ts
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../src/shared/test-utils';
-import { runBranchName, harnessBranchName, harnessIssueId, stripFrontmatter, conductorModelFromDefaults, extensionEntriesFromManifest, extensionFlags, parsePiStream, piRuntime } from './run-coding-task';
+import { runBranchName, extensionEntriesFromManifest, extensionFlags, parsePiStream, piRuntime } from './run-coding-task';
 
 const { test, run } = createTestRunner();
 
@@ -137,40 +137,4 @@ test('piRuntime: defaults to cli (the prod-proven path)', () => {
 test('piRuntime: opts into rpc only on exact HATCHERY_PI_RUNTIME=rpc', () => {
   assert.equal(piRuntime({ HATCHERY_PI_RUNTIME: 'rpc' }), 'rpc');
 });
-
-
-// ---------------------------------------------------------------------------
-// harness-kit helpers
-// ---------------------------------------------------------------------------
-
-test('harnessBranchName: deterministic issue-scoped branch, case preserved', () => {
-  const d = { targetBranch: null, issue: { id: '1', identifier: 'FRD-12', url: '', title: 't', description: null }, runId: 'r1' };
-  assert.equal(harnessBranchName(d), 'harness/FRD-12');
-  assert.equal(harnessBranchName(d), harnessBranchName(d)); // same issue -> same branch, no randomness
-});
-
-test('harnessBranchName: continuation returns targetBranch as-is', () => {
-  assert.equal(harnessBranchName({ targetBranch: 'harness/FRD-12', issue: null, runId: 'r1' }), 'harness/FRD-12');
-});
-
-test('harnessBranchName: falls back to runId; unsafe chars sanitized', () => {
-  assert.equal(harnessBranchName({ targetBranch: null, issue: null, runId: 'run 7/x' }), 'harness/run-7-x');
-});
-
-test('harnessIssueId: sanitizes but preserves case and dots', () => {
-  assert.equal(harnessIssueId({ issue: { id: '1', identifier: 'ABC-9.1', url: '', title: '', description: null }, runId: 'r' }), 'ABC-9.1');
-  assert.equal(harnessIssueId({ issue: null, runId: 'a b!c' }), 'a-b-c');
-});
-
-test('stripFrontmatter: removes a leading YAML block only', () => {
-  assert.equal(stripFrontmatter('---\nname: x\ntools: a, b\n---\nBody line\n'), 'Body line\n');
-  assert.equal(stripFrontmatter('No frontmatter here\n---\nnot a block\n'), 'No frontmatter here\n---\nnot a block\n');
-});
-
-test('conductorModelFromDefaults: reads the conductor tier, ignores comments', () => {
-  const yaml = 'models:\n  conductor:  anthropic/claude-opus-4.8  # parent orchestrator\n  gate: deepseek/deepseek-v4-pro\n';
-  assert.equal(conductorModelFromDefaults(yaml), 'anthropic/claude-opus-4.8');
-  assert.equal(conductorModelFromDefaults('models:\n  gate: x\n'), undefined);
-});
-
 await run();
