@@ -1,5 +1,5 @@
 import { postMessage as defaultPostMessage, type SlackPostOptions } from './post';
-import type { Persona } from '../project/persona';
+import { personaIdentity, type Persona } from '../project/persona';
 
 // The instant, deterministic "working" acknowledgement. Posted from the gateway into the reply's
 // thread the moment we engage, so a person never stares at silence while the agent turn spins up.
@@ -73,7 +73,7 @@ export async function postWorkingAck(
   const postMessage = deps.postMessage ?? defaultPostMessage;
   const log = deps.log ?? console.log;
   const timeoutMs = deps.timeoutMs ?? ACK_POST_TIMEOUT_MS;
-  const identity = persona ? { username: persona.name, ...(persona.iconEmoji ? { iconEmoji: persona.iconEmoji } : {}) } : undefined;
+  const identity = persona ? personaIdentity(persona) : undefined;
 
   // .catch on the post itself (not a try/catch around the race) so a rejection AFTER the timeout has
   // already won can't surface as an unhandled rejection.
