@@ -85,6 +85,7 @@ Everything account-specific lives in `.env.deploy` and is pushed as Worker secre
 | `HATCHERY_PUBLIC_URL` | hatchery | public callback origin for Trigger.dev |
 | `RUNNER_GITHUB_PAT_TEMP` | hatchery | temporary dogfood GitHub token sent to the runner |
 | `GITHUB_SELF_TOKEN` | hatchery | optional; capability-request issues on Hatchery's own repo (see Self-Improvement Loop) |
+| `ROUTES_AUTO_ACTIVATE` | hatchery | optional; `true` auto-activates proposed agent-run routes (single-tenant dogfood — skips the admin counter-signature; repo allowlist still enforced). Leave unset for multi-tenant. |
 | `WORKBENCH_RUNNER_TOKEN`, `CODING_RUNNER_URL` | hatchery | optional source-change workbench runner |
 
 `RUNNER_GITHUB_PAT_TEMP` is a stopgap. Production should replace it with a GitHub App installation
@@ -188,8 +189,8 @@ After deploy:
 1. Mention the bot in a Slack channel so the project/channel binding is created.
 2. Ask the bot for setup status.
 3. Connect GitHub and Linear through Nango from Slack.
-4. Create a pending Linear route with `propose_agent_route`.
-5. Activate it through the guarded admin route:
+4. Create a route with `propose_agent_route`. With `ROUTES_AUTO_ACTIVATE=true` (dogfood) it goes
+   live immediately and step 5 is skipped; otherwise it is pending until an admin activates it:
 
 ```bash
 curl -X POST \

@@ -48,7 +48,8 @@ export async function buildConnectionRuntime(args: {
     canRequestConnect && db
       ? [requestConnectionTool({ nangoSecretKey, projectId, nangoIntegrationKeys }), disconnectConnectionTool({ nangoSecretKey, projectId, db })]
       : [];
-  const routeTools = db ? [proposeAgentRouteTool({ db, projectId }), assignCodingRunTool({ db, projectId })] : [];
+  const autoActivate = env.ROUTES_AUTO_ACTIVATE === 'true'; // dogfood flag: skip the admin counter-signature on routes
+  const routeTools = db ? [proposeAgentRouteTool({ db, projectId, autoActivate }), assignCodingRunTool({ db, projectId })] : [];
 
   return {
     tools: [...nangoTools, ...routeTools, ...connectionTools(state, secrets, nangoSecretKey || undefined)],
