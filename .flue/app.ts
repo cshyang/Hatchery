@@ -6,6 +6,8 @@ import { fetchChannelHistory, fetchThreadReplies, renderThreadBackscroll } from 
 import { mentionsBot, stripMention } from '../src/slack/mentions';
 import { postWorkingAck } from '../src/slack/ack';
 import { createSlackTurnActivity, handleObservedSlackActivity, reapStaleTurnActivities } from '../src/slack/activity';
+import { claimPendingMessages, findAbsorbingTurn, insertPendingMessage, listStragglerConversations, renderPendingMessages } from '../src/slack/absorb';
+import { addReaction } from '../src/slack/post';
 import { recordSlackConversationFiles } from '../src/slack/file-authorizations';
 import { dispatchSlackTurnWithFallback } from '../src/slack/dispatch';
 import { parseSlashCommandPayload, runSlashCommand } from '../src/slack/commands';
@@ -339,8 +341,77 @@ app.post('/__internal/agent-runs/reconcile', async (c) => {
     console.log(`[activity] reap sweep failed: ${e instanceof Error ? e.message : 'error'}`);
     return 0;
   });
-  return c.json({ ...summary, notifications, reapedTurns });
+  // Burst-absorb safety net: parked messages whose conversation has no live turn to drain
+  // them (post-drain stragglers, or a turn that died holding rows) get one combined turn.
+  const sweptPending = await sweepPendingMessages(db, c.env as Record<string, unknown>).catch((e) => {
+    console.log(`[absorb] pending sweep failed: ${e instanceof Error ? e.message : 'error'}`);
+    return 0;
+  });
+  return c.json({ ...summary, notifications, reapedTurns, sweptPending });
 });
+
+// Burst-absorb sweep (docs/planning/burst-absorb.md). For each conversation holding pending
+// rows past the grace window with NO fresh in-flight turn, dispatch ONE combined turn —
+// gateway-style: fresh ack + receipt + thread backscroll, same rebuild shape as the dead-turn
+// retry above. Claims rows as 'dispatched' so the drain can never double-deliver them.
+async function sweepPendingMessages(db: NonNullable<Env['DB']>, env: Record<string, unknown>): Promise<number> {
+  const stragglers = await listStragglerConversations(db);
+  let swept = 0;
+  for (const { projectId, conversationId } of stragglers) {
+    // A fresh active turn will drain these at reply time — leave them to it.
+    const absorbing = await findAbsorbingTurn(db, projectId, conversationId).catch(() => null);
+    if (absorbing) continue;
+    const binding = await bindingByProject(projectId, db);
+    if (!binding) continue;
+    const target = await resolveTarget(db, binding, projectId, 'default', conversationId);
+    if (!target) continue;
+
+    const pending = await claimPendingMessages(db, projectId, conversationId, 'dispatched');
+    if (pending.length === 0) continue; // raced to empty
+
+    const token = env[binding.transportTokenRef];
+    const tokenStr = typeof token === 'string' && token ? token : undefined;
+    const persona = await loadPersona(db, projectId).catch(() => null);
+    const ackMessageTs = await postWorkingAck({
+      token: tokenStr,
+      channel: target.externalSpaceId,
+      threadTs: target.externalConversationId ?? '', // '' = top-level post (postMessage omits empty thread_ts)
+      persona,
+    });
+    if (ackMessageTs) {
+      await createSlackTurnActivity(db, {
+        projectId,
+        sessionId: `conv:${conversationId}`,
+        conversationId,
+        slackChannelId: target.externalSpaceId,
+        slackThreadTs: target.externalConversationId ?? '',
+        ackMessageTs,
+        transportTokenRef: binding.transportTokenRef,
+      }).catch(() => {});
+    }
+    const threadReplies =
+      tokenStr && target.externalConversationId
+        ? await fetchThreadReplies(tokenStr, target.externalSpaceId, target.externalConversationId).catch(() => [])
+        : [];
+    const epoch = await loadAgentEpoch(db, projectId, conversationId).catch(() => 0);
+
+    await dispatch({
+      agent: 'project',
+      id: agentInstanceId(projectId, conversationScope(conversationId, epoch)),
+      input: {
+        message: pending.length === 1 ? pending[0].text : renderPendingMessages(pending),
+        conversationId,
+        ...(ackMessageTs ? { ackMessageTs } : {}),
+        provider: 'slack',
+        accountId: target.externalAccountId,
+        senderId: pending[pending.length - 1].senderId,
+        ...(threadReplies.length ? { threadContext: renderThreadBackscroll(threadReplies, binding.transportBotId) } : {}),
+      },
+    });
+    swept++;
+  }
+  return swept;
+}
 
 // Nightly REM: the nightly cron in .flue/cloudflare.ts pokes this. The GATE is cheap SQL (projects
 // with messages OR terminal runs past their watermarks) — idle projects never dispatch a
@@ -741,6 +812,38 @@ app.post('/slack/events', async (c) => {
   // persisted message is deduped now, not just dispatch-bound ones.)
   if (!(await claimEvent(c.env.SLACK_EVENTS, eventId))) {
     return c.body(null, 200); // duplicate delivery — already handled
+  }
+
+  // Burst-absorb (docs/planning/burst-absorb.md): a FRESH in-flight turn for this conversation
+  // means this message should fold into THAT answer — park it instead of queueing a redundant
+  // turn. The in-flight turn's reply drain (or the reconcile sweep) picks it up. Messages with
+  // files bypass absorb: file authorizations are scoped to the turn that received them. A park
+  // failure falls through to the normal dispatch path — a message is never lost to a D1 hiccup.
+  if (c.env.DB && !ev.files?.length) {
+    const absorbing = await findAbsorbingTurn(c.env.DB, msg.projectId, msg.conversationId).catch(() => null);
+    if (absorbing) {
+      const parked = await insertPendingMessage(c.env.DB, {
+        projectId: msg.projectId,
+        conversationId: msg.conversationId,
+        senderId: msg.senderId,
+        text: msg.text,
+        slackTs: ev.ts,
+      })
+        .then(() => true)
+        .catch(() => false);
+      if (parked) {
+        await logMessage(c.env.DB, {
+          projectId: msg.projectId,
+          conversationId: msg.conversationId,
+          senderId: msg.senderId,
+          role: 'user',
+          text: msg.text,
+        }).catch(() => {});
+        // 👀 instead of a second "On it…": seen, will be answered with the in-flight reply.
+        if (token) c.executionCtx.waitUntil(addReaction(token, ev.channel, ev.ts, 'eyes'));
+        return c.body(null, 200);
+      }
+    }
   }
 
   // Post the deterministic "I'm on it" after the idempotency claim (so retries can't double-post it)

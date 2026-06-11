@@ -82,3 +82,25 @@ export async function editMessage(
   });
   if (!data.ok) throw new Error(`slack chat.update failed: ${data.error ?? 'unknown_error'}`);
 }
+
+// Best-effort emoji reaction (reactions.add). Burst-absorb marks a parked message 👀 so the
+// sender knows it was seen without a second "On it…" ack. Never throws: needs the
+// reactions:write scope, and absorb must keep working (just silently) without it.
+export async function addReaction(token: string, channel: string, ts: string, name: string): Promise<void> {
+  try {
+    const res = await fetch('https://slack.com/api/reactions.add', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ channel, timestamp: ts, name }),
+    });
+    const data = (await res.json()) as SlackApiResponse;
+    if (!data.ok && data.error !== 'already_reacted') {
+      console.log(`[post] reactions.add failed: ${data.error ?? 'unknown_error'}`);
+    }
+  } catch (e) {
+    console.log(`[post] reactions.add failed: ${e instanceof Error ? e.message : 'error'}`);
+  }
+}

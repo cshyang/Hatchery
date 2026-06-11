@@ -4,6 +4,7 @@ import { loadPersona, personaTools } from '../../src/project/persona';
 import { assignSoul, SOUL_NAME_PREFIX } from '../../src/project/souls';
 import { resolveTarget, sendFinalToConversationTarget, sendToConversationTarget } from '../../src/project/conversations';
 import { fetchChannelHistory, fetchThreadReplies, renderThreadBackscroll } from '../../src/slack/threads';
+import { drainNoticeForReply } from '../../src/slack/absorb';
 import { proactiveReplyTool } from '../../src/review';
 import { withToolLogging, withReplyReminder } from '../../src/agent/observability';
 import { skillTools, loadSkillCatalog, loadActiveSkillBody, skillBody, type D1Like } from '../../src/skills/repository';
@@ -107,6 +108,11 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       if (!target) {
         throw new Error(`No reply target found for conversationId "${conv}".`);
       }
+      // Drain-before-post (burst-absorb): messages that arrived mid-turn were parked at the
+      // gateway instead of queued. Hand them back and DON'T post — one revised reply answers
+      // everything. The next call drains empty and posts.
+      const drainNotice = await drainNoticeForReply(db, projectId, conv);
+      if (drainNotice) return drainNotice;
       await sendFinalToConversationTarget(env, target, String(text), {
         db,
         projectId,
