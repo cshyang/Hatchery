@@ -11,8 +11,10 @@ import { assignSoul } from './souls';
 
 export type SandboxMode = 'virtual' | 'cloudflare-sandbox' | 'daytona' | 'e2b';
 
-/** Default model when a binding doesn't pin one. */
-export const DEFAULT_MODEL = 'openrouter/xiaomi/mimo-v2.5-pro';
+/** Default model when a binding doesn't pin one. deepseek-v4-pro since 2026-06-11 (live-probed:
+ *  clean completions + tool calls; 1M ctx) after mimo's intermittent first-token hangs; mimo
+ *  stays validated as the fallback pin. */
+export const DEFAULT_MODEL = 'openrouter/deepseek/deepseek-v4-pro';
 
 // Models whose context window we've VALIDATED — either present in pi-ai's catalog (Flue resolves
 // the window from there, e.g. openrouter/xiaomi/mimo-v2.5-pro → 1048576) or registered via

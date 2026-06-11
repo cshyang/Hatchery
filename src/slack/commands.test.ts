@@ -163,7 +163,7 @@ test('unknown subcommand points at help', async () => {
 test('status reports project, default model, and unconfigured wiring', async () => {
   const out = await runSlashCommand('status', { binding, env: {} });
   assert.ok(out.includes('proj-1'));
-  assert.ok(out.includes('openrouter/xiaomi/mimo-v2.5-pro'));
+  assert.ok(out.includes('openrouter/deepseek/deepseek-v4-pro'));
   assert.ok(out.includes('default'));
   assert.ok(/Linear ingress.*not configured/.test(out));
   assert.ok(/Trigger\.dev runner.*not configured/.test(out));
