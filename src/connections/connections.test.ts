@@ -731,4 +731,22 @@ test('connectionsBlock: a connected provider outside the curated catalog still g
   assert.match(block, /✅ airtable \(connected\) — generic API access via airtable_call_api/);
 });
 
+test('tavily: Worker-secret connection exposes the generic search tool, POST allowed, writes refused', async () => {
+  const TAVILY: ConnectionSpec[] = [{ provider: 'tavily', tokenRef: 'TAVILY_API_KEY', config: {} }];
+  assert.equal(connectionTools(connectionState(TAVILY, {}), {}).length, 0, 'no tool before the key is set');
+
+  const env = { TAVILY_API_KEY: 'tvly-secret' };
+  const creds = resolveConnection(TAVILY, env, 'tavily')!;
+  const tools = connectionTools(connectionState(TAVILY, env), { tavily: creds });
+  const callApi = tools.find((t) => t.name === 'tavily_call_api');
+  assert.ok(callApi, 'tavily gets the generic call tool (no typed tools)');
+  assert.match(String(callApi.description), /POST \/search/, 'crib teaches the search body shape');
+  // get-post policy: search/extract POSTs pass the gate; mutating verbs are refused outright.
+  await assert.rejects(
+    () => (callApi.execute as (a: unknown) => Promise<unknown>)({ method: 'DELETE', path: '/search' }),
+    /blocked for tavily/,
+  );
+  assert.doesNotMatch(JSON.stringify(tools.map((t) => t.description)), /tvly-secret/, 'the key never leaks into tool text');
+});
+
 await run();

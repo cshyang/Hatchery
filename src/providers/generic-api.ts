@@ -53,6 +53,21 @@ export const PROVIDER_API_PROFILES: Record<string, ProviderApiProfile> = {
       );
     },
   },
+  tavily: {
+    provider: 'tavily',
+    baseUrl: 'https://api.tavily.com',
+    auth: (s) => ({ authorization: `Bearer ${s}` }),
+    // Search and extract are POST reads — the get-post default fits exactly; there are no
+    // write endpoints to gate.
+    methodPolicy: 'get-post',
+    crib: () =>
+      'Base: https://api.tavily.com — web search for CURRENT information (your training data is stale; search before ' +
+      'answering questions about recent events, versions, prices, news). ' +
+      'POST /search body {"query":"…","max_results":5,"search_depth":"basic"} — use "advanced" depth only when basic misses; ' +
+      'add {"include_answer":true} for a synthesized answer alongside results. ' +
+      'POST /extract body {"urls":["https://…"]} fetches page content for URLs worth reading in full. ' +
+      'Results carry url/title/content — cite the urls in your reply.',
+  },
   notion: {
     provider: 'notion',
     baseUrl: 'https://api.notion.com',

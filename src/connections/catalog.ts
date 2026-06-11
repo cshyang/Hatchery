@@ -11,6 +11,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   { provider: 'github', summary: 'read issues/code, search (creating issues comes later, with approval)' },
   { provider: 'linear', summary: 'team issue workflow and agent-run trigger routes (route activation needs admin approval)' },
   { provider: 'notion', summary: 'read pages/databases, search (read-only token)' },
+  { provider: 'tavily', summary: 'web search for current information (read-only search API)' },
 ];
 
 // Providers that ship hand-written typed tools as a fallback. For these, the generic call_api tool

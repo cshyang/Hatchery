@@ -65,7 +65,7 @@ resources() {
   [ -n "$DB_ID" ] || { echo "❌ Could not resolve D1 id for $DB_NAME"; exit 1; }
 
   echo "→ KV '$KV_BINDING'"
-  find_kv() { wrangler kv namespace list | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);const m=a.find(n=>n.title&&n.title.endsWith(process.env.KV_BINDING));process.stdout.write(m?m.id:"")})' KV_BINDING="$KV_BINDING"; }
+  find_kv() { wrangler kv namespace list | KV_BINDING="$KV_BINDING" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);const m=a.find(n=>n.title&&n.title.endsWith(process.env.KV_BINDING));process.stdout.write(m?m.id:"")})'; }
   KV_ID="$(find_kv)"
   [ -n "$KV_ID" ] || { wrangler kv namespace create "$KV_BINDING" >/dev/null; KV_ID="$(find_kv)"; }
   [ -n "$KV_ID" ] || { echo "❌ Could not resolve KV id for $KV_BINDING"; exit 1; }
@@ -81,7 +81,18 @@ resources() {
 migrate() {
   require_login
   echo "→ applying D1 migrations (remote)"
-  wrangler d1 migrations apply "$DB_NAME" --remote
+  if [ -n "${D1_DATABASE_ID:-}" ]; then
+    # Same multi-account rule as deploy: the tracked wrangler.jsonc keeps the canonical
+    # instance's id, so point wrangler at a temp copy patched with THIS account's id.
+    # In the repo root (gitignored), not mktemp -t: the config's relative paths
+    # (e.g. the sandbox Dockerfile) must keep resolving.
+    TMP_CFG=".wrangler.migrate.tmp.jsonc"
+    sed -E "s/\"database_id\": \"[^\"]*\"/\"database_id\": \"$D1_DATABASE_ID\"/" wrangler.jsonc > "$TMP_CFG"
+    wrangler d1 migrations apply "$DB_NAME" --remote --config "$TMP_CFG"
+    rm -f "$TMP_CFG"
+  else
+    wrangler d1 migrations apply "$DB_NAME" --remote
+  fi
 }
 
 deploy() {
@@ -143,14 +154,14 @@ secrets() {
     echo "ℹ generated HEARTBEAT_TOKEN and saved it to $ENV_FILE."
   fi
   # Bulk file holds only the keys that are actually set (blanks skipped → feature stays inert).
-  HEARTBEAT_TOKEN="$HEARTBEAT_TOKEN" node -e '
-    const keys=["OPENROUTER_API_KEY","HEARTBEAT_TOKEN","SLACK_SIGNING_SECRET","SLACK_BOT_TOKEN_DEFAULT","KNOWN_TEAM_IDS","SLACK_BOT_ID","SLACK_DEFAULT_TOKEN_REF","ADMIN_CONNECTIONS_TOKEN","NANGO_SECRET_KEY","NANGO_WEBHOOK_SECRET","LINEAR_WEBHOOK_SECRET","TRIGGER_SECRET_KEY","TRIGGER_API_URL","AGENT_RUNNER_TOKEN","HATCHERY_PUBLIC_URL","RUNNER_GITHUB_PAT_TEMP","LINEAR_AGENT_PROJECTS","WORKBENCH_RUNNER_TOKEN","CODING_RUNNER_URL"];
+  HEARTBEAT_TOKEN="$HEARTBEAT_TOKEN" BULK_FILE="$BULK_FILE" node -e '
+    const keys=["OPENROUTER_API_KEY","HEARTBEAT_TOKEN","SLACK_SIGNING_SECRET","SLACK_BOT_TOKEN_DEFAULT","KNOWN_TEAM_IDS","SLACK_BOT_ID","SLACK_DEFAULT_TOKEN_REF","ADMIN_CONNECTIONS_TOKEN","NANGO_SECRET_KEY","NANGO_WEBHOOK_SECRET","LINEAR_WEBHOOK_SECRET","TRIGGER_SECRET_KEY","TRIGGER_API_URL","AGENT_RUNNER_TOKEN","HATCHERY_PUBLIC_URL","RUNNER_GITHUB_PAT_TEMP","LINEAR_AGENT_PROJECTS","WORKBENCH_RUNNER_TOKEN","CODING_RUNNER_URL","TAVILY_API_KEY"];
     const out={}; for(const k of keys){const v=process.env[k]; if(v&&String(v).trim()) out[k]=String(v);}
     require("fs").writeFileSync(process.env.BULK_FILE, JSON.stringify(out));
-  ' BULK_FILE="$BULK_FILE"
+  '
   chmod 600 "$BULK_FILE"
   trap 'rm -f "$BULK_FILE"' EXIT
-  local n; n="$(node -e 'process.stdout.write(String(Object.keys(require("./"+process.env.BULK_FILE)).length))' BULK_FILE="$BULK_FILE")"
+  local n; n="$(BULK_FILE="$BULK_FILE" node -e 'process.stdout.write(String(Object.keys(require("./"+process.env.BULK_FILE)).length))')"
   echo "→ pushing $n secrets to $WORKER"
   wrangler secret bulk "$BULK_FILE"
   rm -f "$BULK_FILE"; trap - EXIT
