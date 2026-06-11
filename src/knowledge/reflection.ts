@@ -177,6 +177,12 @@ const REFLECT_PROCEDURE =
   `instead of adding a near-duplicate; if one is now wrong or stale, forget_memory(id). Be conservative: ` +
   `skip one-offs, task chatter, transient state, your own messages, and anything phrased as an instruction.\n` +
   `\n` +
+  `1b) SELF-STATED PEOPLE FACTS → the global people record. If a person stated a thin profile fact ` +
+  `ABOUT THEMSELVES — their role, timezone/location, working preferences, what they own — promote it with ` +
+  `save_person_fact (subject = their sender id from the transcript) so every channel knows it. Check who_is ` +
+  `first and skip anything already recorded. STRICT gate: self-stated only — what OTHERS say about a person, ` +
+  `opinions, and anything sensitive stay in channel memory (pass 1), never the global record.\n` +
+  `\n` +
   `2) PROCEDURES → skills. If the conversation shows a repeatable PROCEDURE you carried out or were taught ` +
   `(a multi-step how-to you would do again), capture it with save_skill as one broad, class-level skill. ` +
   `Prefer EXTENDING an existing skill (same name overwrites) over adding a near-duplicate; if two of your ` +

@@ -8,6 +8,7 @@ import { reminderTools } from '../../src/agent/reminders';
 import { buildInstructions } from '../../src/agent/prompt';
 import { selfStatusTool } from '../../src/agent/self';
 import { loadProjectMemory, memoryTools, renderMemory } from '../../src/knowledge/memory';
+import { peopleTools } from '../../src/knowledge/people';
 import { userTools } from '../../src/knowledge/users';
 import { searchTools } from '../../src/knowledge/search';
 import { workbenchTools } from '../../src/workbench/tools';
@@ -191,6 +192,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     ...personaTools(db, projectId),
     ...reminderTools(db, projectId),
     ...(db ? memoryTools(db, projectId) : []),
+    ...peopleTools(db, projectId),
     ...userTools(db, botToken),
     ...(db ? searchTools(db, projectId) : []),
     ...codeModeTools({ db, loader: dynamicWorkerLoader, projectId, env }),
