@@ -24,6 +24,11 @@ export const DEFAULT_MODEL = 'openrouter/xiaomi/mimo-v2.5-pro';
 // specific OpenRouter id), also register its window via registerProvider so the window is KNOWN.
 export const VALIDATED_MODELS: ReadonlySet<string> = new Set([
   'openrouter/xiaomi/mimo-v2.5-pro', // catalog contextWindow 1048576
+  // Probed live 2026-06-11 (direct OpenRouter calls): plain completions return clean content (no
+  // reasoning chunks), tool calls produce valid tool_calls — auxiliary reasoning fields ride
+  // ALONGSIDE standard deltas (unlike kimi-k2.6's content:null), which OpenAI-compat parsers
+  // ignore. OpenRouter ctx 1048576. Canary-pinned per binding before becoming a default.
+  'openrouter/deepseek/deepseek-v4-pro',
   // ⚠️ kimi-k2.6 REMOVED from the recommended path (2026-06-11): it is a REASONING model —
   // streams reasoning_details chunks with content:null first — and every live turn died before
   // its first beat (dead-on-arrival; verified by direct OpenRouter probe). Do not pin it until
