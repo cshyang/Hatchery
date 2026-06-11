@@ -385,3 +385,60 @@ function observedSlackActivityEvent(event: FlueEvent): ObservedSlackActivityEven
   }
   return null;
 }
+
+// ── Dead-turn reaper ─────────────────────────────────────────────────────────────────────────────
+// A turn that dies mid-flight (model stream drop, DO eviction) leaves its receipt 'active' forever
+// and the user staring at an eternal "⏳ Working". A live turn updates its row on every stream
+// beat/tool call, so a long-stale active row is unambiguous death. The reaper (riding the */2
+// reconcile tick) marks it failed and edits the receipt into an honest retry prompt.
+
+export const TURN_STALE_MS = 10 * 60_000;
+export const TURN_DIED_TEXT = '⚠️ This turn died unexpectedly — mention me again to retry.';
+
+export interface ReapStaleTurnsDeps {
+  /** Injectable for tests; defaults to the Slack chat.update helper. */
+  editMessage?: typeof editMessage;
+  log?: (message: string) => void;
+  now?: number;
+  staleMs?: number;
+}
+
+export async function reapStaleTurnActivities(
+  db: D1Like,
+  env: Record<string, unknown>,
+  deps: ReapStaleTurnsDeps = {},
+): Promise<number> {
+  const now = deps.now ?? Date.now();
+  const staleMs = deps.staleMs ?? TURN_STALE_MS;
+  const edit = deps.editMessage ?? editMessage;
+  const log = deps.log ?? console.log;
+
+  const { results } = await db
+    .prepare(
+      `SELECT project_id, session_id, slack_channel_id, ack_message_ts, transport_token_ref
+         FROM slack_turn_activity WHERE status='active' AND updated_at < ?`,
+    )
+    .bind(now - staleMs)
+    .all<{ project_id: string; session_id: string; slack_channel_id: string; ack_message_ts: string; transport_token_ref: string }>();
+
+  let reaped = 0;
+  for (const row of results ?? []) {
+    // Mark failed FIRST (guarded on status so a racing live update wins); the Slack edit is
+    // best-effort chrome — a failed edit must never leave the row eternally re-reapable.
+    const res = (await db
+      .prepare(`UPDATE slack_turn_activity SET status='failed', completed_at=?, updated_at=? WHERE project_id=? AND session_id=? AND status='active'`)
+      .bind(now, now, row.project_id, row.session_id)
+      .run()) as { meta?: { changes?: number } };
+    if (!(res?.meta?.changes ?? 0)) continue;
+    reaped++;
+    log(`[activity] reaped dead turn project=${row.project_id} session=${row.session_id}`);
+
+    const token = env[row.transport_token_ref];
+    if (typeof token === 'string' && token && row.ack_message_ts) {
+      await edit(token, row.slack_channel_id, row.ack_message_ts, TURN_DIED_TEXT).catch((e) =>
+        log(`[activity] reaper edit failed: ${e instanceof Error ? e.message : 'error'}`),
+      );
+    }
+  }
+  return reaped;
+}

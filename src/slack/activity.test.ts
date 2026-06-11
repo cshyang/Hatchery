@@ -10,7 +10,10 @@ import {
   loadSlackTurnActivity,
   recordSlackToolActivity,
   renderSlackActivityReceipt,
+  reapStaleTurnActivities,
   shouldPostFinalBelowActivity,
+  TURN_DIED_TEXT,
+  TURN_STALE_MS,
   toolActivityLabel,
 } from './activity';
 
@@ -31,6 +34,10 @@ class FakeD1 implements D1Like {
             return results[0] ?? null;
           },
           async all<T = Row>(): Promise<{ results: T[] }> {
+            if (query.includes("status='active' AND updated_at <")) {
+              const [cutoff] = values as [number];
+              return { results: db.rows.filter((row) => row.status === 'active' && (row.updated_at as number) < cutoff) as T[] };
+            }
             if (query.includes('FROM slack_turn_activity')) {
               const [projectId, sessionId] = values;
               return {
@@ -88,6 +95,13 @@ class FakeD1 implements D1Like {
                   completed_at: completedAt,
                 });
               }
+              return { meta: { changes: 1 } };
+            }
+            if (query.includes("SET status='failed', completed_at=")) {
+              const [completedAt, updatedAt, projectId, sessionId] = values;
+              const row = db.rows.find((item) => item.project_id === projectId && item.session_id === sessionId && item.status === 'active');
+              if (!row) return { meta: { changes: 0 } };
+              Object.assign(row, { status: 'failed', completed_at: completedAt, updated_at: updatedAt });
               return { meta: { changes: 1 } };
             }
             if (query.startsWith('UPDATE slack_turn_activity')) {
@@ -387,6 +401,38 @@ test('Flue observer hides unknown tools and never posts args or results', async 
   assert.doesNotMatch(String(calls[0].body.text), /secret_debug_tool/);
   assert.doesNotMatch(String(calls[0].body.text), /secret-token/);
   assert.doesNotMatch(String(calls[0].body.text), /secret stack trace/);
+});
+
+test('reapStaleTurnActivities: marks long-stale active turns failed and edits the receipt', async () => {
+  const db = new FakeD1();
+  await createSlackTurnActivity(db, input({ now: 0 }));
+  const edits: Array<{ token: string; channel: string; ts: string; text: string }> = [];
+  const logs: string[] = [];
+  const reaped = await reapStaleTurnActivities(db, { SLACK_BOT_TOKEN_DEFAULT: 'xoxb-1' }, {
+    now: TURN_STALE_MS + 1000,
+    editMessage: async (token, channel, ts, text) => { edits.push({ token, channel, ts, text }); },
+    log: (m) => logs.push(m),
+  });
+  assert.equal(reaped, 1);
+  const activity = await loadSlackTurnActivity(db, 'P', 'conv:slack:T:C:100.000');
+  assert.equal(activity?.status, 'failed');
+  assert.equal(edits[0].text, TURN_DIED_TEXT);
+  assert.equal(edits[0].ts, '101.000');
+});
+
+test('reapStaleTurnActivities: leaves fresh and completed turns alone; edit failure still reaps', async () => {
+  const db = new FakeD1();
+  await createSlackTurnActivity(db, input({ now: 1000 }));
+  assert.equal(await reapStaleTurnActivities(db, {}, { now: 2000, editMessage: async () => {} }), 0, 'fresh turn untouched');
+
+  const reaped = await reapStaleTurnActivities(db, { SLACK_BOT_TOKEN_DEFAULT: 'xoxb-1' }, {
+    now: TURN_STALE_MS + 5000,
+    editMessage: async () => { throw new Error('slack down'); },
+    log: () => {},
+  });
+  assert.equal(reaped, 1, 'edit failure does not block the reap');
+  assert.equal((await loadSlackTurnActivity(db, 'P', 'conv:slack:T:C:100.000'))?.status, 'failed');
+  assert.equal(await reapStaleTurnActivities(db, {}, { now: TURN_STALE_MS + 9000, editMessage: async () => {} }), 0, 'already-failed row not re-reaped');
 });
 
 await run();

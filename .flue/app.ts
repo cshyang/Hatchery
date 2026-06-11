@@ -5,7 +5,7 @@ import { verifySlackSignature } from '../src/slack/verify';
 import { fetchChannelHistory, fetchThreadReplies, renderThreadBackscroll } from '../src/slack/threads';
 import { mentionsBot, stripMention } from '../src/slack/mentions';
 import { postWorkingAck } from '../src/slack/ack';
-import { createSlackTurnActivity, handleObservedSlackActivity } from '../src/slack/activity';
+import { createSlackTurnActivity, handleObservedSlackActivity, reapStaleTurnActivities } from '../src/slack/activity';
 import { recordSlackConversationFiles } from '../src/slack/file-authorizations';
 import { dispatchSlackTurnWithFallback } from '../src/slack/dispatch';
 import { parseSlashCommandPayload, runSlashCommand } from '../src/slack/commands';
@@ -330,7 +330,13 @@ app.post('/__internal/agent-runs/reconcile', async (c) => {
     fetch,
   });
   const notifications = await deliverPendingSlackRunNotifications({ db, env: c.env as Record<string, unknown> });
-  return c.json({ ...summary, notifications });
+  // Dead-turn reaper: a receipt stuck 'active' past the stale window is a died turn — mark it
+  // failed and edit the eternal "⏳ Working" into an honest retry prompt. Failure-isolated.
+  const reapedTurns = await reapStaleTurnActivities(db, c.env as Record<string, unknown>).catch((e) => {
+    console.log(`[activity] reap sweep failed: ${e instanceof Error ? e.message : 'error'}`);
+    return 0;
+  });
+  return c.json({ ...summary, notifications, reapedTurns });
 });
 
 // Nightly REM: the nightly cron in .flue/cloudflare.ts pokes this. The GATE is cheap SQL (projects

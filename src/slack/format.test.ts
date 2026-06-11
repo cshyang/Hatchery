@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
-import { chunkSlackText, formatSlackText } from './format';
+import { chunkSlackText, convertMarkdownTables, formatSlackText } from './format';
 
 const { test, run } = createTestRunner();
 
@@ -64,6 +64,34 @@ test('chunkSlackText labels chunks only when requested after final count is know
   assert.equal(chunks.length, 3);
   assert.equal(chunks[0].startsWith('Part 1/3\n\n'), true);
   assert.equal(chunks[2].startsWith('Part 3/3\n\n'), true);
+});
+
+test('convertMarkdownTables: 2-column table becomes *Key:* value lines (header dropped)', () => {
+  const md = ['| Setting | Value |', '| --- | --- |', '| Linear team | KOO (Koomi) |', '| Repo | Calibrax-ai/Crewmate |'].join('\n');
+  assert.equal(convertMarkdownTables(md), '*Linear team:* KOO (Koomi)\n*Repo:* Calibrax-ai/Crewmate');
+});
+
+test('convertMarkdownTables: 3+ columns become an aligned monospace block', () => {
+  const md = ['| Name | Status | Age |', '|---|---|---|', '| Wren | active | 2d |', '| Owl | pending | 19m |'].join('\n');
+  const out = convertMarkdownTables(md);
+  assert.equal(out.startsWith('```'), true);
+  assert.match(out, /Name {2}Status {3}Age/);
+  assert.match(out, /Wren {2}active {3}2d/);
+  assert.equal(out.endsWith('```'), true);
+});
+
+test('convertMarkdownTables: surrounding prose and non-table pipes untouched', () => {
+  const md = 'Before the table\n\n| K | V |\n|---|---|\n| a | b |\n\nthis | is not a table';
+  const out = convertMarkdownTables(md);
+  assert.match(out, /Before the table/);
+  assert.match(out, /\*a:\* b/);
+  assert.match(out, /this \| is not a table/);
+});
+
+test('formatSlackText converts tables but leaves tables inside code fences alone', () => {
+  const fenced = '```\n| raw | table |\n|---|---|\n| x | y |\n```';
+  assert.equal(formatSlackText(fenced), fenced);
+  assert.equal(formatSlackText('| K | V |\n|---|---|\n| **a** | b |'), '*a:* b');
 });
 
 await run();

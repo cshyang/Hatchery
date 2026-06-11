@@ -34,10 +34,51 @@ function formatUnprotected(input: string): string {
     .replace(/\*\*([^*\n](?:.*?[^*\n])?)\*\*/g, (_m, value: string) => `*${value}*`);
 }
 
+const TABLE_SEPARATOR_RE = /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/;
+
+function tableCells(line: string): string[] {
+  const cells = line.split('|').map((c) => c.trim());
+  if (cells.length && cells[0] === '') cells.shift(); // leading boundary pipe
+  if (cells.length && cells[cells.length - 1] === '') cells.pop(); // trailing boundary pipe
+  return cells;
+}
+
+/** Slack renders markdown tables as raw pipes, so the transport adapter translates them — the
+ *  agent stays transport-neutral and writes whatever markdown fits (ADR 0001's seam). Two-column
+ *  tables (the overwhelmingly common key-value case) become `*Key:* value` lines; wider tables
+ *  become an aligned monospace block, which Slack DOES render legibly. Exported for tests. */
+export function convertMarkdownTables(input: string): string {
+  const lines = input.split('\n');
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const isHeader = lines[i].includes('|') && i + 1 < lines.length && TABLE_SEPARATOR_RE.test(lines[i + 1]) && lines[i + 1].includes('-');
+    if (!isHeader) {
+      out.push(lines[i]);
+      continue;
+    }
+    const header = tableCells(lines[i]);
+    const rows: string[][] = [];
+    let j = i + 2;
+    for (; j < lines.length && lines[j].includes('|'); j++) rows.push(tableCells(lines[j]));
+    if (header.length === 2) {
+      // Key-value: the header is structural labeling; the keys themselves carry it. The key cell
+      // gets bolded wholesale, so emphasis markers inside it would only nest badly — drop them.
+      out.push(...rows.map((r) => `*${(r[0] ?? '').replace(/\*/g, '')}:* ${r[1] ?? ''}`));
+    } else {
+      const all = [header, ...rows];
+      const widths = header.map((_, col) => Math.max(...all.map((r) => (r[col] ?? '').length)));
+      const pad = (r: string[]) => widths.map((w, col) => (r[col] ?? '').padEnd(w)).join('  ').trimEnd();
+      out.push('```', pad(header), widths.map((w) => '-'.repeat(w)).join('  '), ...rows.map(pad), '```');
+    }
+    i = j - 1; // resume after the table block
+  }
+  return out.join('\n');
+}
+
 export function formatSlackText(input: string): string {
   const raw = String(input ?? '');
   const { text, tokens } = protect(raw, [/```[\s\S]*?```/g, /`[^`\n]*`/g, /<[^>\n]+>/g]);
-  return restore(formatUnprotected(text), tokens);
+  return restore(formatUnprotected(convertMarkdownTables(text)), tokens);
 }
 
 function splitUnits(input: string): string[] {
