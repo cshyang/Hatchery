@@ -233,6 +233,21 @@ test('provenance is stamped on save', async () => {
   assert.ok(row.created_at > 0 && row.updated_at > 0);
 });
 
+test('body caps: personality is tight (every-turn cost), ordinary skills generous', async () => {
+  const db = new FakeD1();
+  const t = skillTools(db, 'P');
+  // Ordinary skill: fine at personality-breaking size, refused past MAX_BODY.
+  await invoke(t, 'save_skill', { skill_md: mkmd('big-howto', 'x'.repeat(10_000)) });
+  await assert.rejects(invoke(t, 'save_skill', { skill_md: mkmd('big-howto', 'x'.repeat(24_000)) }), /≤ 24000/);
+  // Personality: refused past its tight cap, with the why in the error.
+  await assert.rejects(
+    invoke(t, 'save_skill', { skill_md: mkmd('personality', 'x'.repeat(6_000)) }),
+    /EVERY turn/,
+  );
+  await invoke(t, 'save_skill', { skill_md: mkmd('personality', 'x'.repeat(3_000)) });
+  assert.equal(db.rows.filter((r) => r.name === 'personality').length, 1);
+});
+
 test('skills are project-isolated', async () => {
   const db = new FakeD1();
   await invoke(skillTools(db, 'P1'), 'save_skill', { skill_md: mkmd('alpha') });

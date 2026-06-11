@@ -59,6 +59,11 @@ export function parseSkillFrontmatter(md: string): { name?: string; description?
 
 const SKILL_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const MAX_DESCRIPTION = 1024; // matches the SKILL.md convention; the description is the L1 line
+// Body caps, memory-budget style: ordinary skills load on demand so the cap is generous
+// (a screenful is the GUIDANCE; this is the runaway backstop). `personality` is the
+// exception — its body is injected into EVERY turn's prompt, so it gets a tight budget.
+export const MAX_BODY = 24_000;
+export const MAX_PERSONALITY_BODY = 6_000;
 
 // The markdown body after the frontmatter fence (used to apply a `personality` skill).
 export function skillBody(md: string): string {
@@ -157,6 +162,14 @@ export function skillTools(db: D1Like, projectId: string): ToolDefinition[] {
       assertCanMutateSkill(projectId, name);
       if (description.length > MAX_DESCRIPTION) {
         throw new Error(`description must be ≤ ${MAX_DESCRIPTION} chars (got ${description.length}).`);
+      }
+      const bodyCap = name === 'personality' ? MAX_PERSONALITY_BODY : MAX_BODY;
+      if (md.length > bodyCap) {
+        throw new Error(
+          name === 'personality'
+            ? `personality must be ≤ ${MAX_PERSONALITY_BODY} chars (got ${md.length}) — it rides in EVERY turn's prompt; trim it, the spine and persona are enough.`
+            : `skill must be ≤ ${MAX_BODY} chars (got ${md.length}); split it or tighten the steps.`,
+        );
       }
       const now = Date.now();
       // Re-saving a name reactivates it: state forced back to 'active', archived_at cleared.
