@@ -1,6 +1,7 @@
 import { createAgent, defineTool, Type, type AgentRuntimeConfig, type ToolDefinition } from '@flue/runtime';
 import { bindingByProject, parseAgentInstanceId, DEFAULT_MODEL, resolveModel } from '../../src/project/bindings';
 import { loadPersona, personaTools } from '../../src/project/persona';
+import { assignSoul, SOUL_NAME_PREFIX } from '../../src/project/souls';
 import { resolveTarget, sendFinalToConversationTarget, sendToConversationTarget } from '../../src/project/conversations';
 import { withToolLogging, withReplyReminder } from '../../src/agent/observability';
 import { skillTools, loadSkillCatalog, loadActiveSkillBody, skillBody, type D1Like } from '../../src/skills/repository';
@@ -46,6 +47,16 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     };
   }
 
+  // Persona (structured display identity) resolves FIRST: no `personas` row means the channel has
+  // never hatched — backfill a random pre-authored soul (channels bound before souls shipped get
+  // one here too) so this very turn is already in character. assignSoul no-ops for any channel
+  // with an existing identity; .catch keeps identity a nicety, never a turn-blocker.
+  let persona = db ? await loadPersona(db, projectId).catch(() => null) : null;
+  if (db && !persona) {
+    const assigned = await assignSoul(db, projectId).catch(() => null);
+    if (assigned) persona = await loadPersona(db, projectId).catch(() => null);
+  }
+
   // L1 catalog query — cheap, every turn. .catch keeps a D1 hiccup from breaking the agent.
   const skills = db ? await loadSkillCatalog(db, projectId).catch(() => []) : [];
   // Personality (overwritable): a skill named `personality` defines the agent's role/voice and is
@@ -55,7 +66,9 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     db && skills.some((s) => s.name === 'personality')
       ? await loadActiveSkillBody(db, projectId, 'personality').catch(() => null)
       : null;
-  const catalog = skills.filter((s) => s.name !== 'personality'); // applied above, not load-on-demand
+  // `personality` is applied above (not load-on-demand); `soul-*` are assignment templates, not
+  // channel how-tos — both stay out of the L1 list.
+  const catalog = skills.filter((s) => s.name !== 'personality' && !s.name.startsWith(SOUL_NAME_PREFIX));
 
   // Memory (always-injected, bounded, project-scoped — shared channel facts). NOTE: per-author
   // user memory can't be injected here — Flue's dispatch leaves the initializer blind to the
@@ -65,16 +78,12 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   const projectMem = db ? await loadProjectMemory(db, projectId).catch(() => []) : [];
   const memoryBlock = renderMemory(projectMem);
 
-  // Persona (structured): the display identity fresh Slack posts wear (chat:write.customize).
-  // Set by the set_persona tool at hatch/rewrite; null until hatched → app default name.
-  const persona = db ? await loadPersona(db, projectId).catch(() => null) : null;
-
   const connectionRuntime = await buildConnectionRuntime({ db, binding, env, projectId });
 
   const replyToConversation = defineTool({
     name: 'reply_to_conversation',
     description:
-      "Send your reply to the current conversation. Call this with your final response text; pass conversationId for user-message replies, and ackMessageTs so your reply replaces the 'On it…' note in place.",
+      "Send your reply to the current conversation. Call this with your final response text; pass conversationId for user-message replies, and ackMessageTs so your reply replaces the working note in place.",
     parameters: Type.Object({
       text: Type.String({ description: 'The message to post.' }),
       conversationId: Type.Optional(
@@ -86,7 +95,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       ackMessageTs: Type.Optional(
         Type.String({
           description:
-            "Copy ackMessageTs from the [Dispatch Input] block (alongside conversationId) so your reply edits the 'On it…' note into your answer instead of posting a second message. OMIT for heartbeat/new posts.",
+            "Copy ackMessageTs from the [Dispatch Input] block (alongside conversationId) so your reply edits the working note into your answer instead of posting a second message. OMIT for heartbeat/new posts.",
         }),
       ),
     }),
@@ -118,7 +127,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     description:
       "Update the working note BEFORE slow, multi-step work (several searches/API calls before you can " +
       "answer) to show the person the SPECIFIC step you're on. Pass ackMessageTs so this replaces the generic " +
-      "'On it…' note in place (don't post a duplicate ack). Use up to 3 meaningful phase updates for long turns, " +
+      "working note in place (don't post a duplicate ack). Use up to 3 meaningful phase updates for long turns, " +
       "with human-readable activity like Checking the repo or Running tests; do not list raw tool names or argument dumps. " +
       "Skip it for quick answers and for heartbeat/scheduled runs. Lead with an emoji. This is NOT your " +
       "reply: always send the actual answer via reply_to_conversation.",
@@ -130,7 +139,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       ackMessageTs: Type.Optional(
         Type.String({
           description:
-            "Copy from the [Dispatch Input] block so this note edits the 'On it…' message in place. OMIT for heartbeat/new posts.",
+            "Copy from the [Dispatch Input] block so this note edits the working-note message in place. OMIT for heartbeat/new posts.",
         }),
       ),
     }),

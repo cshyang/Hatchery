@@ -4,7 +4,24 @@ import { personaIdentity, type Persona } from '../project/persona';
 // The instant, deterministic "working" acknowledgement. Posted from the gateway into the reply's
 // thread the moment we engage, so a person never stares at silence while the agent turn spins up.
 // Naming the specific step is the model's job via update_status; this is just the guaranteed baseline.
-export const WORKING_ACK = '👀 On it…';
+// A rotating pool (Claude Code spinner style) so a busy channel doesn't read like a stuck record;
+// every line must telegraph "received, working" at a glance regardless of which one lands.
+export const WORKING_ACKS: readonly string[] = [
+  '👀 On it…',
+  '🐦 Swooping in…',
+  '🔍 Digging in…',
+  '🧠 Pondering…',
+  '🛠️ Tinkering…',
+  '📜 Checking my notes…',
+  '🪶 Ruffling feathers…',
+  '⚙️ Cranking…',
+  '🗺️ Charting a course…',
+  '☕ Brewing an answer…',
+];
+/** A random working ack — the default text for postWorkingAck. */
+export function pickWorkingAck(random: () => number = Math.random): string {
+  return WORKING_ACKS[Math.min(Math.floor(random() * WORKING_ACKS.length), WORKING_ACKS.length - 1)];
+}
 export const SETUP_FAILURE_FALLBACK =
   'I hit an internal error after starting. Try again in a moment; if it repeats, an operator needs to check the logs.';
 
@@ -65,7 +82,7 @@ export interface QueueWorkingAckDeps {
 // dispatches anyway with the reply falling back to a fresh post. Returns undefined with no token too.
 // A redelivery after a slow post is deduped by the already-claimed event_id upstream.
 export async function postWorkingAck(
-  { token, channel, threadTs, text = WORKING_ACK, persona }: PostWorkingAckInput,
+  { token, channel, threadTs, text = pickWorkingAck(), persona }: PostWorkingAckInput,
   deps: PostWorkingAckDeps = {},
 ): Promise<string | undefined> {
   if (!token) return undefined;

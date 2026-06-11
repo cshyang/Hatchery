@@ -16,7 +16,13 @@ const dir = join(dirname(fileURLToPath(import.meta.url)), 'global');
 const projectId = '__global__';
 const esc = (s) => s.replace(/'/g, "''");
 
-const stmts = readdirSync(dir)
+// Flat baseline skills, plus the soul templates (souls/) that assignSoul copies at provision time.
+const files = [
+  ...readdirSync(dir).filter((f) => f.endsWith('.md')),
+  ...readdirSync(join(dir, 'souls')).map((f) => join('souls', f)),
+];
+
+const stmts = files
   .filter((f) => f.endsWith('.md'))
   .sort()
   .map((f) => {

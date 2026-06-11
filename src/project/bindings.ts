@@ -7,6 +7,7 @@
 // never from prompt text or model-supplied arguments.
 
 import type { D1Like } from '../skills/repository';
+import { assignSoul } from './souls';
 
 export type SandboxMode = 'virtual' | 'cloudflare-sandbox' | 'daytona' | 'e2b';
 
@@ -272,6 +273,11 @@ export async function autoCreateBinding(db: D1Like, input: AutoCreateBindingInpu
       now,
     )
     .run();
+  // Give the fresh channel a soul (random pre-authored persona). Failure-isolated: identity is
+  // a nicety; the binding — the agent's ability to function at all — must never ride on it.
+  await assignSoul(db, input.channelId).catch((e) =>
+    console.log(`[souls] assignment failed for ${input.channelId}: ${e instanceof Error ? e.message : 'error'}`),
+  );
 }
 
 /** Operator/admin upsert (full update). Distinct from autoCreateBinding (which never overwrites): this
@@ -297,4 +303,9 @@ export async function upsertBinding(db: D1Like, rec: BindingRecord): Promise<voi
       rec.model ?? null, rec.status, 'admin', now, now,
     )
     .run();
+  // Same soul-on-provision as autoCreateBinding; assignSoul itself no-ops for a channel that
+  // already has an identity, so operator re-upserts never reroll a persona.
+  await assignSoul(db, rec.projectId).catch((e) =>
+    console.log(`[souls] assignment failed for ${rec.projectId}: ${e instanceof Error ? e.message : 'error'}`),
+  );
 }
