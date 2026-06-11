@@ -67,8 +67,8 @@ test('chunkSlackText labels chunks only when requested after final count is know
 });
 
 test('convertMarkdownTables: 2-column table becomes *Key:* value lines (header dropped)', () => {
-  const md = ['| Setting | Value |', '| --- | --- |', '| Linear team | KOO (Koomi) |', '| Repo | Calibrax-ai/Crewmate |'].join('\n');
-  assert.equal(convertMarkdownTables(md), '*Linear team:* KOO (Koomi)\n*Repo:* Calibrax-ai/Crewmate');
+  const md = ['| Setting | Value |', '| --- | --- |', '| Linear team | WID (Widgets) |', '| Repo | acme/widgets |'].join('\n');
+  assert.equal(convertMarkdownTables(md), '*Linear team:* WID (Widgets)\n*Repo:* acme/widgets');
 });
 
 test('convertMarkdownTables: 3+ columns become an aligned monospace block', () => {
