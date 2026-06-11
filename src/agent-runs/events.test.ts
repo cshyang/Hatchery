@@ -427,7 +427,7 @@ test('propose_agent_route tool creates a pending Pi route only', async () => {
   );
 
   assert.equal(output.status, 'pending');
-  assert.equal(output.kit, 'coding-default');
+  assert.equal(output.kit, 'harness');
   assert.equal(output.runtime, 'pi');
   assert.equal(output.sandboxProvider, 'e2b');
   assert.equal(db.routes.length, 1);
@@ -435,6 +435,29 @@ test('propose_agent_route tool creates a pending Pi route only', async () => {
   assert.equal(db.routes[0].runtime, 'pi');
   assert.equal(db.routes[0].sandbox_provider, 'e2b');
   assert.equal(await findActiveAgentRunRoute(db, { provider: 'linear', externalKey: 'EDK', triggerType: 'state', triggerValue: 'Run Agent' }), null);
+});
+
+test('propose_agent_route with autoActivate: route goes live immediately; conflicts fall back to pending', async () => {
+  const db = new FakeD1();
+  db.connections.push({ project_id: 'P', provider: 'linear', status: 'active' });
+  db.connections.push({ project_id: 'P', provider: 'github', status: 'active', config_json: JSON.stringify({ repo: 'acme/repo' }) });
+
+  const tool = proposeAgentRouteTool({ db, projectId: 'P', autoActivate: true });
+  const exec = (tool as { execute: (a: Record<string, unknown>) => Promise<string> }).execute;
+  const base = {
+    provider: 'linear', externalKey: 'EDK', triggerType: 'state', triggerValue: 'Run Agent',
+    githubOwner: 'acme', githubRepo: 'repo', baseBranch: 'main', reason: 'dogfood route',
+  };
+
+  const first = JSON.parse(await exec({ ...base }));
+  assert.equal(first.status, 'active', 'auto-activated without the admin step');
+  const active = await findActiveAgentRunRoute(db, { provider: 'linear', externalKey: 'EDK', triggerType: 'state', triggerValue: 'Run Agent' });
+  assert.equal(active?.id, first.id);
+
+  // Same trigger again → activation conflict → created but pending, proposal does not throw.
+  const second = JSON.parse(await exec({ ...base, reason: 'duplicate' }));
+  assert.equal(second.status, 'pending');
+  assert.match(second.note, /NOT auto-activated/i);
 });
 
 await run();
