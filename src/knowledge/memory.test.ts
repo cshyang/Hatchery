@@ -93,12 +93,14 @@ test('project isolation: a project-A fact is invisible to project B', async () =
 test('full-budget refusal: over-limit save is refused, not inserted', async () => {
   const db = new FakeD1();
   const save = byName(memoryTools(db, 'A'), 'save_memory');
-  const big = (i: number) => 'x'.repeat(580) + i; // ~588 rendered each; 3 fit under 2000, 4th overflows
-  for (let i = 0; i < 3; i++) assert.match(await save.execute({ fact: big(i) }), /^Remembered:/);
+  // ~588 rendered each; fill to one entry below the budget, then the next overflows.
+  const fitting = Math.floor(PROJECT_LIMIT / 588);
+  const big = (i: number) => 'x'.repeat(580) + i;
+  for (let i = 0; i < fitting; i++) assert.match(await save.execute({ fact: big(i) }), /^Remembered:/);
   const refused = await save.execute({ fact: big(99) });
   assert.match(refused, /full/i);
-  assert.equal((await loadProjectMemory(db, 'A')).length, 3, 'no 4th row inserted');
-  assert.equal(PROJECT_LIMIT, 2000);
+  assert.equal((await loadProjectMemory(db, 'A')).length, fitting, 'no overflowing row inserted');
+  assert.equal(PROJECT_LIMIT, 6000); // sized for a 10-20 person team channel
 });
 
 test('duplicate rejection: identical fact saved once', async () => {

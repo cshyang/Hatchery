@@ -25,7 +25,10 @@ import type { D1Like } from '../skills/repository';
 // Budget counts RENDERED size (fact + the `[id] ` prefix + a newline), not raw fact text, so
 // it reflects what actually lands in context. The fixed block header is excluded — it carries
 // the usage % itself, so counting it would be circular; the limit keeps headroom for it.
-export const PROJECT_LIMIT = 2000;
+// Sized for a real team channel: ~2k of project conventions + per-person working facts for
+// 10-20 people (~150 chars each). ~1.5k tokens injected per turn — under 1% of the window.
+// Profile-thin people facts go to the global people record (tool-time), not this budget.
+export const PROJECT_LIMIT = 6000;
 export const PER_ENTRY_MAX = 600; // one saved fact, not an essay
 const ENTRY_OVERHEAD = 8; // rough `[id] ` + newline, so a near-full namespace isn't under-counted
 
