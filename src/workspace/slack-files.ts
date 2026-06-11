@@ -7,8 +7,9 @@
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
 import type { D1Like } from '../skills/repository';
 import { safeJson } from '../shared/bounded';
+import { withWallClock } from '../shared/wall-clock';
 import { isSlackConversationFileAllowed } from '../slack/file-authorizations';
-import { beginWorkspaceOp, type SandboxFactory, type WorkspaceDeps } from './workspace';
+import { beginWorkspaceOp, workspaceLimits, type SandboxFactory, type WorkspaceDeps } from './workspace';
 
 export const WORKSPACE_INPUTS_DIR = '/workspace/inputs';
 
@@ -117,8 +118,10 @@ export async function workspaceLoadSlackFile(
     const name = sanitizeFileName(info.file.name, fileId);
     const path = `${WORKSPACE_INPUTS_DIR}/${fileId}_${name}`;
     const sandbox = deps.sandbox();
-    await sandbox.exec(`mkdir -p ${WORKSPACE_INPUTS_DIR}`);
-    const written = await sandbox.writeFile(path, toBase64(buffer), { encoding: 'base64' });
+    const wallClockMs = workspaceLimits(deps.env).fileOpWallClockMs;
+    // Dead-container RPCs hang forever (see shared/wall-clock.ts) — bound both hops.
+    await withWallClock(sandbox.exec(`mkdir -p ${WORKSPACE_INPUTS_DIR}`), wallClockMs, 'workspace_load_slack_file');
+    const written = await withWallClock(sandbox.writeFile(path, toBase64(buffer), { encoding: 'base64' }), wallClockMs, 'workspace_load_slack_file');
     if (!written.success) return fail('sandbox write failed');
 
     const completedAt = await op.complete({
@@ -183,7 +186,7 @@ export async function workspaceSendFile(
     const target = await deps.resolveTarget(params.conversationId?.trim() ?? '');
     if (!target) return fail(`No Slack target found for conversationId "${params.conversationId ?? ''}".`);
 
-    const read = await deps.sandbox().readFile(path, { encoding: 'base64' });
+    const read = await withWallClock(deps.sandbox().readFile(path, { encoding: 'base64' }), workspaceLimits(deps.env).fileOpWallClockMs, 'workspace_send_file');
     if (!read.success) return fail('sandbox read failed');
     const bytes = fromBase64(read.content ?? '');
     if (bytes.byteLength === 0) return fail('file is empty or unreadable');

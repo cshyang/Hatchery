@@ -1,6 +1,7 @@
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
 import type { D1Like } from '../skills/repository';
 import { byteLength, redactSecrets, safeJson, truncateToBytes } from '../shared/bounded';
+import { withWallClock } from '../shared/wall-clock';
 
 export type WorkspaceOp = 'exec' | 'write_file' | 'read_file' | 'load_slack_file' | 'send_file';
 export type WorkspaceOpStatus = 'running' | 'completed' | 'failed';
@@ -28,6 +29,11 @@ export interface WorkspaceLimits {
   maxOutputBytes: number;
   maxWriteBytes: number;
   maxReadBytes: number;
+  /** Client-side headroom past the container-enforced exec timeout before the
+   *  wall-clock race gives up on the RPC (covers ~6s cold start + transit). */
+  execClientGraceMs: number;
+  /** Wall-clock bound on file-op RPCs, which have no container-side timeout. */
+  fileOpWallClockMs: number;
 }
 
 const DEFAULT_LIMITS: WorkspaceLimits = {
@@ -36,6 +42,8 @@ const DEFAULT_LIMITS: WorkspaceLimits = {
   maxOutputBytes: 20_000,
   maxWriteBytes: 1_000_000,
   maxReadBytes: 1_000_000,
+  execClientGraceMs: 15_000,
+  fileOpWallClockMs: 30_000,
 };
 
 const PREVIEW_BYTES = 2000;
@@ -47,6 +55,8 @@ export function workspaceLimits(env: Record<string, unknown> = {}): WorkspaceLim
     maxOutputBytes: positiveInt(env.WORKSPACE_MAX_OUTPUT_BYTES, DEFAULT_LIMITS.maxOutputBytes),
     maxWriteBytes: positiveInt(env.WORKSPACE_MAX_WRITE_BYTES, DEFAULT_LIMITS.maxWriteBytes),
     maxReadBytes: positiveInt(env.WORKSPACE_MAX_READ_BYTES, DEFAULT_LIMITS.maxReadBytes),
+    execClientGraceMs: positiveInt(env.WORKSPACE_EXEC_CLIENT_GRACE_MS, DEFAULT_LIMITS.execClientGraceMs),
+    fileOpWallClockMs: positiveInt(env.WORKSPACE_FILE_WALL_CLOCK_MS, DEFAULT_LIMITS.fileOpWallClockMs),
   };
 }
 
@@ -113,7 +123,14 @@ export async function workspaceExec(
 
   const timeout = Math.min(positiveInt(params.timeoutMs, limits.execTimeoutMs), limits.maxExecTimeoutMs);
   try {
-    const result = await deps.sandbox().exec(command, { timeout, cwd: params.cwd ?? '/workspace' });
+    // `timeout` is enforced inside the container; if the container itself dies
+    // mid-exec (deploys replace containers) the RPC await hangs with no error.
+    // Client-side race at timeout + grace converts that into a failed op.
+    const result = await withWallClock(
+      deps.sandbox().exec(command, { timeout, cwd: params.cwd ?? '/workspace' }),
+      timeout + limits.execClientGraceMs,
+      'workspace_exec',
+    );
     const stdout = truncateToBytes(result.stdout ?? '', limits.maxOutputBytes);
     const stderr = truncateToBytes(result.stderr ?? '', limits.maxOutputBytes);
     const truncated = stdout !== (result.stdout ?? '') || stderr !== (result.stderr ?? '');
@@ -169,7 +186,7 @@ export async function workspaceWriteFile(
   }
 
   try {
-    const result = await deps.sandbox().writeFile(path, content);
+    const result = await withWallClock(deps.sandbox().writeFile(path, content), limits.fileOpWallClockMs, 'workspace_write_file');
     if (!result.success) return op.failFile(path, 'sandbox write failed');
     const completedAt = await op.complete({ resultPreview: preview(`wrote ${contentBytes} bytes to ${path}`), exitCode: null, bytesOut: contentBytes });
     return { opId: op.id, status: 'completed', path, content: null, bytes: contentBytes, truncated: false, error: null, durationMs: completedAt - op.startedAt };
@@ -195,7 +212,7 @@ export async function workspaceReadFile(
   const cap = Math.min(positiveInt(params.maxBytes, limits.maxReadBytes), limits.maxReadBytes);
 
   try {
-    const result = await deps.sandbox().readFile(path);
+    const result = await withWallClock(deps.sandbox().readFile(path), limits.fileOpWallClockMs, 'workspace_read_file');
     if (!result.success) return op.failFile(path, 'sandbox read failed');
     const full = result.content ?? '';
     const fullBytes = byteLength(full);

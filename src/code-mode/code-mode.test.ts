@@ -107,16 +107,17 @@ class FakeD1 implements D1Like {
 }
 
 class FakeEntrypoint {
-  constructor(private readonly mode: 'success' | 'failure') {}
+  constructor(private readonly mode: 'success' | 'failure' | 'hang') {}
 
   async run(input: unknown): Promise<unknown> {
+    if (this.mode === 'hang') return new Promise(() => {});
     if (this.mode === 'failure') throw new Error('dynamic failed');
     return { ok: true, input };
   }
 }
 
 class FakeWorkerStub {
-  constructor(private readonly mode: 'success' | 'failure') {}
+  constructor(private readonly mode: 'success' | 'failure' | 'hang') {}
 
   getEntrypoint(name?: string | null, opts?: unknown) {
     return { name, opts, run: (input: unknown) => new FakeEntrypoint(this.mode).run(input) };
@@ -126,7 +127,7 @@ class FakeWorkerStub {
 class FakeLoader {
   calls: { id: string; spec: Record<string, unknown> }[] = [];
 
-  constructor(private readonly mode: 'success' | 'failure' = 'success') {}
+  constructor(private readonly mode: 'success' | 'failure' | 'hang' = 'success') {}
 
   get(id: string, callback: () => Record<string, unknown> | unknown) {
     const spec = callback();
@@ -226,6 +227,28 @@ test('executeCode records failed audit rows and returns structured errors', asyn
   assert.match(result.error ?? '', /dynamic failed/);
   assert.equal(db.rows[0].status, 'failed');
   assert.match(String(db.rows[0].error), /dynamic failed/);
+});
+
+test('executeCode fails a hung loader RPC at the wall-clock bound instead of hanging the turn', async () => {
+  const db = new FakeD1();
+  const result = await executeCode({
+    db,
+    loader: new FakeLoader('hang'),
+    projectId: 'P',
+    now: () => 1000,
+    id: () => 'exec_hang',
+    env: { CODE_EXEC_WALL_CLOCK_MS: '20' },
+    params: {
+      language: 'javascript',
+      code: 'export default async function main() { return 1; }',
+      purpose: 'hang forever',
+    },
+  });
+
+  assert.equal(result.status, 'failed');
+  assert.match(result.error ?? '', /execute_code timed out after 20ms \(wall clock\)/);
+  assert.equal(db.rows[0].status, 'failed');
+  assert.match(String(db.rows[0].error), /wall clock/);
 });
 
 test('executeCode rejects over-limit code before invoking loader and still audits the failure', async () => {

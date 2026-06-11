@@ -1,6 +1,7 @@
 import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
 import type { D1Like } from '../skills/repository';
 import { byteLength as bytes, redactSecrets, safeJson, truncateToBytes } from '../shared/bounded';
+import { withWallClock } from '../shared/wall-clock';
 
 export type CodeLanguage = 'javascript' | 'python';
 export type CodeNetworkMode = 'open_public' | 'off';
@@ -12,6 +13,7 @@ export interface CodeModeLimits {
   maxOutputBytes: number;
   cpuMs: number;
   subRequests: number;
+  wallClockMs: number;
 }
 
 export interface DynamicWorkerLoaderLike {
@@ -86,6 +88,7 @@ const DEFAULT_LIMITS: CodeModeLimits = {
   maxOutputBytes: 20_000,
   cpuMs: 5000,
   subRequests: 50,
+  wallClockMs: 60_000,
 };
 
 const COMPATIBILITY_DATE = '2026-06-09';
@@ -98,6 +101,7 @@ export function codeModeLimits(env: Record<string, unknown> = {}): CodeModeLimit
     maxOutputBytes: positiveInt(env.CODE_EXEC_MAX_OUTPUT_BYTES, DEFAULT_LIMITS.maxOutputBytes),
     cpuMs: positiveInt(env.CODE_EXEC_CPU_MS, DEFAULT_LIMITS.cpuMs),
     subRequests: positiveInt(env.CODE_EXEC_SUBREQUESTS, DEFAULT_LIMITS.subRequests),
+    wallClockMs: positiveInt(env.CODE_EXEC_WALL_CLOCK_MS, DEFAULT_LIMITS.wallClockMs),
   };
 }
 
@@ -264,7 +268,10 @@ export async function executeCode(args: {
     });
     const worker = args.loader.get(workerId, async () => spec);
     const entrypoint = worker.getEntrypoint('CodeRunner', { limits: { cpuMs: limits.cpuMs, subRequests: limits.subRequests } });
-    const rawResult = await entrypoint.run(input);
+    // cpuMs bounds CPU inside the dynamic worker; it does nothing if the loader
+    // RPC itself wedges (worker replaced by a deploy mid-call). Wall-clock race
+    // turns that hang into a failed execution the model can retry.
+    const rawResult = await withWallClock(entrypoint.run(input), limits.wallClockMs, 'execute_code');
     const outputJson = safeJson(rawResult);
     const outputBytes = bytes(outputJson);
     const truncated = outputBytes > limits.maxOutputBytes;

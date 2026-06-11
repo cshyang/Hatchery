@@ -80,10 +80,13 @@ class FakeSandbox implements SandboxLike {
   execCalls: Array<{ command: string; options?: { timeout?: number; cwd?: string } }> = [];
   execResult = { success: true, exitCode: 0, stdout: 'ok', stderr: '' };
   execError: Error | null = null;
+  /** Simulates a dead-container RPC: the exec promise never settles. */
+  execHangs = false;
   files = new Map<string, string>();
 
   async exec(command: string, options?: { timeout?: number; cwd?: string }) {
     this.execCalls.push({ command, options });
+    if (this.execHangs) return new Promise<never>(() => {});
     if (this.execError) throw this.execError;
     return this.execResult;
   }
@@ -174,6 +177,22 @@ test('workspaceExec: sandbox throw records failed audit with bounded error', asy
   const [audit] = await listWorkspaceOps(db, 'proj-1');
   assert.equal(audit.status, 'failed');
   assert.equal(audit.error, 'container start timeout');
+});
+
+test('workspaceExec: hung container RPC fails at timeout + client grace instead of hanging the turn', async () => {
+  const db = new FakeD1();
+  const sandbox = new FakeSandbox();
+  sandbox.execHangs = true;
+  const result = await workspaceExec(deps(db, sandbox, { WORKSPACE_EXEC_CLIENT_GRACE_MS: '10' }), {
+    command: 'sleep forever',
+    timeoutMs: 10,
+  });
+
+  assert.equal(result.status, 'failed');
+  assert.match(result.error ?? '', /workspace_exec timed out after 20ms \(wall clock\)/);
+  const [audit] = await listWorkspaceOps(db, 'proj-1');
+  assert.equal(audit.status, 'failed');
+  assert.match(String(audit.error), /wall clock/);
 });
 
 test('workspaceExec: empty command fails without touching the sandbox', async () => {
