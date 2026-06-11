@@ -107,7 +107,7 @@ export async function buildSetupStatus(args: {
 
   const routes = args.db ? await loadRoutes(args.db, args.projectId).catch(() => []) : [];
   const activeRoute = routes.find((route) => routeMatches(route, { targetRepo, linearTeamKey, status: 'active' }));
-  const runner = runnerSummary(env);
+  const runner = runnerSummary(env, hasGithub);
   const githubRecommendation = githubAuthRecommendation(targetRepo);
 
   const missing: SetupMissingItem[] = [];
@@ -263,12 +263,14 @@ function routeMatches(
   return true;
 }
 
-function runnerSummary(env: Record<string, unknown>): SetupRunnerSummary {
+function runnerSummary(env: Record<string, unknown>, githubConnected: boolean): SetupRunnerSummary {
   return {
     configured:
       hasEnvString(env, 'TRIGGER_SECRET_KEY') &&
       hasEnvString(env, 'AGENT_RUNNER_TOKEN') &&
-      hasEnvString(env, 'RUNNER_GITHUB_PAT_TEMP') &&
+      // Write credential, mirroring resolveDispatchGithubToken: the project's GitHub connection
+      // (App installation token, preferred) or the RUNNER_GITHUB_PAT_TEMP fallback.
+      (githubConnected || hasEnvString(env, 'RUNNER_GITHUB_PAT_TEMP')) &&
       hasEnvString(env, 'HATCHERY_PUBLIC_URL'),
     runtime: DEFAULT_RUNNER_RUNTIME,
     sandboxProvider: DEFAULT_SANDBOX_PROVIDER,

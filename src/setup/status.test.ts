@@ -175,6 +175,24 @@ test('setup_status reports ready when GitHub, Linear, active route, and runner c
   assert.match(status.slackText, /acme\/widgets/);
 });
 
+test('setup_status reports the runner configured via a GitHub connection with no PAT fallback', async () => {
+  const db = new FakeD1();
+  db.connections.push(connection('github', { authMode: 'oauth' }), connection('linear', { authMode: 'oauth' }));
+  db.routes.push(route('active'));
+
+  const status = await buildSetupStatus({
+    db,
+    binding: binding(),
+    projectId: 'project_1',
+    // No RUNNER_GITHUB_PAT_TEMP — the App installation token from the github connection is the write credential.
+    env: { NANGO_SECRET_KEY: 'secret', TRIGGER_SECRET_KEY: 'trigger_secret', AGENT_RUNNER_TOKEN: 'runner_secret', HATCHERY_PUBLIC_URL: 'https://hatchery.example' },
+    linearTeamKey: 'EDK',
+    intent: 'run_agent',
+  });
+
+  assert.equal(status.runner.configured, true, 'github connection satisfies the write-credential leg without the PAT');
+});
+
 test('setup_status flags legacy opencode active routes before Pi readiness', async () => {
   const db = new FakeD1();
   db.connections.push(connection('github', { authMode: 'pat', repo: 'acme/widgets' }), connection('linear', { authMode: 'oauth' }));

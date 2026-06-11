@@ -185,7 +185,13 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
       hasDb: !!db,
       hasBotToken: !!botToken,
       hasCodingRunner: !!codingRunnerUrl && !!workbenchRunnerToken,
-      hasAgentRunner: !!triggerSecretKey && !!agentRunnerToken && !!runnerGithubToken && !!hatcheryPublicUrl,
+      // GitHub write credential mirrors resolveDispatchGithubToken: the project's connected
+      // GitHub App installation token (preferred) or the RUNNER_GITHUB_PAT_TEMP fallback.
+      hasAgentRunner:
+        !!triggerSecretKey &&
+        !!agentRunnerToken &&
+        (connectionRuntime.state.some((s) => s.provider === 'github' && s.status === 'connected') || !!runnerGithubToken) &&
+        !!hatcheryPublicUrl,
       hasLinearAgentIngress: typeof env.LINEAR_WEBHOOK_SECRET === 'string',
       hasCodeMode,
       codeModeLimits: hasCodeMode ? limits : null,
