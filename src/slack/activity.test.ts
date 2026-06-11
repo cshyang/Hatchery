@@ -67,6 +67,7 @@ class FakeD1 implements D1Like {
                   status,
                   activities_json: activitiesJson,
                   last_posted_at: lastPostedAt,
+                  created_at: createdAt,
                   updated_at: updatedAt,
                   completed_at: completedAt,
                 });
@@ -148,6 +149,17 @@ test('creates and loads an active receipt by project and session', async () => {
   assert.equal(activity?.conversationId, 'slack:T:C:100.000');
   assert.equal(activity?.ackMessageTs, '101.000');
   assert.deepEqual(activity?.activities, []);
+});
+
+test('a new turn in the same thread resets the receipt clock (created_at survives the upsert)', async () => {
+  const db = new FakeD1();
+  await createSlackTurnActivity(db, input({ now: 0 }));
+  // 19 minutes later, a NEW turn starts in the same thread → same (project, session) row.
+  const later = 19 * 60_000;
+  await createSlackTurnActivity(db, input({ now: later, ackMessageTs: '102.000' }));
+  const activity = await loadSlackTurnActivity(db, 'P', 'conv:slack:T:C:100.000');
+  assert.equal(activity?.createdAt, later, 'clock starts at the new turn, not the first turn in the thread');
+  assert.match(renderSlackActivityReceipt(activity!, { now: later + 30_000 }), /<1 min/);
 });
 
 test('maps allowlisted tools to friendly labels and hides unknown tools', () => {

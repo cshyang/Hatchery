@@ -1,6 +1,6 @@
 -- Proactive review (Layer 4) state: watermark + split noise budgets, plus the ingest-time
 -- candidate flag on messages. Apply:
--- npx wrangler d1 execute crewmate-skills --remote --file=migrations/0024_review_state.sql
+-- npx wrangler d1 execute hatchery-skills --remote --file=migrations/0024_review_state.sql
 --
 -- review_state is separate from reflection_state — the review consumes every ~2 min on its own
 -- watermark; reflection consumes nightly on its own. A message is independently seen by both.

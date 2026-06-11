@@ -297,6 +297,7 @@ async function upsertActivity(db: D1Like, activity: SlackTurnActivity): Promise<
          status=excluded.status,
          activities_json=excluded.activities_json,
          last_posted_at=excluded.last_posted_at,
+         created_at=excluded.created_at,
          updated_at=excluded.updated_at,
          completed_at=excluded.completed_at`,
     )
