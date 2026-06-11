@@ -24,7 +24,11 @@ export const DEFAULT_MODEL = 'openrouter/xiaomi/mimo-v2.5-pro';
 // specific OpenRouter id), also register its window via registerProvider so the window is KNOWN.
 export const VALIDATED_MODELS: ReadonlySet<string> = new Set([
   'openrouter/xiaomi/mimo-v2.5-pro', // catalog contextWindow 1048576
-  'openrouter/moonshotai/kimi-k2.6', // catalog contextWindow 262144 — upgrade path if mimo fumbles tools
+  // ⚠️ kimi-k2.6 REMOVED from the recommended path (2026-06-11): it is a REASONING model —
+  // streams reasoning_details chunks with content:null first — and every live turn died before
+  // its first beat (dead-on-arrival; verified by direct OpenRouter probe). Do not pin it until
+  // the pi-ai/Flue stream pipeline handles reasoning deltas. Window validation alone is NOT
+  // model validation: run a live turn before recommending a model here.
 ]);
 
 // Warn at most once per model id per process — visibility in `wrangler tail` without per-turn spam

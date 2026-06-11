@@ -231,11 +231,11 @@ test('upsertBinding accepts a validated model pin', async () => {
   await upsertBinding(db, {
     projectId: 'C_OK', provider: 'slack', externalAccountId: 'T0B6VB415TQ', externalSpaceId: 'C_OK',
     transportBotId: 'U', transportTokenRef: 'SLACK_BOT_TOKEN_DEFAULT',
-    model: 'openrouter/moonshotai/kimi-k2.6', status: 'active',
+    model: 'openrouter/xiaomi/mimo-v2.5-pro', status: 'active',
   });
   const rows = await loadBindings(db, 'C_OK');
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].model, 'openrouter/moonshotai/kimi-k2.6', 'validated pin is stored');
+  assert.equal(rows[0].model, 'openrouter/xiaomi/mimo-v2.5-pro', 'validated pin is stored');
 });
 
 test('autoCreateBinding rejects an unvalidated model pin', async () => {
