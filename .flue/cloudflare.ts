@@ -60,7 +60,12 @@ export default {
       controller.cron === REMINDERS_CRON
         ? scanReminders(env, ctx)
         : controller.cron === RECONCILE_CRON
-          ? callInternal(env, ctx, '/__internal/agent-runs/reconcile', {})
+          ? Promise.all([
+              callInternal(env, ctx, '/__internal/agent-runs/reconcile', {}),
+              // Layer 4 rides the same 2-min tick: the review-sweep gate is one cheap SQL query,
+              // so sharing the reconcile cadence costs nothing on quiet channels.
+              callInternal(env, ctx, '/__internal/review-sweep', {}),
+            ]).then(() => undefined)
           : controller.cron === REFLECT_CRON
             ? callInternal(env, ctx, '/__internal/reflect-sweep', {})
             : callInternal(env, ctx, '/__heartbeat', {});

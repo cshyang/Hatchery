@@ -1,8 +1,36 @@
 # Proactive Review (Layer 4) — Design
 
 **Date:** 2026-06-02
-**Status:** Draft for review
+**Status:** IMPLEMENTED 2026-06-11 (with the revisions below)
 **Depends on:** L1 (context hydration), L2 (ambient ingestion), L3 (`search_channel`) — all live.
+
+## Revision 2026-06-11 (Notion-agent learnings; supersedes conflicting text below)
+
+Studied Notion's Slack Q&A agent and revised three decisions before building:
+
+- **Timing → hybrid debounced sweep** (was: 10-min work-hours cron). Ambient ingest flags
+  candidate messages with a cheap regex (`isReviewCandidate`: question-shaped; skips chatter,
+  fragments, and messages addressed to a person). The sweep rides the existing `*/2` cron; the
+  Tier-1 gate adds a debounce — review only when the channel has been quiet ≥90s ("collect the
+  burst, judge it whole") — with a 5-min max-wait so busy channels can't starve. DO-alarm
+  debounce was considered and rejected: more precise, less robust (cron+watermark re-derives
+  everything from durable D1 state; a timer is a second source of truth that can diverge).
+- **Budgets → split** (was: ≤1/day for everything). Answering an unanswered question with a
+  receipt is service: ≤5/project/day (`answer_posts_today`/`answer_posts_day`). Unprompted
+  observations keep ≤1/24h (`last_observation_post_at`). `proactive_reply` takes `kind:
+  'answer' | 'observation'` and enforces the matching budget.
+- **Answer bar → receipt or clear expertise** (was: implicit). The procedure requires a citable
+  source (memory, verified thread, channel history, connected tool) or objective technical
+  certainty; hedging means silence. Notion's skip rules (open-ended/opinion questions,
+  addressed-to-a-person, chatter) are folded into both the ingest heuristic and the procedure.
+
+Unchanged: thread-only venue (enforced in code — `threadTargetFromConversationId` builds the
+target from trusted binding config and refuses other channels), shadow mode default
+(`REVIEW_MODE` unset/`shadow` → drafts log via `wrangler tail`, nothing posts, no budget spent),
+consume-on-take watermark, silence as the normal outcome.
+
+Implementation: `migrations/0024_review_state.sql`, `src/review.ts` (+ tests), ambient flag in
+`logMessage`, `/__internal/review-sweep` route, `proactive_reply` registered in the project agent.
 
 ## Problem
 

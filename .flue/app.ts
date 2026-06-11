@@ -23,6 +23,7 @@ import { upsertConversationTarget } from '../src/project/conversations';
 import { claimEvent, type KVLike } from '../src/shared/idempotency';
 import type { D1Like } from '../src/skills/repository';
 import { logMessage, projectsWithUnreflected, projectsWithUnreflectedRuns, takeUnreflectedBatch, takeUnreflectedRuns, buildReflectInstructions } from '../src/knowledge/reflection';
+import { isReviewCandidate, projectsToReview, takeReviewBatch, buildReviewInstructions } from '../src/review';
 import { upsertConnection, loadConnections, connectedNotice, disconnectedNotice, disableConnectionByRef } from '../src/connections/repository';
 import { verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook, fetchProviderApiSpec } from '../src/providers/nango';
 import { isCatalogProvider } from '../src/connections/catalog';
@@ -359,6 +360,31 @@ app.post('/__internal/reflect-sweep', async (c) => {
   return c.json({ swept });
 });
 
+// Proactive review sweep (Layer 4): the */2 cron pokes this. Tier-1 gate is pure SQL (unreviewed
+// candidate messages AND channel quiet/max-wait AND a budget free) — idle channels cost one query,
+// zero tokens. Qualifying projects get ONE review turn in a fresh session whose procedure makes
+// silence the default; speaking goes through proactive_reply (budgeted, thread-only, shadow-able).
+app.post('/__internal/review-sweep', async (c) => {
+  if (!requireHeartbeat(c)) return c.body(null, 404);
+  const db = c.env.DB;
+  if (!db) return c.json({ swept: 0, reason: 'no DB binding' });
+
+  const projects = await projectsToReview(db);
+  const now = new Date().toISOString();
+  let swept = 0;
+  for (const projectId of projects) {
+    const batch = await takeReviewBatch(db, projectId);
+    if (!batch) continue; // raced to empty; skip
+    await dispatch({
+      agent: 'project',
+      id: agentInstanceId(projectId, `review:${Date.now()}`), // fresh instance — no carryover, no thread pollution
+      input: { kind: 'heartbeat', now, instructions: buildReviewInstructions(batch) },
+    });
+    swept++;
+  }
+  return c.json({ swept });
+});
+
 // Operator connection provisioning (ADR 0003 / D11). Lets the operator add or change a connection's
 // METADATA without a code edit + redeploy. Guarded by its OWN token (NOT HEARTBEAT_TOKEN — provisioning
 // connections and poking heartbeats are different privilege levels). The SECRET is set separately via
@@ -598,6 +624,9 @@ app.post('/slack/events', async (c) => {
         role: 'user',
         text: msg.text,
         ambient: true,
+        // Layer 4 wake signal: does this overheard message look like an answerable question?
+        // Cheap regex at ingest; the review sweep's gate reads the flag, no LLM until then.
+        reviewCandidate: isReviewCandidate(msg.text),
       }).catch(() => {});
     }
     return c.body(null, 200);

@@ -4,6 +4,7 @@ import { loadPersona, personaTools } from '../../src/project/persona';
 import { assignSoul, SOUL_NAME_PREFIX } from '../../src/project/souls';
 import { resolveTarget, sendFinalToConversationTarget, sendToConversationTarget } from '../../src/project/conversations';
 import { fetchChannelHistory, fetchThreadReplies, renderThreadBackscroll } from '../../src/slack/threads';
+import { proactiveReplyTool } from '../../src/review';
 import { withToolLogging, withReplyReminder } from '../../src/agent/observability';
 import { skillTools, loadSkillCatalog, loadActiveSkillBody, skillBody, type D1Like } from '../../src/skills/repository';
 import { reminderTools } from '../../src/agent/reminders';
@@ -237,6 +238,22 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
     ...peopleTools(db, projectId),
     ...userTools(db, botToken),
     readChannelHistory,
+    // Layer 4's only mouth: unprompted posts go through here (budgets + thread-only + shadow
+    // mode enforced in the tool). Registered always, used only by review-sweep turns per prompt.
+    ...(db
+      ? [
+          proactiveReplyTool({
+            db,
+            projectId,
+            binding,
+            mode: typeof env.REVIEW_MODE === 'string' ? env.REVIEW_MODE : undefined,
+            send: async (target, text) => {
+              await sendToConversationTarget(env, target, text, undefined, persona);
+              await logMessage(db, { projectId, conversationId: target.conversationId, senderId: 'agent', role: 'agent', text }).catch(() => {});
+            },
+          }),
+        ]
+      : []),
     ...(db ? searchTools(db, projectId) : []),
     ...codeModeTools({ db, loader: dynamicWorkerLoader, projectId, env }),
     ...workspaceTools({ db, sandbox, projectId, env }),

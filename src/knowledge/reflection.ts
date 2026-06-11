@@ -31,6 +31,9 @@ export interface LogMessageInput {
   /** True for a message the bot overheard but did not engage (Layer 2 ambient ingestion).
    *  Ambient rows feed the cross-thread index/review but are SKIPPED by nightly REM below. */
   ambient?: boolean;
+  /** True when the ingest-time heuristic flags this as an answerable question/request — the
+   *  proactive review's (Layer 4) Tier-1 wake signal. Computed by isReviewCandidate in review.ts. */
+  reviewCandidate?: boolean;
 }
 
 // Best-effort transcript logging. Called from app.ts (inbound) and the reply tool (outbound).
@@ -39,9 +42,9 @@ export async function logMessage(db: D1Like, m: LogMessageInput): Promise<void> 
   if (!text) return;
   await db
     .prepare(
-      'INSERT INTO messages(project_id, conversation_id, sender_id, role, text, ambient, created_at) VALUES(?,?,?,?,?,?,?)',
+      'INSERT INTO messages(project_id, conversation_id, sender_id, role, text, ambient, review_candidate, created_at) VALUES(?,?,?,?,?,?,?,?)',
     )
-    .bind(m.projectId, m.conversationId, m.senderId, m.role, text, m.ambient ? 1 : 0, Date.now())
+    .bind(m.projectId, m.conversationId, m.senderId, m.role, text, m.ambient ? 1 : 0, m.reviewCandidate ? 1 : 0, Date.now())
     .run();
 }
 
