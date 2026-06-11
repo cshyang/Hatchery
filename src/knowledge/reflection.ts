@@ -48,6 +48,19 @@ export async function logMessage(db: D1Like, m: LogMessageInput): Promise<void> 
     .run();
 }
 
+/** Has the agent itself ever posted in this conversation? The engage policy's thread-participation
+ *  check against OUR transcript instead of Slack message authorship — persona posts
+ *  (chat:write.customize) are bot_message subtypes WITHOUT a `user` field, so matching Slack's
+ *  `user` against the bot id silently fails the moment a channel hatches. This record is ours and
+ *  transport-quirk-proof. */
+export async function agentPostedInConversation(db: D1Like, projectId: string, conversationId: string): Promise<boolean> {
+  const row = await db
+    .prepare("SELECT 1 AS x FROM messages WHERE project_id=? AND conversation_id=? AND role='agent' LIMIT 1")
+    .bind(projectId, conversationId)
+    .first<{ x: number }>();
+  return !!row;
+}
+
 // The nightly sweep's gate: which projects have messages past their watermark. Cheap SQL, no LLM —
 // idle projects simply don't appear, so they never dispatch a (token-costing) REM turn.
 export async function projectsWithUnreflected(db: D1Like): Promise<string[]> {

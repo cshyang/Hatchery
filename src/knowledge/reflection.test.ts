@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
-import { logMessage, projectsWithUnreflected, projectsWithUnreflectedRuns, takeUnreflectedBatch, takeUnreflectedRuns, buildReflectInstructions } from './reflection';
+import { agentPostedInConversation, logMessage, projectsWithUnreflected, projectsWithUnreflectedRuns, takeUnreflectedBatch, takeUnreflectedRuns, buildReflectInstructions } from './reflection';
 import type { D1Like } from '../skills/repository';
 
 interface MsgRow { id: number; project_id: string; conversation_id: string; sender_id: string; role: string; text: string; ambient: number; created_at: number; }
@@ -39,6 +39,10 @@ class FakeD1 implements D1Like {
   }
 
   private select(q: string, v: unknown[]): Record<string, unknown>[] {
+    if (q.includes("role='agent' LIMIT 1")) {
+      const [pid, conv] = v as [string, string];
+      return this.msgs.some((m) => m.project_id === pid && m.conversation_id === conv && m.role === 'agent') ? [{ x: 1 }] : [];
+    }
     if (q.includes('FROM agent_runs_m1 r')) {
       // projectsWithUnreflectedRuns: terminal runs past max(run watermark, lookback cutoff).
       const [cutoff] = v as [number];
@@ -231,6 +235,15 @@ test('buildReflectInstructions: sections appear only for streams with material',
   const runsOnly = buildReflectInstructions(null, '[failed] …');
   assert.match(runsOnly, /NO NEW CONVERSATION TONIGHT/);
   assert.match(runsOnly, /--- RUN RECORD TO CONSOLIDATE ---/);
+});
+
+test('agentPostedInConversation: true only for conversations with an agent reply', async () => {
+  const db = new FakeD1();
+  await logMessage(db, { projectId: 'P', conversationId: 'c1', senderId: 'slack:T:U1', role: 'user', text: 'hi' });
+  assert.equal(await agentPostedInConversation(db, 'P', 'c1'), false);
+  await logMessage(db, { projectId: 'P', conversationId: 'c1', senderId: 'agent', role: 'agent', text: 'hello' });
+  assert.equal(await agentPostedInConversation(db, 'P', 'c1'), true);
+  assert.equal(await agentPostedInConversation(db, 'P', 'c2'), false);
 });
 
 await run();

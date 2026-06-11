@@ -22,7 +22,7 @@ import { normalizeSlackMessage } from '../src/shared/canonical';
 import { upsertConversationTarget, loadAgentEpoch, bumpAgentEpoch, conversationScope } from '../src/project/conversations';
 import { claimEvent, type KVLike } from '../src/shared/idempotency';
 import type { D1Like } from '../src/skills/repository';
-import { logMessage, projectsWithUnreflected, projectsWithUnreflectedRuns, takeUnreflectedBatch, takeUnreflectedRuns, buildReflectInstructions } from '../src/knowledge/reflection';
+import { agentPostedInConversation, logMessage, projectsWithUnreflected, projectsWithUnreflectedRuns, takeUnreflectedBatch, takeUnreflectedRuns, buildReflectInstructions } from '../src/knowledge/reflection';
 import { isReviewCandidate, projectsToReview, takeReviewBatch, buildReviewInstructions } from '../src/review';
 import { upsertConnection, loadConnections, connectedNotice, disconnectedNotice, disableConnectionByRef } from '../src/connections/repository';
 import { verifyNangoWebhook, parseNangoAuthWebhook, parseNangoDeletionWebhook, fetchProviderApiSpec } from '../src/providers/nango';
@@ -628,9 +628,13 @@ app.post('/slack/events', async (c) => {
   );
 
   // Engage when @mentioned anywhere, or when replying in a thread the bot already posted in.
+  // Participation is checked against Slack authorship AND our own transcript: persona posts
+  // (chat:write.customize) are bot_message subtypes with NO `user` field, so the Slack-side
+  // check stops matching the moment a channel hatches — the D1 record is authorship we own.
   const engaged =
     mentionsBot(text, binding.transportBotId) ||
-    threadReplies.some((m) => m.user === binding.transportBotId);
+    threadReplies.some((m) => m.user === binding.transportBotId) ||
+    (!!ev.thread_ts && !!c.env.DB && (await agentPostedInConversation(c.env.DB, msg.projectId, msg.conversationId).catch(() => false)));
 
   if (!engaged) {
     // Ambient ingestion (Layer 2): remember every message in a bound channel even when we won't
