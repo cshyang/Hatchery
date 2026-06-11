@@ -19,7 +19,7 @@ import { bindings, bindingBySlack, bindingByProject, agentInstanceId, autoCreate
 import { loadPersona } from '../src/project/persona';
 import { deploymentConfig, isKnownTeam } from '../src/config/deployment';
 import { normalizeSlackMessage } from '../src/shared/canonical';
-import { upsertConversationTarget, loadAgentEpoch, bumpAgentEpoch, conversationScope } from '../src/project/conversations';
+import { upsertConversationTarget, loadAgentEpoch, bumpAgentEpoch, conversationScope, resolveTarget } from '../src/project/conversations';
 import { claimEvent, type KVLike } from '../src/shared/idempotency';
 import type { D1Like } from '../src/skills/repository';
 import { agentPostedInConversation, logMessage, projectsWithUnreflected, projectsWithUnreflectedRuns, takeUnreflectedBatch, takeUnreflectedRuns, buildReflectInstructions } from '../src/knowledge/reflection';
@@ -334,6 +334,7 @@ app.post('/__internal/agent-runs/reconcile', async (c) => {
   // failed and edit the eternal "⏳ Working" into an honest retry prompt. Failure-isolated.
   const reapedTurns = await reapStaleTurnActivities(db, c.env as Record<string, unknown>, {
     bumpEpoch: (projectId, conversationId) => bumpAgentEpoch(db, projectId, conversationId),
+    retryTurn: (row) => retrySlackDoaTurn(db, c.env as Record<string, unknown>, row),
   }).catch((e) => {
     console.log(`[activity] reap sweep failed: ${e instanceof Error ? e.message : 'error'}`);
     return 0;
@@ -367,6 +368,62 @@ app.post('/__internal/reflect-sweep', async (c) => {
   }
   return c.json({ swept });
 });
+
+// Auto-retry for a first-strike dead-on-arrival turn: rebuild the dispatch from durable state
+// (the transcript's last user message, the conversation target, the binding) and send the SAME
+// turn again — reusing the original ack ts so the thread stays one evolving message. Only the
+// reaper calls this, only on DOA strike one; strike two takes the epoch-reset path instead.
+async function retrySlackDoaTurn(
+  db: NonNullable<Env['DB']>,
+  env: Record<string, unknown>,
+  row: { projectId: string; sessionId: string; conversationId: string; ackMessageTs: string },
+): Promise<boolean> {
+  const binding = await bindingByProject(row.projectId, db);
+  if (!binding) return false;
+  const target = await resolveTarget(db, binding, row.projectId, 'default', row.conversationId);
+  if (!target) return false;
+  const lastUser = await db
+    .prepare("SELECT sender_id, text FROM messages WHERE project_id=? AND conversation_id=? AND role='user' ORDER BY id DESC LIMIT 1")
+    .bind(row.projectId, row.conversationId)
+    .first<{ sender_id: string; text: string }>();
+  if (!lastUser?.text) return false;
+
+  const token = env[binding.transportTokenRef];
+  const threadReplies =
+    typeof token === 'string' && token && target.externalConversationId
+      ? await fetchThreadReplies(token, target.externalSpaceId, target.externalConversationId).catch(() => [])
+      : [];
+  const epoch = await loadAgentEpoch(db, row.projectId, row.conversationId).catch(() => 0);
+
+  // Reset the receipt to active so the retried turn's beats land on a fresh clock.
+  await createSlackTurnActivity(db, {
+    projectId: row.projectId,
+    sessionId: row.sessionId,
+    conversationId: row.conversationId,
+    slackChannelId: target.externalSpaceId,
+    slackThreadTs: target.externalConversationId ?? '',
+    ackMessageTs: row.ackMessageTs,
+    transportTokenRef: binding.transportTokenRef,
+  });
+
+  await dispatch({
+    agent: 'project',
+    id: agentInstanceId(row.projectId, conversationScope(row.conversationId, epoch)),
+    input: {
+      message: lastUser.text,
+      conversationId: row.conversationId,
+      ...(row.ackMessageTs ? { ackMessageTs: row.ackMessageTs } : {}),
+      provider: 'slack',
+      accountId: target.externalAccountId,
+      senderId: lastUser.sender_id,
+      retryOfDeadTurn: true,
+      ...(threadReplies.length
+        ? { threadContext: renderThreadBackscroll(threadReplies, binding.transportBotId) }
+        : {}),
+    },
+  });
+  return true;
+}
 
 // Proactive review sweep (Layer 4): the */2 cron pokes this. Tier-1 gate is pure SQL (unreviewed
 // candidate messages AND channel quiet/max-wait AND a budget free) — idle channels cost one query,

@@ -14,6 +14,7 @@ import {
   shouldPostFinalBelowActivity,
   TURN_DIED_RESET_TEXT,
   TURN_DIED_TEXT,
+  TURN_RETRYING_TEXT,
   TURN_DOA_STALE_MS,
   TURN_STALE_MS,
   toolActivityLabel,
@@ -489,6 +490,58 @@ test('reaper self-heal: second consecutive DOA bumps the session epoch and says 
   assert.deepEqual(bumps, ['P/slack:T:C:100.000'], 'second consecutive DOA declares the session wedged');
   assert.equal(edits[1], TURN_DIED_RESET_TEXT);
   assert.equal((await loadSlackTurnActivity(db, 'P', 'conv:slack:T:C:100.000'))?.status, 'failed');
+});
+
+test('reaper auto-retry: first-strike DOA re-dispatches and shows the retrying note', async () => {
+  const db = new FakeD1();
+  await createSlackTurnActivity(db, input({ now: 0 }));
+  const retries: string[] = [];
+  const edits: string[] = [];
+  const reaped = await reapStaleTurnActivities(db, { SLACK_BOT_TOKEN_DEFAULT: 'x' }, {
+    now: TURN_DOA_STALE_MS + 1000,
+    editMessage: async (_t, _c, _ts, text) => { edits.push(text); },
+    retryTurn: async (row) => { retries.push(row.conversationId); return true; },
+    bumpEpoch: async () => { throw new Error('must not bump on strike one'); },
+    log: () => {},
+  });
+  assert.equal(reaped, 1);
+  assert.deepEqual(retries, ['slack:T:C:100.000']);
+  assert.deepEqual(edits, [TURN_RETRYING_TEXT], 'retrying note instead of a death notice');
+});
+
+test('reaper auto-retry: retry dispatch failure falls back to the death notice', async () => {
+  const db = new FakeD1();
+  await createSlackTurnActivity(db, input({ now: 0 }));
+  const edits: string[] = [];
+  await reapStaleTurnActivities(db, { SLACK_BOT_TOKEN_DEFAULT: 'x' }, {
+    now: TURN_DOA_STALE_MS + 1000,
+    editMessage: async (_t, _c, _ts, text) => { edits.push(text); },
+    retryTurn: async () => { throw new Error('dispatch down'); },
+    log: () => {},
+  });
+  assert.deepEqual(edits, [TURN_DIED_TEXT]);
+});
+
+test('reaper auto-retry: second strike skips retry and resets the session', async () => {
+  const db = new FakeD1();
+  const retries: string[] = [];
+  const bumps: string[] = [];
+  const edits: string[] = [];
+  const deps = {
+    editMessage: async (_t: string, _c: string, _ts: string, text: string) => { edits.push(text); },
+    retryTurn: async (row: { conversationId: string }) => { retries.push(row.conversationId); return true; },
+    bumpEpoch: async (p: string, c: string) => { bumps.push(`${p}/${c}`); return 1; },
+    log: () => {},
+  };
+  await createSlackTurnActivity(db, input({ now: 0 }));
+  await reapStaleTurnActivities(db, { SLACK_BOT_TOKEN_DEFAULT: 'x' }, { ...deps, now: TURN_DOA_STALE_MS + 1000 });
+  assert.equal(retries.length, 1, 'strike one retries');
+  // The retried turn ALSO dies on arrival.
+  await createSlackTurnActivity(db, input({ now: TURN_DOA_STALE_MS + 60_000, ackMessageTs: '102.000' }));
+  await reapStaleTurnActivities(db, { SLACK_BOT_TOKEN_DEFAULT: 'x' }, { ...deps, now: 2 * TURN_DOA_STALE_MS + 120_000 });
+  assert.equal(retries.length, 1, 'strike two does NOT retry again');
+  assert.deepEqual(bumps, ['P/slack:T:C:100.000'], 'strike two resets the session');
+  assert.equal(edits[1], TURN_DIED_RESET_TEXT);
 });
 
 test('completed turn resets the DOA streak', async () => {

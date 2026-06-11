@@ -405,8 +405,16 @@ export const TURN_STALE_MS = 10 * 60_000; // a turn that showed life gets the lo
 export const TURN_DOA_STALE_MS = 3 * 60_000; // zero beats by now = the model request never started
 export const DOA_WEDGE_THRESHOLD = 2; // consecutive dead-on-arrival turns before the session is declared wedged
 export const TURN_DIED_TEXT = '⚠️ This turn died unexpectedly — mention me again to retry.';
+export const TURN_RETRYING_TEXT = '🔁 That took longer than it should — retrying…';
 export const TURN_DIED_RESET_TEXT =
   "⚠️ This turn died before it could start, twice in a row — I've reset this thread's session. Mention me again to retry.";
+
+export interface ReapableTurnRow {
+  projectId: string;
+  sessionId: string;
+  conversationId: string;
+  ackMessageTs: string;
+}
 
 export interface ReapStaleTurnsDeps {
   /** Injectable for tests; defaults to the Slack chat.update helper. */
@@ -414,6 +422,10 @@ export interface ReapStaleTurnsDeps {
   /** Bump the conversation's session epoch (abandon a wedged session DO). Wired by the caller
    *  (app.ts) to bumpAgentEpoch — injected to avoid an activity↔conversations import cycle. */
   bumpEpoch?: (projectId: string, conversationId: string) => Promise<number>;
+  /** Re-dispatch the turn's triggering message (first-strike DOA only — a transient provider
+   *  hang self-heals without anyone retyping). Returns true when a retry was dispatched. Wired
+   *  by app.ts, which owns Flue dispatch. */
+  retryTurn?: (row: ReapableTurnRow) => Promise<boolean>;
   log?: (message: string) => void;
   now?: number;
   staleMs?: number;
@@ -466,10 +478,32 @@ export async function reapStaleTurnActivities(
     reaped++;
     log(`[activity] reaped dead turn project=${row.project_id} session=${row.session_id} doa=${doa}`);
 
+    const newDoaCount = doa ? (row.doa_count ?? 0) + 1 : row.doa_count ?? 0;
+
+    // First-strike DOA: a transient provider hang — re-dispatch the triggering message once,
+    // automatically. The retried turn reuses the same ack message, so the thread reads as one
+    // evolving "retrying…" note instead of a death notice nobody asked to act on.
+    if (doa && newDoaCount === 1 && deps.retryTurn && row.conversation_id) {
+      const retried = await deps
+        .retryTurn({ projectId: row.project_id, sessionId: row.session_id, conversationId: row.conversation_id, ackMessageTs: row.ack_message_ts })
+        .catch((e) => {
+          log(`[activity] auto-retry failed: ${e instanceof Error ? e.message : 'error'}`);
+          return false;
+        });
+      if (retried) {
+        log(`[activity] auto-retry dispatched project=${row.project_id} session=${row.session_id}`);
+        const token = env[row.transport_token_ref];
+        if (typeof token === 'string' && token && row.ack_message_ts) {
+          await edit(token, row.slack_channel_id, row.ack_message_ts, TURN_RETRYING_TEXT).catch(() => {});
+        }
+        continue; // the retried turn owns the receipt now
+      }
+    }
+
     // Two consecutive DOA turns = the session DO is wedged (poisoned history rejects every model
     // request before its first token) — abandon it so the thread self-heals.
     let resetSession = false;
-    if (doa && (row.doa_count ?? 0) + 1 >= DOA_WEDGE_THRESHOLD && deps.bumpEpoch && row.conversation_id) {
+    if (doa && newDoaCount >= DOA_WEDGE_THRESHOLD && deps.bumpEpoch && row.conversation_id) {
       const epoch = await deps.bumpEpoch(row.project_id, row.conversation_id).catch(() => 0);
       if (epoch > 0) {
         resetSession = true;
