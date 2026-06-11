@@ -1,6 +1,6 @@
 ---
 name: writing-coding-issues
-description: How to write a coding issue or assignment contract sized for the autonomous coding harness: one-agent-session slices (NOT small human-sized cards), AC lines as testable assertions, a named verification command. Use after brainstorming-requirements, or directly for any well-understood ask.
+description: How to write a coding issue or assignment contract sized for the autonomous coding harness: one-agent-session slices (NOT small human-sized cards), AC lines as testable assertions, a named verification command. Use after brainstorming, or directly for any well-understood ask.
 ---
 
 # Writing coding issues (agent-sized)
@@ -48,4 +48,4 @@ express lane when the work deserves it.
   identifier and the SAME body as description.
 - Ad-hoc work: skip Linear entirely — `assign_coding_run` with the contract as description.
 - Never assign work whose design was not either approved in conversation
-  (brainstorming-requirements) or stated unambiguously by the requester.
+  (brainstorming) or stated unambiguously by the requester.
