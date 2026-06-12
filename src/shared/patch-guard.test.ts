@@ -26,7 +26,7 @@ test('Flue stream-journal patch is applied in the installed runtime', () => {
   );
   assert.ok(
     patched,
-    'PATCH(crewmate) stripPartialContentForJournal not found in @flue/runtime — ' +
+    'PATCH(hatchery) stripPartialContentForJournal not found in @flue/runtime — ' +
       'run `npx patch-package @flue/runtime` after re-applying the edit, or regenerate ' +
       'patches/@flue+runtime+*.patch for the new version (see src/shared/stream-journal.ts).',
   );
