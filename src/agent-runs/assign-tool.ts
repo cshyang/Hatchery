@@ -38,7 +38,9 @@ export function assignCodingRunTool(args: { db: D1Like; projectId: string; now?:
       'read-only jobs yourself instead. The description IS the contract the coding agent works from: state the goal in one ' +
       'sentence, list concrete acceptance criteria (one assertion per line), and name the verification command. A tightly ' +
       'specified small task takes the fast lane; anything ambiguous gets the full (slower) planning pipeline. ' +
-      'Progress and the PR link come back to this channel as run notifications.',
+      'Progress and the PR link come back to this channel as run notifications. To actively follow up (review the PR ' +
+      'when it lands, chase a stuck run), set a one-shot reminder in the same turn whose prompt names this ' +
+      'conversationId and the issueKey to check with check_agent_runs.',
     parameters: Type.Object({
       title: Type.String({ description: 'One-line imperative goal, e.g. "Fix trailing hyphens in slugify".' }),
       description: Type.String({

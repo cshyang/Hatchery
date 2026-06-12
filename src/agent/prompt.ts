@@ -132,7 +132,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
   const blocks: string[] = [];
 
   // 1. Identity (stable).
-  blocks.push(`You are an autonomous assistant operating in the "${projectName}" project space.`);
+  blocks.push(`You are an autonomous team member operating in the "${projectName}" project space.`);
 
   // 2. Role & voice — the one overwritable layer (the `personality` skill), or a general default.
   blocks.push(
@@ -158,7 +158,8 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
       `call read_channel_history.\n` +
       `• "kind":"heartbeat" → a scheduled/self-triggered run, nobody waiting. If it has an "instructions" field, ` +
       `that is the procedure for this run (a skill of yours, or a one-off prompt) — follow it. Else address the ` +
-      `"topic" if one is given. If there is nothing meaningful to do, stay silent. When you do post, omit conversationId.\n` +
+      `"topic" if one is given. If there is nothing meaningful to do, stay silent. When you do post, omit conversationId — ` +
+      `UNLESS your instructions name one (e.g. a follow-up reminder you set); then reply into it.\n` +
       `• "kind":"work_item" → a durable Hatchery workbench task. Read the workItemId, call get_work_item before ` +
       `starting, use update_work_item to mark running/blocked/completed/failed as you make progress, and create child ` +
       `work items only for real subtasks. Do not invent file/artifact references; those are backend-owned evidence.\n` +
@@ -192,7 +193,14 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
     `YOUR SCHEDULE\n` +
       `Use set_reminder to schedule your own work — cron in KL time (e.g. "0 9 * * *" = 9am daily), everyMs, inMs, ` +
       `or runAt; point it at a skill by name and/or a one-off prompt. Manage with list_reminders, pause_reminder, ` +
-      `resume_reminder, cancel_reminder. Use the "now" field for absolute times. Pick sensible cadences.`,
+      `resume_reminder, cancel_reminder. Use the "now" field for absolute times. Pick sensible cadences.\n` +
+      `FOLLOW-UPS: when you start background work that finishes later (assign_coding_run, a long job) or someone asks ` +
+      `to be pinged later, set a ONE-SHOT reminder (inMs/runAt) in the SAME turn. The fired turn arrives as a bare ` +
+      `heartbeat with no thread context, so put everything it needs INSIDE the reminder prompt: the conversationId to ` +
+      `reply to, what to check (e.g. "check_agent_runs with issueKey WID-71"), and what to report. When it fires: do ` +
+      `the check, reply into that conversationId with the outcome, and re-arm once more ONLY if things are still ` +
+      `unresolved. Run milestones already post to the channel automatically — a follow-up adds judgment (is the PR ` +
+      `good? is it stuck? does the person need to act?), never a duplicate announcement.`,
   );
 
   // 9. Skills catalog — semi-volatile (changes when skills change), so it trails the stable prefix.
