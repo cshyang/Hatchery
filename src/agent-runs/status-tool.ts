@@ -49,7 +49,7 @@ export function checkAgentRunsTool(args: { db: D1Like; projectId: string; now?: 
       'follow up on a run you assigned. Milestone notifications already post to this channel automatically; do not re-announce ' +
       'what the channel has already seen. Pass issueKey to get the latest run for one issue.',
     parameters: Type.Object({
-      issueKey: Type.Optional(Type.String({ description: 'Issue key (e.g. "KOO-71") — returns that issue\'s latest run only.' })),
+      issueKey: Type.Optional(Type.String({ description: 'Issue key (e.g. "WID-71") — returns that issue\'s latest run only.' })),
       limit: Type.Optional(Type.Number({ description: `How many recent runs to list (default ${DEFAULT_LIMIT}, max ${MAX_LIMIT}).` })),
     }),
     async execute({ issueKey, limit }) {

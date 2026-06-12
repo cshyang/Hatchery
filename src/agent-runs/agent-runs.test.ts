@@ -1056,13 +1056,13 @@ test('check_agent_runs: lists recent runs newest first with receipts, never the 
 test('check_agent_runs: issueKey matches the tracker identifier even when linear_issue_id is a UUID', async () => {
   const db = new FakeD1();
   db.routes.push(activeRoute());
-  await execAssign(db, { title: 'T', description: 'D', identifier: 'KOO-71' }, 1000);
+  await execAssign(db, { title: 'T', description: 'D', identifier: 'WID-71' }, 1000);
   // Webhook-created runs keep the Linear UUID in linear_issue_id and the key in linear_identifier.
   db.agentRuns[0].linear_issue_id = 'uuid-123';
 
-  const single = JSON.parse(await execCheck(db, { issueKey: 'KOO-71' })) as Record<string, unknown>;
-  assert.equal(single.issueKey, 'KOO-71');
-  assert.match(await execCheck(db, { issueKey: 'KOO-99' }), /No runs for "KOO-99"/);
+  const single = JSON.parse(await execCheck(db, { issueKey: 'WID-71' })) as Record<string, unknown>;
+  assert.equal(single.issueKey, 'WID-71');
+  assert.match(await execCheck(db, { issueKey: 'WID-99' }), /No runs for "WID-99"/);
 });
 
 test('check_agent_runs: empty project reports plainly and clamps the limit', async () => {
