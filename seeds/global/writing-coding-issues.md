@@ -1,6 +1,6 @@
 ---
 name: writing-coding-issues
-description: How to write a coding issue or assignment contract sized for the autonomous coding harness: one-agent-session slices (NOT small human-sized cards), AC lines as testable assertions, a named verification command. Use after brainstorming, or directly for any well-understood ask.
+description: How to write a coding issue or assignment contract sized for the autonomous coding agent: one-agent-session slices (NOT small human-sized cards), AC lines as testable assertions, a named verification command. Use after brainstorming, or directly for any well-understood ask.
 ---
 
 # Writing coding issues (agent-sized)
@@ -15,16 +15,16 @@ pipeline overhead five-fold.
 
 Ask: **"Can one AI agent plan, implement, verify, and ship this as ONE PR in one session?"**
 
-- Typical right-sized issue: a whole coherent feature, ~2000-5000 lines of additions across all
-  layers including tests. Spanning DB + API + UI is FINE when one user-visible outcome confirms
-  the whole change end-to-end.
-- Too small (under ~500 lines): planning overhead dominates. Merge it with a coupled sibling
-  into one bigger issue instead of filing confetti.
+- Typical right-sized issue: a whole coherent feature across all layers including tests.
+  Spanning DB + API + UI is FINE when one user-visible outcome confirms the whole change
+  end-to-end.
+- Too small: planning overhead dominates. Merge it with a coupled sibling into one bigger
+  issue instead of filing confetti.
 - Too big: only when the work genuinely cannot fit one session — independent outcomes with no
   shared acceptance boundary, or slice 2 cannot be designed until slice 1 ships and is observed
-  (migration bake time, telemetry-gated rollout). Then file it as ONE umbrella issue and say so
-  in the body — the harness decomposes it itself with its own reviewer gate. Do NOT pre-split
-  into child issues by hand.
+  (migration bake time, telemetry-gated rollout). Then split it YOURSELF into sequential issues
+  with one outcome each, and file only the first; file the next after its predecessor merges.
+  The agent runs one issue per session — it does not decompose umbrellas for you.
 
 ## The contract shape
 
@@ -38,9 +38,10 @@ Body, in order:
 4. **Verification** — the exact command(s): `npm test`, `bun test src/x.test.ts`.
 5. **Non-goals** — what is explicitly out of scope (this is what keeps the slice bounded).
 
-A tight contract with unambiguous goal + ACs + verification takes the harness's express lane
-(minutes); anything ambiguous routes through full planning (slower, still fine). Write for the
-express lane when the work deserves it.
+The agent works alone — there is no reviewer gate between your contract and the PR. The
+verification command is the only gate, so every AC must be checkable by it: an ambiguous
+contract does not get clarified mid-run, it gets interpreted, and you review the
+interpretation as a PR. Spend the precision here, not in the code review after.
 
 ## Filing and assigning
 
