@@ -88,6 +88,7 @@ interface Env {
   CODE_EXEC_CPU_MS?: string;
   CODE_EXEC_SUBREQUESTS?: string;
   DB?: D1Like; // D1 skill catalog, transcript, memory, and conversation targets
+  ZAI_CODING_API_KEY?: string; // Z.ai GLM coding-plan key — registers the 'zai-coding' model provider (src/agent/providers.ts)
   [binding: string]: unknown;
 }
 

@@ -1,5 +1,6 @@
 import { createAgent, defineTool, Type, type AgentRuntimeConfig, type ToolDefinition } from '@flue/runtime';
 import { bindingByProject, parseAgentInstanceId, DEFAULT_MODEL, resolveModel } from '../../src/project/bindings';
+import { ensureModelProviders } from '../../src/agent/providers';
 import { loadPersona, personaTools } from '../../src/project/persona';
 import { overhearingTools } from '../../src/project/overhearing';
 import { assignSoul, SOUL_NAME_PREFIX } from '../../src/project/souls';
@@ -40,6 +41,9 @@ import { workspaceSlackFileTools } from '../../src/workspace/slack-files';
 export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   const { projectId, slug } = parseAgentInstanceId(ctx.id);
   const env = ctx.env as Record<string, unknown>;
+  // Register secret-backed model providers in THIS DO isolate before the turn resolves its model
+  // (idempotent; no-op unless the relevant secret is set). See src/agent/providers.ts.
+  ensureModelProviders(env);
   const db = env.DB as D1Like | undefined;
   const binding = await bindingByProject(projectId, db);
 
