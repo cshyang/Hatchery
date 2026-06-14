@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
 import type { D1Like } from '../skills/repository';
-import type { Binding } from '../project/bindings';
+import { DEFAULT_MODEL, type Binding } from '../project/bindings';
 import { parseSlashCommandPayload, runSlashCommand } from './commands';
 import { listRecentAgentRuns } from '../agent-runs/repository';
 
@@ -163,7 +163,7 @@ test('unknown subcommand points at help', async () => {
 test('status reports project, default model, and unconfigured wiring', async () => {
   const out = await runSlashCommand('status', { binding, env: {} });
   assert.ok(out.includes('proj-1'));
-  assert.ok(out.includes('openrouter/deepseek/deepseek-v4-pro'));
+  assert.ok(out.includes(DEFAULT_MODEL));
   assert.ok(out.includes('default'));
   assert.ok(/Linear ingress.*not configured/.test(out));
   assert.ok(/Trigger\.dev runner.*not configured/.test(out));

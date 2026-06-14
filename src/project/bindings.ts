@@ -11,10 +11,12 @@ import { assignSoul } from './souls';
 
 export type SandboxMode = 'virtual' | 'cloudflare-sandbox' | 'daytona' | 'e2b';
 
-/** Default model when a binding doesn't pin one. deepseek-v4-pro since 2026-06-11 (live-probed:
- *  clean completions + tool calls; 1M ctx) after mimo's intermittent first-token hangs; mimo
- *  stays validated as the fallback pin. */
-export const DEFAULT_MODEL = 'openrouter/deepseek/deepseek-v4-pro';
+/** Default model when a binding doesn't pin one. Reverted to glm-5.1 on 2026-06-14: deepseek-v4-pro
+ *  (default 2026-06-11) went dead-on-arrival in live traffic — every dispatch since the swap produced
+ *  no reply (the gateway accepts the message and the turn dies at the model call; Flue posts nothing
+ *  on a dead turn, so it reads as silence). glm-5.1 was the proven default before the mimo/deepseek
+ *  detour — last-known-good. Routed via OpenRouter (the direct Z.ai provider was dropped in e5f5418). */
+export const DEFAULT_MODEL = 'openrouter/z-ai/glm-5.1';
 
 // Models whose context window we've VALIDATED — either present in pi-ai's catalog (Flue resolves
 // the window from there, e.g. openrouter/xiaomi/mimo-v2.5-pro → 1048576) or registered via
@@ -25,11 +27,17 @@ export const DEFAULT_MODEL = 'openrouter/deepseek/deepseek-v4-pro';
 // Keep it in sync with the models you actually run; when adding an uncatalogued model (e.g. a
 // specific OpenRouter id), also register its window via registerProvider so the window is KNOWN.
 export const VALIDATED_MODELS: ReadonlySet<string> = new Set([
+  // Current default. Was the proven default before the mimo/deepseek detour — clean completions +
+  // tool calls through this exact pipeline. OpenRouter ctx ~203K (catalog-resolved).
+  'openrouter/z-ai/glm-5.1',
   'openrouter/xiaomi/mimo-v2.5-pro', // catalog contextWindow 1048576
   // Probed live 2026-06-11 (direct OpenRouter calls): plain completions return clean content (no
   // reasoning chunks), tool calls produce valid tool_calls — auxiliary reasoning fields ride
   // ALONGSIDE standard deltas (unlike kimi-k2.6's content:null), which OpenAI-compat parsers
   // ignore. OpenRouter ctx 1048576. Canary-pinned per binding before becoming a default.
+  // ⚠️ 2026-06-14: made default 06-11, then produced ZERO replies in live traffic (dead-on-arrival,
+  // same symptom as kimi). Window is still valid; left here for reference, but do NOT default it
+  // again without a fresh live turn. The 06-11 "probe" was a direct API call, not a real DO turn.
   'openrouter/deepseek/deepseek-v4-pro',
   // ⚠️ kimi-k2.6 REMOVED from the recommended path (2026-06-11): it is a REASONING model —
   // streams reasoning_details chunks with content:null first — and every live turn died before
