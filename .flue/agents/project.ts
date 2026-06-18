@@ -1,4 +1,5 @@
-import { createAgent, defineTool, Type, type AgentRuntimeConfig, type ToolDefinition } from '@flue/runtime';
+import { createAgent, defineTool, type AgentRuntimeConfig, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import { bindingByProject, parseAgentInstanceId, DEFAULT_MODEL, resolveModel } from '../../src/project/bindings';
 import { ensureModelProviders } from '../../src/agent/providers';
 import { loadPersona, personaTools } from '../../src/project/persona';

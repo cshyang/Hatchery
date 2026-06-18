@@ -9,7 +9,8 @@
 // and almost always stays silent. Speaking happens only through proactive_reply, which enforces
 // venue (thread-only, this binding's channel only), budgets, and shadow mode IN CODE.
 
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import type { D1Like } from './skills/repository';
 import type { Binding } from './project/bindings';
 import type { ConversationTarget } from './project/conversations';

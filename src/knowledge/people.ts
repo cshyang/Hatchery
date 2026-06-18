@@ -7,7 +7,8 @@
 // claims are gossip and stay in channel memory. created_by records the source channel so a
 // bad entry is attributable and cleanable. Read path is tool-time (who_is), never injected.
 
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import type { D1Like } from '../skills/repository';
 
 export const GLOBAL_PROJECT_ID = '__global__';

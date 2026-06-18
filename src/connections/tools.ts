@@ -1,4 +1,5 @@
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import { dynamicApiProfile, genericApiTool, nangoProxyProfile, PROVIDER_API_PROFILES } from '../providers/generic-api';
 import { disconnectedNotice, disableConnectionByRef, loadConnections, type ConnectionState, type ResolvedConnection } from './repository';
 import { githubReadTools } from '../providers/github';

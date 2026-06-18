@@ -9,7 +9,8 @@
 // reconcile cron (*/2) claims and dispatches it — no Trigger call inside the DO turn, so the
 // ~12s fetch ceiling never applies here.
 
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import type { D1Like } from '../skills/repository';
 import { createAgentRunChannelNotifications, findActiveRouteForProject } from './events';
 import { createAgentRun, getLatestAgentRunByLinearIssue } from './repository';

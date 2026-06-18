@@ -4,7 +4,8 @@
 // streams bytes into the container as base64, so the container never sees a credential and the
 // model never sees url_private. The container only boots when the model actually loads a file.
 
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import type { D1Like } from '../skills/repository';
 import { safeJson } from '../shared/bounded';
 import { withWallClock } from '../shared/wall-clock';

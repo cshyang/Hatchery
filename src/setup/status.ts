@@ -1,4 +1,5 @@
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import type { Binding } from '../project/bindings';
 import type { D1Like } from '../skills/repository';
 import { connectionState, loadConnectionSpecs } from '../connections/repository';

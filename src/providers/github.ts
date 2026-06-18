@@ -6,7 +6,8 @@
 // post-approval executor in the gateway (ADR D4). The agent's create tool merely *proposes*
 // (see connections/tools.ts → connectionTools), so the model never reaches a write directly.
 
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import { fetchWithTimeout, jsonMessageOrText } from './http';
 
 const API = 'https://api.github.com';

@@ -14,7 +14,8 @@
 //   loadActiveSkillBody   → active only (load_skill, and the personality skill)
 //   loadRunnableSkillBody → status-aware (scheduled fire; lets the caller refuse archived/absent)
 
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 
 // Reserved project holding the shared skill baseline every channel inherits. Double-underscore can't
 // collide with a Slack channel id (e.g. "C0B6VFM…"). Skills here are seeded/operator-written; a

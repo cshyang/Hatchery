@@ -14,7 +14,8 @@
 //      almost none; Notion needs the version header it routinely forgets. The crib rides in the
 //      tool DESCRIPTION (loads only when the tool exists, right where the model decides to call).
 
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import { fetchWithTimeout, jsonMessageOrText } from './http';
 
 export interface ProviderApiProfile {

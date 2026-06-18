@@ -4,7 +4,8 @@
 // A reminder references a skill by NAME (or carries a one-off prompt) — never the skill
 // body, so edits to the skill apply to all future scheduled runs (reference, not copy).
 
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import type { D1Like } from '../skills/repository';
 import { upsertReminder, listReminders, cancelReminder, setReminderEnabled } from '../gateway/reminders-store';
 

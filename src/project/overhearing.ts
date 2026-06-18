@@ -5,7 +5,8 @@
 // budget) when it can genuinely help, without an @mention. DMs are always engaged, so the flag is
 // a no-op there.
 
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import type { D1Like } from '../skills/repository';
 import { setBindingOverhear } from './bindings';
 

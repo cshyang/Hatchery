@@ -6,7 +6,8 @@
 // this gives it an on-demand `resolve_user` tool to turn that id into a name, CACHED in D1 so each
 // person is looked up at most once (until the TTL), and only for people the agent actually asks about.
 
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import { fetchWithTimeout } from '../providers/http';
 import type { D1Like } from '../skills/repository';
 

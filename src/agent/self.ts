@@ -1,4 +1,5 @@
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import type { ProviderCatalogEntry } from '../connections/catalog';
 import type { ConnectionState } from '../connections/repository';
 

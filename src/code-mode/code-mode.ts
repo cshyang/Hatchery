@@ -1,4 +1,5 @@
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import type { D1Like } from '../skills/repository';
 import { byteLength as bytes, redactSecrets, safeJson, truncateToBytes } from '../shared/bounded';
 import { withWallClock } from '../shared/wall-clock';

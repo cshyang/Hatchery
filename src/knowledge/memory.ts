@@ -19,7 +19,8 @@
 // (we load live every turn — a fact saved this turn shows up next turn), and regex injection-
 // scanning (the real defense is the framing in renderMemory + tool-bound FUNCTION).
 
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import type { D1Like } from '../skills/repository';
 
 // Budget counts RENDERED size (fact + the `[id] ` prefix + a newline), not raw fact text, so

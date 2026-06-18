@@ -4,7 +4,8 @@
 // reconciler already posts milestone notifications to the channel, so this is for answering
 // questions and reminder-driven follow-ups, not for re-announcing.
 
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import type { D1Like } from '../skills/repository';
 import { getLatestAgentRunByIssueKey, listRecentAgentRuns, type AgentRun } from './repository';
 

@@ -9,7 +9,8 @@
 // removes stopword noise and neutralizes SQL-LIKE wildcard/operator injection (a term can never carry
 // %, _, or a quote), so the `%term%` patterns are always safe to bind.
 
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import type { D1Like } from '../skills/repository';
 
 const RAW_LIMIT = 200; // cap rows pulled for in-JS grouping; a single channel won't exceed this for a real query

@@ -10,7 +10,8 @@
 // when both are sent, so set_persona replaces both fields on every call and the identity
 // helper emits exactly one.
 
-import { defineTool, Type, type ToolDefinition } from '@flue/runtime';
+import { defineTool, type ToolDefinition } from '@flue/runtime';
+import { Type } from '@earendil-works/pi-ai';
 import type { D1Like } from '../skills/repository';
 
 export interface Persona {
