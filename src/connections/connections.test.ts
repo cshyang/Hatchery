@@ -444,7 +444,7 @@ test('request_connection: a catalog provider whose integration key is NOT enable
 });
 
 test('request_connection: a catalog provider whose key IS enabled proceeds normally', async () => {
-  // github "app" resolves to "github-app-oauth" (Hatchery's integration key) — and it's in the enabled list.
+  // github "app" resolves to "github-app-oauth" (MoreHands's integration key) — and it's in the enabled list.
   const tool = requestConnectionTool(
     { nangoSecretKey: 'nk', projectId: 'C123', enabledIntegrationKeys: ['github-app-oauth', 'notion'] },
     { startConnectSession: async () => ({ connectLink: 'https://connect.nango.dev/app', token: 't', expiresAt: 'e' }) },

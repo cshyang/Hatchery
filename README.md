@@ -1,4 +1,4 @@
-# Hatchery
+# MoreHands
 
 A channel-scoped AI teammate on Cloudflare Workers. Slack is the front door; each bound channel
 gets its own agent running in a Durable Object (via [Flue](https://flueframework.com)); Linear
@@ -10,7 +10,7 @@ Since the Flue 0.11 upgrade it deploys as **one Cloudflare Worker plus one Trigg
 
 ```
 hatchery          Slack/Linear/Nango ingress + cron clock + agent DOs + sandbox container
-run-coding-task   a Trigger.dev task that runs Pi + Agent Kits and calls Hatchery back
+run-coding-task   a Trigger.dev task that runs Pi + Agent Kits and calls MoreHands back
 ```
 
 ## Architecture
@@ -99,7 +99,7 @@ Dynamic Worker loader. Flue generates the agent DO bindings (`FLUE_PROJECT_AGENT
 `FLUE_REGISTRY`) itself.
 
 Deeper docs: [docs/deployment.md](docs/deployment.md) (setup, secrets, dashboard wiring),
-[docs/runner-contract.md](docs/runner-contract.md) (Hatchery ⇄ runner protocol),
+[docs/runner-contract.md](docs/runner-contract.md) (MoreHands ⇄ runner protocol),
 [docs/decisions/](docs/decisions/) (ADRs), [docs/planning/](docs/planning/) (design notes,
 including the [Flue 0.11 upgrade](docs/planning/flue-011-upgrade.md)).
 

@@ -1,10 +1,10 @@
 # Agent Kits Pi Runner Contract
 
-Hatchery owns the control-plane receipt. The external runner owns execution.
+MoreHands owns the control-plane receipt. The external runner owns execution.
 
 ## Dispatch
 
-For new coding routes, Hatchery dispatches:
+For new coding routes, MoreHands dispatches:
 
 ```json
 {
@@ -25,11 +25,11 @@ The runner must:
 2. Load the markdown agents, skills, and policy into Pi.
 3. Run the coding loop in session memory: scout/planner, worker, reviewer/verifier, PR.
 4. Clone, edit, test, commit, and open the PR.
-5. Call back Hatchery with the existing agent-run callback payload.
+5. Call back MoreHands with the existing agent-run callback payload.
 
-## Hatchery Responsibilities
+## MoreHands Responsibilities
 
-Hatchery records routes, runs, events, notifications, and callback metadata. It does not load Pi,
+MoreHands records routes, runs, events, notifications, and callback metadata. It does not load Pi,
 persist controller topology, run subagents inside the Durable Object, auto-merge PRs, or deploy
 production.
 

@@ -84,7 +84,7 @@ const COORDINATOR_CODE_MODE =
   `export default async function main(input) { ... }. For Python, provide async def main(input): ... . ` +
   `This is not bash, not a repo workspace, not npm install, not pip install, not persistent filesystem ` +
   `state, and not source-code editing. Do not put secrets into code/input; the Dynamic Worker receives ` +
-  `no Hatchery secrets, provider tokens, DB bindings, or Slack credentials.`;
+  `no MoreHands secrets, provider tokens, DB bindings, or Slack credentials.`;
 
 const WORKSPACE_SANDBOX =
   `WORKSPACE SANDBOX\n` +
@@ -97,7 +97,7 @@ const WORKSPACE_SANDBOX =
   `minutes and loses everything, so never assume files from earlier turns still exist — re-load inputs and ` +
   `verify with ls before reusing state. The first command after idle takes ~6s extra. Boundary: execute_code ` +
   `for small pure functions; workspace for anything touching files or shell. The container receives no ` +
-  `Hatchery secrets, provider tokens, or Slack credentials — never echo credentials into it.`;
+  `MoreHands secrets, provider tokens, or Slack credentials — never echo credentials into it.`;
 
 // Guidance on AUTHORING skills — kept consistent whether or not the catalog is empty, because
 // the failure mode of a self-improving agent is skill SPRAWL (many narrow one-off skills nobody
@@ -160,7 +160,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): string {
       `that is the procedure for this run (a skill of yours, or a one-off prompt) — follow it. Else address the ` +
       `"topic" if one is given. If there is nothing meaningful to do, stay silent. When you do post, omit conversationId — ` +
       `UNLESS your instructions name one (e.g. a follow-up reminder you set); then reply into it.\n` +
-      `• "kind":"work_item" → a durable Hatchery workbench task. Read the workItemId, call get_work_item before ` +
+      `• "kind":"work_item" → a durable MoreHands workbench task. Read the workItemId, call get_work_item before ` +
       `starting, use update_work_item to mark running/blocked/completed/failed as you make progress, and create child ` +
       `work items only for real subtasks. Do not invent file/artifact references; those are backend-owned evidence.\n` +
       `• reply_to_conversation is the ONLY way your words reach the project space. Plain text you write — INCLUDING a ` +

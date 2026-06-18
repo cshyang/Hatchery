@@ -220,7 +220,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   const agentRunnerToken = typeof env.AGENT_RUNNER_TOKEN === 'string' ? env.AGENT_RUNNER_TOKEN : '';
   const triggerSecretKey = typeof env.TRIGGER_SECRET_KEY === 'string' ? env.TRIGGER_SECRET_KEY : '';
   const runnerGithubToken = typeof env.RUNNER_GITHUB_PAT_TEMP === 'string' ? env.RUNNER_GITHUB_PAT_TEMP : '';
-  const hatcheryPublicUrl = typeof env.HATCHERY_PUBLIC_URL === 'string' ? env.HATCHERY_PUBLIC_URL : '';
+  const moreHandsPublicUrl = typeof env.HATCHERY_PUBLIC_URL === 'string' ? env.HATCHERY_PUBLIC_URL : '';
   const dynamicWorkerLoader = env.DYNAMIC_WORKER_LOADER as DynamicWorkerLoaderLike | undefined;
   const hasCodeMode = hasCodeModeCapability({ db, loader: dynamicWorkerLoader });
   const limits = codeModeLimits(env);
@@ -248,7 +248,7 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
         !!triggerSecretKey &&
         !!agentRunnerToken &&
         (connectionRuntime.state.some((s) => s.provider === 'github' && s.status === 'connected') || !!runnerGithubToken) &&
-        !!hatcheryPublicUrl,
+        !!moreHandsPublicUrl,
       hasLinearAgentIngress: typeof env.LINEAR_WEBHOOK_SECRET === 'string',
       hasCodeMode,
       codeModeLimits: hasCodeMode ? limits : null,

@@ -200,7 +200,7 @@ function tool<T = unknown>(tools: { name: string; execute?: (args: Record<string
 const request = {
   targetRepo: 'github.com/acme/hatchery',
   problem: 'self_status cannot report source evolution',
-  evidence: ['User asked whether Hatchery can evolve its own code'],
+  evidence: ['User asked whether MoreHands can evolve its own code'],
   desiredBehavior: 'The agent proposes source changes and tracks the PR result',
   acceptanceTests: ['source change proposal creates a work item', 'runner callback records a PR artifact'],
   risk: 'medium',

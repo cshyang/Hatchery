@@ -14,7 +14,7 @@ at a skill *by name*). What's missing is the **lifecycle** — the agent decidin
 retire skills — i.e. self-improvement.
 
 We studied a mature agent framework's approach as prior art and decided how much to port given
-Hatchery's constraints (Cloudflare Durable Objects + Flue, multi-tenant, data-not-code, ephemeral DO
+MoreHands's constraints (Cloudflare Durable Objects + Flue, multi-tenant, data-not-code, ephemeral DO
 filesystem, semi-trusted per ADR 0001).
 
 Three facts frame everything below:
@@ -240,7 +240,7 @@ cross-project up-flow is moot and earns no code.
 
 - The library sprawls (or N+ skills accumulate) → build the heavier curator beyond the REM prompt pass.
 - A skill proves generalizable across 2+ projects → wire the global REM worker + two-tier read path.
-- Hatchery's tool/behavior surface outgrows the always-on prompt → graduate self-knowledge into a
+- MoreHands's tool/behavior surface outgrows the always-on prompt → graduate self-knowledge into a
   loadable global skill (progressive disclosure).
 - A real need to live-tune a kernel behavior without deploy → expose that one bit via the
   personality-style override seam (do NOT open the kernel wholesale).

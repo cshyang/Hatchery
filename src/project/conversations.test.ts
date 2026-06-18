@@ -1,5 +1,5 @@
 // Conversation target invariants: ingress stores a provider-native reply target, while the
-// agent only receives Hatchery's stable conversationId and resolves the target at send time.
+// agent only receives MoreHands's stable conversationId and resolves the target at send time.
 
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';

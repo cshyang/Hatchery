@@ -294,7 +294,7 @@ const triggerDeps = {
   triggerSecretKey: 'tr_secret',
   githubToken: 'ghp_x',
   runnerToken: 'runner-secret',
-  hatcheryPublicUrl: 'https://hatchery.example',
+  moreHandsPublicUrl: 'https://hatchery.example',
 };
 
 function issuePayload(stateName = 'Run Agent', previousStateName = 'Backlog') {

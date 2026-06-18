@@ -522,7 +522,7 @@ const runnerDeps = {
   triggerSecretKey: 'tr_secret',
   githubToken: 'ghp_x',
   runnerToken: 'rt',
-  hatcheryPublicUrl: 'https://hatchery.test',
+  moreHandsPublicUrl: 'https://hatchery.test',
 };
 
 test('claimRunForDispatch is compare-and-set: only the first claim wins', async () => {
@@ -599,7 +599,7 @@ test('a 4xx runner response fails immediately (not retryable)', async () => {
 });
 
 // ── Outbox: payload → contract mapping ───────────────────────────────────────
-const mappingDeps = { triggerApiUrl: 'https://trigger.test', triggerSecretKey: 'tr_secret', githubToken: 'ghp_x', runnerToken: 'rt', hatcheryPublicUrl: 'https://hatchery.test' };
+const mappingDeps = { triggerApiUrl: 'https://trigger.test', triggerSecretKey: 'tr_secret', githubToken: 'ghp_x', runnerToken: 'rt', moreHandsPublicUrl: 'https://hatchery.test' };
 const runWith = (dispatchPayload: string): AgentRun => ({ id: 'run-1', projectId: 'P', dispatchPayload } as unknown as AgentRun);
 
 const continuationDispatchPayload = JSON.stringify({
@@ -689,7 +689,7 @@ test('claimAndDispatchRun: a resolver counts as configured and its token reaches
     sentToken = (JSON.parse(String(init?.body)) as { payload: { githubToken: string } }).payload.githubToken;
     return new Response(JSON.stringify({ id: 'run_x' }), { status: 200 });
   }) as unknown as typeof fetch;
-  const noPatWithResolver = { triggerApiUrl: 'https://trigger.test', triggerSecretKey: 'tr_secret', runnerToken: 'rt', hatcheryPublicUrl: 'https://hatchery.test', resolveGithubToken: async () => 'ghs_app', fetch: capturingFetch };
+  const noPatWithResolver = { triggerApiUrl: 'https://trigger.test', triggerSecretKey: 'tr_secret', runnerToken: 'rt', moreHandsPublicUrl: 'https://hatchery.test', resolveGithubToken: async () => 'ghs_app', fetch: capturingFetch };
 
   const result = await claimAndDispatchRun(db, created.run.id, noPatWithResolver, deps);
 
@@ -701,7 +701,7 @@ test('claimAndDispatchRun: no connection token and no PAT → requeued with a cl
   const db = new FakeD1();
   const deps = seq();
   const created = await createAgentRun(db, dispatchableInput, deps);
-  const noCred = { triggerApiUrl: 'https://trigger.test', triggerSecretKey: 'tr_secret', runnerToken: 'rt', hatcheryPublicUrl: 'https://hatchery.test', resolveGithubToken: async () => null, fetch: okFetch };
+  const noCred = { triggerApiUrl: 'https://trigger.test', triggerSecretKey: 'tr_secret', runnerToken: 'rt', moreHandsPublicUrl: 'https://hatchery.test', resolveGithubToken: async () => null, fetch: okFetch };
 
   const result = await claimAndDispatchRun(db, created.run.id, noCred, deps);
 
@@ -997,7 +997,7 @@ test('assign_coding_run: queues a run on the route grant, and the stored payload
   assert.equal(row.route_id, 'route-1');
   // Producer↔contract assertion: the row dispatches through the SAME mapper the cron uses.
   const run = (await getAgentRunById(db, String(row.id)))!;
-  const dispatch = buildRunnerDispatch(run, { githubToken: 'tok', runnerToken: 'rt', hatcheryPublicUrl: 'https://h.dev' });
+  const dispatch = buildRunnerDispatch(run, { githubToken: 'tok', runnerToken: 'rt', moreHandsPublicUrl: 'https://h.dev' });
   assert.equal(dispatch.kit, 'coding-default');
   assert.equal(dispatch.issue?.identifier, 'FRD-9');
   assert.match(dispatch.issue?.description ?? '', /bun test/);

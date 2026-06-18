@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stand up Hatchery on the currently-logged-in Cloudflare account.
+# Stand up MoreHands on the currently-logged-in Cloudflare account.
 #
 #   ./scripts/setup.sh             full run: resources -> migrate -> deploy -> secrets
 #   ./scripts/setup.sh resources   create D1 + KV, write their ids into the env file
@@ -188,7 +188,7 @@ doctor() {
   todo() { echo "  ⬜ $1"; }
   local url="${HATCHERY_PUBLIC_URL:-<worker-url>}"
 
-  echo "Hatchery doctor — env file: $ENV_FILE"
+  echo "MoreHands doctor — env file: $ENV_FILE"
   if [ ! -f "$ENV_FILE" ]; then
     bad "env file missing — cp .env.deploy.example $ENV_FILE and fill it"
     echo "✗ doctor: 1 core check failed."; exit 1

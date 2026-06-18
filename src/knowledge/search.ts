@@ -38,7 +38,7 @@ export function buildSearchTerms(query: string): string[] {
   return [...seen];
 }
 
-/** Split a Hatchery conversationId ("slack:<team>:<channel>:<thread_ts>") into its parts, or null. */
+/** Split a MoreHands conversationId ("slack:<team>:<channel>:<thread_ts>") into its parts, or null. */
 export function parseConversationId(cid: string): { team: string; channel: string; threadTs: string } | null {
   const m = String(cid ?? '').match(/^slack:([^:]+):([^:]+):(.+)$/);
   return m ? { team: m[1], channel: m[2], threadTs: m[3] } : null;

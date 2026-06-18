@@ -68,7 +68,7 @@ test('buildSelfStatus reports the live runtime manifest without exposing connect
   assert.match(status.capabilities.workspace.note, /EPHEMERAL/);
   assert.match(status.capabilities.workspace.note, /pandas/);
   assert.match(status.capabilities.workspace.note, /distinct from Code Mode/i);
-  assert.match(status.capabilities.workspace.note, /No Hatchery secrets/);
+  assert.match(status.capabilities.workspace.note, /No MoreHands secrets/);
   assert.equal(JSON.stringify(status).includes('NANGO_SECRET_KEY'), false);
   assert.equal(JSON.stringify(status).includes('OpenCode'), false);
   assert.equal(JSON.stringify(status).includes('Claude Code'), false);

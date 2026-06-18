@@ -89,21 +89,21 @@ export function buildSelfStatus(input: SelfStatusInput) {
         input.hasDb && input.hasLinearAgentIngress,
         input.hasDb ? ['propose_agent_route'] : [],
         input.hasAgentRunner
-          ? 'Admin-approved routes can turn Linear state transitions into Hatchery agent-run receipts and dispatch the Trigger.dev-hosted Pi runner with Agent Kits. Boundary events are stored in the event ledger; route activation is admin-only.'
+          ? 'Admin-approved routes can turn Linear state transitions into MoreHands agent-run receipts and dispatch the Trigger.dev-hosted Pi runner with Agent Kits. Boundary events are stored in the event ledger; route activation is admin-only.'
           : 'Linear agent-run intake and route proposals are available, but Trigger.dev runner dispatch is not configured yet. Route activation is admin-only.',
       ),
       codeMode: capability(
         input.hasCodeMode,
         ['execute_code'],
         input.hasCodeMode && input.codeModeLimits
-          ? `Coordinator Code Mode can run lightweight JavaScript and Python in Cloudflare Dynamic Workers with public network access by default. Limits: code ${input.codeModeLimits.maxCodeBytes} bytes, input ${input.codeModeLimits.maxInputBytes} bytes, output ${input.codeModeLimits.maxOutputBytes} bytes, CPU ${input.codeModeLimits.cpuMs}ms, subrequests ${input.codeModeLimits.subRequests}. It is not bash, not a repo workspace, and receives no Hatchery secrets or provider tokens.`
+          ? `Coordinator Code Mode can run lightweight JavaScript and Python in Cloudflare Dynamic Workers with public network access by default. Limits: code ${input.codeModeLimits.maxCodeBytes} bytes, input ${input.codeModeLimits.maxInputBytes} bytes, output ${input.codeModeLimits.maxOutputBytes} bytes, CPU ${input.codeModeLimits.cpuMs}ms, subrequests ${input.codeModeLimits.subRequests}. It is not bash, not a repo workspace, and receives no MoreHands secrets or provider tokens.`
           : 'Unavailable unless DB and DYNAMIC_WORKER_LOADER are configured. Code Mode is for lightweight JavaScript/Python only, not bash or repo workspaces.',
       ),
       workspace: capability(
         input.hasWorkspace,
         ['workspace_exec', 'workspace_write_file', 'workspace_read_file', 'workspace_load_slack_file', 'workspace_send_file'],
         input.hasWorkspace && input.workspaceLimits
-          ? `Workspace is a real per-project sandbox container (Ubuntu with git, node, python3 + pandas/numpy) for files, spreadsheets, shell commands, and multi-step data work — distinct from Code Mode: use execute_code for small pure functions, workspace tools for anything needing a filesystem or shell. The filesystem is EPHEMERAL (container sleeps after ~10 idle minutes and loses all files; first command after idle pays a ~6s start). Slack-attached files load into /workspace/inputs via workspace_load_slack_file; generated files post back to the thread via workspace_send_file. Limits: exec timeout ${input.workspaceLimits.execTimeoutMs}ms (max ${input.workspaceLimits.maxExecTimeoutMs}ms), output ${input.workspaceLimits.maxOutputBytes} bytes, file read/write ${input.workspaceLimits.maxReadBytes}/${input.workspaceLimits.maxWriteBytes} bytes. No Hatchery secrets, provider tokens, or Slack credentials enter the container.`
+          ? `Workspace is a real per-project sandbox container (Ubuntu with git, node, python3 + pandas/numpy) for files, spreadsheets, shell commands, and multi-step data work — distinct from Code Mode: use execute_code for small pure functions, workspace tools for anything needing a filesystem or shell. The filesystem is EPHEMERAL (container sleeps after ~10 idle minutes and loses all files; first command after idle pays a ~6s start). Slack-attached files load into /workspace/inputs via workspace_load_slack_file; generated files post back to the thread via workspace_send_file. Limits: exec timeout ${input.workspaceLimits.execTimeoutMs}ms (max ${input.workspaceLimits.maxExecTimeoutMs}ms), output ${input.workspaceLimits.maxOutputBytes} bytes, file read/write ${input.workspaceLimits.maxReadBytes}/${input.workspaceLimits.maxWriteBytes} bytes. No MoreHands secrets, provider tokens, or Slack credentials enter the container.`
           : 'Unavailable unless DB and the SANDBOX container binding are configured.',
       ),
       userLookup: capability(input.hasDb || input.hasBotToken, ['resolve_user'], 'Resolves Slack user ids via cache and, when available, Slack users.info.'),
@@ -130,7 +130,7 @@ export function buildSelfStatus(input: SelfStatusInput) {
       'No raw environment access; Worker secrets are resolved only by trusted broker/tool code.',
       'Repository/source inspection requires a connected provider such as GitHub; it is not VM-style self-introspection.',
       'Source-code evolution happens through workbench proposals, an external coding runner, PR review, and deployment; this agent does not edit or deploy its own code directly.',
-      'Linear-driven coding work is control-plane only: Hatchery records leases and callbacks; the Trigger.dev runner owns Pi execution, Agent Kit loading, clone/edit/test/commit/PR, and never auto-merges from this runtime.',
+      'Linear-driven coding work is control-plane only: MoreHands records leases and callbacks; the Trigger.dev runner owns Pi execution, Agent Kit loading, clone/edit/test/commit/PR, and never auto-merges from this runtime.',
       'Trigger.dev is the runner host, not the run-state source of truth. E2B or another sandbox/workspace provider is still required before running arbitrary third-party repos.',
       'Coordinator Code Mode can execute lightweight JavaScript/Python only when configured; it has no bash, git, npm install, pip install, persistent filesystem, or source-code write authority.',
       'External writes must go through explicit gated tools; connected read APIs do not grant arbitrary write authority.',
@@ -143,7 +143,7 @@ export function selfStatusTool(input: SelfStatusInput): ToolDefinition {
   return defineTool({
     name: 'self_status',
     description:
-      'Return your live Hatchery runtime and capability manifest for this turn. Use when the user asks what you can do, ' +
+      'Return your live MoreHands runtime and capability manifest for this turn. Use when the user asks what you can do, ' +
       'which tools/connections are available, how you work, or what your limits are. This is authoritative for current ' +
       'capability status and never exposes secrets.',
     parameters: Type.Object({}),

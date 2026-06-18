@@ -4,7 +4,7 @@ Date: 2026-05-31 · Status: Design (approved, pre-plan) · Builds on [ADR 0003](
 
 ## Goal
 
-Let the operator drop the Hatchery agent into **any channel of the existing Slack
+Let the operator drop the MoreHands agent into **any channel of the existing Slack
 workspace** and have it work immediately as its own isolated project, then let whoever
 is in that channel (operator or a non-technical teammate, "Tester") **connect tools
 through the conversation** — without a redeploy, without the credential ever entering

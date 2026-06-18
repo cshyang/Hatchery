@@ -1,7 +1,7 @@
 # Runner Contract
 
-The runner is currently a Trigger.dev task named `run-coding-task`. Hatchery dispatches the task and
-stores Trigger's run id as a foreign execution id; Hatchery remains the source of truth for
+The runner is currently a Trigger.dev task named `run-coding-task`. MoreHands dispatches the task and
+stores Trigger's run id as a foreign execution id; MoreHands remains the source of truth for
 `agent_runs`.
 
 The runner reports facts through callbacks. It does not mutate Slack, Linear, merge PRs, or deploy
@@ -23,7 +23,7 @@ decision.
 
 ## Continuation mode
 
-When a human leaves feedback on an existing PR (Linear comment now; GitHub PR review later), Hatchery
+When a human leaves feedback on an existing PR (Linear comment now; GitHub PR review later), MoreHands
 creates a *continuation* `agent_run` and dispatches it to the runner. The runner's `start` request body
 MAY now contain these additional fields (alongside today's fields):
 
@@ -33,13 +33,13 @@ MAY now contain these additional fields (alongside today's fields):
 - `prUrl: string` — the PR being iterated, for context.
 - `feedback: string` — the human's comment; treat it as the task for this turn.
 - `replyTarget: { surface: "linear" | "github", ref: string }` — opaque to the runner; echo it back in
-  callbacks so Hatchery can route the eventual reply to the surface the comment came from.
+  callbacks so MoreHands can route the eventual reply to the surface the comment came from.
 
 Reaffirmed invariants (unchanged, but they matter more here):
 - `start(runId)` is IDEMPOTENT — a re-dispatched runId must return the existing sandbox, not start a
   second job.
 - Emit `pr_opened` again after pushing continuation commits to the same branch, carrying the PR URL
-  and a short summary if available. Hatchery handles the visible reply on the source surface.
+  and a short summary if available. MoreHands handles the visible reply on the source surface.
 
 ## Runtime channel (CLI vs RPC)
 

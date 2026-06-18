@@ -76,7 +76,7 @@ interface Env {
   TRIGGER_SECRET_KEY?: string; // Trigger.dev secret key (Bearer) for the coding-task dispatch
   TRIGGER_API_URL?: string; // Trigger.dev REST base URL; defaults to https://api.trigger.dev
   RUNNER_GITHUB_PAT_TEMP?: string; // temporary GitHub PAT handed to the coding task (M0a stopgap; short-lived tokens later)
-  LINEAR_BOT_ACTOR_ID?: string; // Hatchery's own Linear actor id; its transitions never self-trigger a run
+  LINEAR_BOT_ACTOR_ID?: string; // MoreHands's own Linear actor id; its transitions never self-trigger a run
   ADMIN_CONNECTIONS_TOKEN?: string; // OWN secret guarding /__admin/connections (ADR D11 — NOT the heartbeat token)
   NANGO_SECRET_KEY?: string; // platform Bearer for the Nango API (create session / fetch token)
   NANGO_WEBHOOK_SECRET?: string; // HMAC signing key to verify inbound Nango auth webhooks
@@ -232,7 +232,7 @@ const makeGithubTokenResolver = (env: Env) => async (run: AgentRun): Promise<str
 
 // Linear is the team-facing baton for coding-agent work. The gateway verifies Linear's raw-body
 // HMAC and turns only "Issue transitioned into Run Agent" into an agent_run lease. The external
-// runner owns coding-agent/E2B/PR behavior; Hatchery only records dispatch and callback metadata.
+// runner owns coding-agent/E2B/PR behavior; MoreHands only records dispatch and callback metadata.
 app.post('/linear/webhook', async (c) => {
   const raw = await c.req.text();
   // Issue state-changes trigger NEW runs (handleLinearWebhook); comments on an issue with an existing
@@ -255,7 +255,7 @@ app.post('/linear/webhook', async (c) => {
     githubToken: c.env.RUNNER_GITHUB_PAT_TEMP, // transition fallback; resolveGithubToken is preferred
     resolveGithubToken: makeGithubTokenResolver(c.env),
     runnerToken: c.env.AGENT_RUNNER_TOKEN,
-    hatcheryPublicUrl: c.env.HATCHERY_PUBLIC_URL,
+    moreHandsPublicUrl: c.env.HATCHERY_PUBLIC_URL,
     botActorId: c.env.LINEAR_BOT_ACTOR_ID,
     fetch,
   };
@@ -339,7 +339,7 @@ app.post('/__internal/agent-runs/reconcile', async (c) => {
     githubToken: c.env.RUNNER_GITHUB_PAT_TEMP, // transition fallback; resolveGithubToken is preferred
     resolveGithubToken: makeGithubTokenResolver(c.env),
     runnerToken: c.env.AGENT_RUNNER_TOKEN,
-    hatcheryPublicUrl: c.env.HATCHERY_PUBLIC_URL,
+    moreHandsPublicUrl: c.env.HATCHERY_PUBLIC_URL,
     fetch,
   });
   const notifications = await deliverPendingSlackRunNotifications({ db, env: c.env as Record<string, unknown> });
@@ -987,7 +987,7 @@ app.post('/slack/commands', async (c) => {
   if (!binding) {
     return c.json({
       response_type: 'ephemeral',
-      text: 'This channel is not bound to a Hatchery project yet. @mention the bot first to create the binding.',
+      text: 'This channel is not bound to a MoreHands project yet. @mention the bot first to create the binding.',
     });
   }
 

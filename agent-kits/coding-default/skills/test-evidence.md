@@ -1,6 +1,6 @@
 ---
 name: test-evidence
-description: Capture verification output for the PR and Hatchery callback.
+description: Capture verification output for the PR and MoreHands callback.
 ---
 
 # Test Evidence

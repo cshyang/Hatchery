@@ -1,14 +1,14 @@
 # Deployment
 
-Hatchery deploys as a small control plane plus a separate coding runner.
+MoreHands deploys as a small control plane plus a separate coding runner.
 
 ```text
 hatchery          Cloudflare Worker + Flue Durable Objects (hosts its own crons)
 run-coding-task   Trigger.dev task that runs Pi + Agent Kits
 ```
 
-Hatchery owns routes, run receipts, events, callback auth, and notifications. Trigger.dev hosts the
-long-running coding task. The runner reports facts back to Hatchery; it does not own Linear, Slack,
+MoreHands owns routes, run receipts, events, callback auth, and notifications. Trigger.dev hosts the
+long-running coding task. The runner reports facts back to MoreHands; it does not own Linear, Slack,
 merge, or production deploy authority.
 
 ## Prerequisites
@@ -85,7 +85,7 @@ Everything account-specific lives in `.env.deploy` and is pushed as Worker secre
 | `AGENT_RUNNER_TOKEN` | hatchery | runner callback auth |
 | `HATCHERY_PUBLIC_URL` | hatchery | public callback origin for Trigger.dev |
 | `RUNNER_GITHUB_PAT_TEMP` | hatchery | temporary dogfood GitHub token sent to the runner |
-| `GITHUB_SELF_TOKEN` | hatchery | optional; capability-request issues on Hatchery's own repo (see Self-Improvement Loop) |
+| `GITHUB_SELF_TOKEN` | hatchery | optional; capability-request issues on MoreHands's own repo (see Self-Improvement Loop) |
 | `ROUTES_AUTO_ACTIVATE` | hatchery | optional; `true` auto-activates proposed agent-run routes (single-tenant dogfood — skips the admin counter-signature; repo allowlist still enforced). Leave unset for multi-tenant. |
 | `WORKBENCH_RUNNER_TOKEN`, `CODING_RUNNER_URL` | hatchery | optional source-change workbench runner |
 
@@ -112,7 +112,7 @@ Set Trigger.dev environment variables for the task (dashboard → Environment Va
 | `KIT_ROOT` | optional override when packaged kit lookup differs |
 | `HATCHERY_PI_RUNTIME` | optional; `rpc` switches the pi channel, default is `cli` — runtime var, no redeploy needed |
 
-The GitHub token and Hatchery callback token are sent in the dispatch payload by Hatchery. They do
+The GitHub token and MoreHands callback token are sent in the dispatch payload by MoreHands. They do
 not need to be standing Trigger.dev secrets.
 
 ### Agent kits
@@ -143,7 +143,7 @@ as the safety boundary for untrusted repo execution.
 
 ```text
 Git branch       code truth
-Hatchery D1      run-state truth
+MoreHands D1      run-state truth
 Trigger.dev      long-running task host
 Workspace        clone/edit/test filesystem
 ```
@@ -167,7 +167,7 @@ linear
 notion
 ```
 
-**Any other integration enabled in the Nango project is also connectable** — no Hatchery change
+**Any other integration enabled in the Nango project is also connectable** — no MoreHands change
 needed. The agent validates the name live against `GET /integrations`, the auth webhook persists the
 provider's API spec from Nango's catalog (base URL + required headers), and the call tool goes
 direct for Bearer-auth providers or relays through Nango's proxy for exotic auth. Generic providers
@@ -197,11 +197,11 @@ Then move a Linear issue into the configured `Run Agent` state. The expected loo
 
 ```text
 Linear state transition
-  -> Hatchery agent_run + event receipt
+  -> MoreHands agent_run + event receipt
   -> Trigger.dev run-coding-task
   -> Pi edits repo and opens/updates PR
-  -> Hatchery callback
-  -> Linear comment from Hatchery
+  -> MoreHands callback
+  -> Linear comment from MoreHands
 ```
 
 The runner should report `pr_opened` when the PR is ready for review. Completion should come from a
@@ -209,7 +209,7 @@ real terminal signal such as PR merge, deploy, failure, or an explicit future po
 
 ## Self-Improvement Loop (capability requests)
 
-Optional. Lets the agent turn "can you do X?" moments in Slack into GitHub issues on Hatchery's OWN
+Optional. Lets the agent turn "can you do X?" moments in Slack into GitHub issues on MoreHands's OWN
 repo (the `file-capability-request` skill: offer → explicit human confirmation → dedupe against open
 `capability-request` issues → file with the verbatim ask + requester + channel). The proposal queue
 lives with the code, not in any tenant's tracker. Filing is human-gated per request; pickup is
@@ -217,7 +217,7 @@ human too — no automated dispatch from these issues yet.
 
 Provisioning (three steps, no deploy):
 
-1. **Credential** — a fine-grained GitHub PAT: repository access = ONLY the Hatchery repo,
+1. **Credential** — a fine-grained GitHub PAT: repository access = ONLY the MoreHands repo,
    permissions = Issues read/write (Metadata read is implied). Narrow token, loose fence: the
    connection's `get-post` policy allows POST broadly, so the token's own scope is the guard.
 

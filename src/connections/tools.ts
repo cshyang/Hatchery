@@ -253,7 +253,7 @@ function connectionRequestCopy(provider: string, mode: ConnectionAuthMode, conne
   }
   if (provider === 'github' && mode === 'app') {
     return (
-      `Authorize the Hatchery GitHub App:\n${connectLink}\n\n` +
+      `Authorize the MoreHands GitHub App:\n${connectLink}\n\n` +
       'On the GitHub install/authorize screen, pick the repos to grant. The app then acts on your behalf ' +
       'with short-lived, repo-scoped tokens — bounded by what you grant (no personal access token to manage).'
     );

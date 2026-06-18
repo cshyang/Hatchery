@@ -1,4 +1,4 @@
-// Nango backend invariants (Hatchery M2) — run: npx tsx src/providers/nango.test.ts
+// Nango backend invariants (MoreHands M2) — run: npx tsx src/providers/nango.test.ts
 // Fake fetch proves the CODE shape (URL, headers, body, parsing, bounds). The real WIRE shape is
 // reconciled live in the integration task (see the plan's live-probe task) — green here != Nango-correct.
 

@@ -240,7 +240,7 @@ export function sourceChangeTools(args: SourceChangeToolArgs): ToolDefinition[] 
   const propose = defineTool({
     name: 'propose_self_change',
     description:
-      'Create a structured Hatchery workbench item for a proposed source-code change to Hatchery itself. ' +
+      'Create a structured MoreHands workbench item for a proposed source-code change to MoreHands itself. ' +
       'Use this when the agent notices a code-level improvement, bug, missing tool, or runtime limitation. ' +
       'This does NOT edit code, create a GitHub issue, merge, or deploy.',
     parameters: Type.Object({

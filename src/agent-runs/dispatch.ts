@@ -54,7 +54,7 @@ export interface RunnerDispatchDeps {
    *  fresh token. githubToken stays as the transition fallback (RUNNER_GITHUB_PAT_TEMP). */
   resolveGithubToken?: (run: AgentRun) => Promise<string | null>;
   runnerToken?: string; // callback auth: the runner echoes this on its callbacks
-  hatcheryPublicUrl?: string; // absolute origin Trigger calls back to (REQUIRED — callback is external)
+  moreHandsPublicUrl?: string; // absolute origin Trigger calls back to (REQUIRED — callback is external)
   fetch?: typeof fetch;
 }
 
@@ -75,9 +75,9 @@ class RunnerDispatchError extends Error {
   }
 }
 
-function runnerCallbackUrl(hatcheryPublicUrl: string | undefined): string | undefined {
-  if (!hatcheryPublicUrl) return undefined;
-  return `${hatcheryPublicUrl.replace(/\/+$/, '')}/__internal/agent-runs`;
+function runnerCallbackUrl(moreHandsPublicUrl: string | undefined): string | undefined {
+  if (!moreHandsPublicUrl) return undefined;
+  return `${moreHandsPublicUrl.replace(/\/+$/, '')}/__internal/agent-runs`;
 }
 
 // Map the self-contained stored row into the runner CONTRACT object. The stored dispatchPayload is the
@@ -116,7 +116,7 @@ export function buildRunnerDispatch(run: AgentRun, deps: RunnerDispatchDeps): Ru
     prUrl: stored.prUrl ?? null,
     replyTarget: stored.replyTarget ?? null,
     githubToken: deps.githubToken,
-    callback: { url: runnerCallbackUrl(deps.hatcheryPublicUrl), token: deps.runnerToken },
+    callback: { url: runnerCallbackUrl(deps.moreHandsPublicUrl), token: deps.runnerToken },
   };
   try {
     return v.parse(RunnerDispatchSchema, obj);
@@ -240,7 +240,7 @@ export async function claimAndDispatchRun(
   deps: RunnerDispatchDeps,
   clock: ClockAndIds = {},
 ): Promise<DispatchResult> {
-  if (!deps.triggerApiUrl || !deps.triggerSecretKey || !deps.runnerToken || !(deps.githubToken || deps.resolveGithubToken) || !deps.hatcheryPublicUrl) {
+  if (!deps.triggerApiUrl || !deps.triggerSecretKey || !deps.runnerToken || !(deps.githubToken || deps.resolveGithubToken) || !deps.moreHandsPublicUrl) {
     return { dispatched: false, status: 'skipped', reason: 'trigger dispatch not fully configured' };
   }
   const claimed = await claimRunForDispatch(db, runId, clock);

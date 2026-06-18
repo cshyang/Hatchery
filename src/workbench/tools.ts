@@ -14,7 +14,7 @@ export function workbenchTools(db: D1Like, projectId: string, deps: ClockAndIds 
   const create = defineTool({
     name: 'create_work_item',
     description:
-      'Record a durable project work item or child task in the Hatchery workbench. Use this for todo items, decomposition, and task tracking.',
+      'Record a durable project work item or child task in the MoreHands workbench. Use this for todo items, decomposition, and task tracking.',
     parameters: Type.Object({
       title: Type.String({ description: 'Short task title.' }),
       body: Type.Optional(Type.String({ description: 'Optional task detail, acceptance notes, or current context.' })),
@@ -42,7 +42,7 @@ export function workbenchTools(db: D1Like, projectId: string, deps: ClockAndIds 
 
   const list = defineTool({
     name: 'list_work_items',
-    description: 'List durable project work items from the Hatchery workbench, optionally filtered by status.',
+    description: 'List durable project work items from the MoreHands workbench, optionally filtered by status.',
     parameters: Type.Object({
       status: Type.Optional(Type.String({ description: 'Optional status filter, e.g. requested, running, blocked, completed.' })),
       limit: Type.Optional(Type.Number({ description: 'Maximum rows to return; defaults to 25.' })),

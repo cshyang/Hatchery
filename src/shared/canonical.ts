@@ -11,7 +11,7 @@ export interface CanonicalMessage {
   externalAccountId: string; // provider account / workspace (Slack: team id)
   projectId: string;
   externalSpaceId: string; // the space / room (Slack: channel id)
-  conversationId: string; // Hatchery-stable id: provider/account/space/native conversation
+  conversationId: string; // MoreHands-stable id: provider/account/space/native conversation
   externalConversationId: string; // provider-native conversation/thread id (Slack: thread_ts, or message ts)
   senderId: string;
   text: string;

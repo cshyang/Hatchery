@@ -105,7 +105,7 @@ async function installKitAgents(wsDir: string, kitDir: string): Promise<void> {
   await cp(agentsSrc, path.join(wsDir, '.pi', 'agents'), { recursive: true });
   await appendFile(
     path.join(wsDir, '.git', 'info', 'exclude'),
-    '\n# Hatchery runner kit — not part of the change\n.pi/\n',
+    '\n# MoreHands runner kit — not part of the change\n.pi/\n',
   );
 }
 
@@ -240,7 +240,7 @@ export const runCodingTask = task({
   // pi/GLM coding runs OOM the default small-1x (0.5GB) — confirmed TASK_PROCESS_OOM_KILLED on a
   // blogpost task. Trying small-2x (1GB); bump to medium-2x (4GB) if a real task still OOMs.
   machine: 'small-2x',
-  maxDuration: 2700, // matches the config default; a maxDuration kill skips cleanup — Hatchery's reaper closes the run.
+  maxDuration: 2700, // matches the config default; a maxDuration kill skips cleanup — MoreHands's reaper closes the run.
   run: async (raw) => {
     const d = v.parse(RunnerDispatchSchema, raw);                 // consumer↔contract assertion
     await callback(d, { contractVersion: RUNNER_CONTRACT_VERSION, runId: d.runId, status: 'running' });
@@ -337,8 +337,8 @@ export const runCodingTask = task({
       // The cloud container has no git identity (local `trigger dev` inherits ~/.gitconfig), so set a
       // deterministic one on the clone — otherwise `git commit` fails with "Please tell me who you are".
       await execFile('git', ['-C', ws.dir, 'config', 'user.email', 'runner@hatchery.dev']);
-      await execFile('git', ['-C', ws.dir, 'config', 'user.name', 'Hatchery Runner']);
-      const commitMsg = d.issue?.title ?? ('Hatchery run ' + d.runId);
+      await execFile('git', ['-C', ws.dir, 'config', 'user.name', 'MoreHands Runner']);
+      const commitMsg = d.issue?.title ?? ('MoreHands run ' + d.runId);
       await execFile('git', ['-C', ws.dir, 'commit', '-m', commitMsg]);
       const { stdout: shaOut } = await execFile('git', ['-C', ws.dir, 'rev-parse', 'HEAD']);
       const commitSha = shaOut.trim();
@@ -353,8 +353,8 @@ export const runCodingTask = task({
         repo,
         head: branch,
         base: d.baseBranch,
-        title: d.issue?.title ?? ('Hatchery run ' + d.runId),
-        body: 'Automated run by Hatchery (pi/glm-5.1). Run: ' + d.runId,
+        title: d.issue?.title ?? ('MoreHands run ' + d.runId),
+        body: 'Automated run by MoreHands (pi/glm-5.1). Run: ' + d.runId,
         token: d.githubToken,
       });
 

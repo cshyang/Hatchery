@@ -1,4 +1,4 @@
-// Nango backend (Hatchery M2). ALL Nango wire code lives here, behind the connection broker
+// Nango backend (MoreHands M2). ALL Nango wire code lives here, behind the connection broker
 // (src/connections/repository.ts). The agent never imports this; it reaches Nango only via the broker's
 // request_connection tool (start a session) and the lazy token fetch inside a connected provider's
 // call tool. Verified facts in memory/nango-integration.md (docs 404 a lot; the webhook signature
@@ -45,7 +45,7 @@ async function nangoFetch(url: string, init: RequestInit, fetchImpl: typeof fetc
 
 export interface StartConnectSessionArgs {
   secretKey: string;
-  /** Binds the future connection to this Hatchery project (the Slack channel id). Filed under
+  /** Binds the future connection to this MoreHands project (the Slack channel id). Filed under
    *  tags.end_user_id — top-level end_user/organization fields are DEPRECATED. */
   endUserId: string;
   /** Nango integration id to lock the session to. Defaults to the catalog provider slug, but may
@@ -153,7 +153,7 @@ export interface NangoIntegration {
 }
 
 /** List the integrations enabled in OUR Nango project — the dynamic half of the provider catalog.
- *  Enabling an integration in the Nango dashboard makes it connectable here, no Hatchery change. */
+ *  Enabling an integration in the Nango dashboard makes it connectable here, no MoreHands change. */
 export async function listIntegrations(args: { secretKey: string }, deps: FetchDeps = {}): Promise<NangoIntegration[]> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const res = await nangoFetch(

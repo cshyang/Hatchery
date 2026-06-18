@@ -43,7 +43,7 @@ export interface SlashCommandContext {
 const RUNS_LIMIT = 10;
 
 const HELP = [
-  '*Hatchery commands*',
+  '*MoreHands commands*',
   '• `/hatchery status` — binding, model, connections, and wiring for this channel',
   '• `/hatchery runs` — recent agent runs (Linear → Trigger.dev coding runs)',
   '• `/hatchery reminders` — scheduled reminders for this project',
@@ -74,7 +74,7 @@ async function statusCommand(ctx: SlashCommandContext): Promise<string> {
     .map((s) => `${s.provider} ${s.status === 'connected' ? 'connected' : 'not connected'}`)
     .join(', ');
   return [
-    `*Hatchery status — project \`${binding.projectId}\`*`,
+    `*MoreHands status — project \`${binding.projectId}\`*`,
     `• Model: \`${resolveModel(binding.model)}\` (${binding.model ? 'pinned' : 'default'})`,
     `• Connections: ${connections || 'none declared'}`,
     wiring('Linear ingress', hasSecret(env, 'LINEAR_WEBHOOK_SECRET')),

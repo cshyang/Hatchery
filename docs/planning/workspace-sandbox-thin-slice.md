@@ -26,7 +26,7 @@ The original "Coordinator Workspace Tasks" plan dispatched one-shot Pi-agent job
 
 ## Version pins (do not upgrade past these in this slice)
 
-- **Flue 0.9.1.** Sandbox auto-wiring is the only integration path on the published 0.9.1; Flue 0.10 removes it in favor of explicit source-root `cloudflare.ts` exports AND removes named sessions (which Hatchery's thread→session mapping depends on). The 0.10 upgrade is a separate migration project; see `flue-cloudflare-agents` skill, "0.10 upgrade watermark".
+- **Flue 0.9.1.** Sandbox auto-wiring is the only integration path on the published 0.9.1; Flue 0.10 removes it in favor of explicit source-root `cloudflare.ts` exports AND removes named sessions (which MoreHands's thread→session mapping depends on). The 0.10 upgrade is a separate migration project; see `flue-cloudflare-agents` skill, "0.10 upgrade watermark".
 - **`@cloudflare/sandbox` 0.12.1**, image `docker.io/cloudflare/sandbox:0.12.1-python` (default variant has no Python; `-python` ships pandas/numpy/matplotlib).
 - wrangler 4.99 + `@cloudflare/vite-plugin` 1.40.1 at root (already bumped; fixes `flue dev` workerd/compatibility-date skew).
 

@@ -1,6 +1,6 @@
 name: deploy
 
-# CD for Hatchery. Push to main → gate → (guard migrations) → build → deploy → smoke.
+# CD for MoreHands. Push to main → gate → (guard migrations) → build → deploy → smoke.
 # Code deploys are reversible (`wrangler rollback`); the irreversible part — D1 migrations — is NOT
 # auto-applied here (some are destructive rebuilds against the single prod DB). The guard below stops
 # a deploy whenever a migration is unapplied, so prod code never runs ahead of its schema.

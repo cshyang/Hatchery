@@ -32,7 +32,7 @@ export interface LinearWebhookRequest {
 }
 
 export interface LinearWebhookDeps extends RunnerDispatchDeps, ClockAndIds {
-  // Linear actor id of Hatchery's own integration. When set, a transition performed by that actor is
+  // Linear actor id of MoreHands's own integration. When set, a transition performed by that actor is
   // recorded but never triggers a run — closes the self-trigger loop if the bot ever moves an issue.
   botActorId?: string;
 }
@@ -219,7 +219,7 @@ function actorText(value: unknown): string | null {
 }
 
 // Self-trigger / automation guard. A human moving an issue into the trigger state is the intended baton;
-// a move by Hatchery's own integration (or any non-user actor) must be recorded, not re-triggered, or we
+// a move by MoreHands's own integration (or any non-user actor) must be recorded, not re-triggered, or we
 // loop. Linear omits `actor` on some events — when absent we treat it as human so a real move is never
 // suppressed; the loop is closed precisely once botActorId is configured (or the actor self-identifies).
 function isNonHumanActor(payload: Record<string, unknown>, botActorId: string | undefined): boolean {
@@ -412,7 +412,7 @@ export async function handleLinearComment(req: LinearWebhookRequest, deps: Linea
     if (!issueId) return { status: 200, body: { skipped: 'no issue id on comment' } };
 
     // A comment attaches to whatever run/project already owns the issue. Resolve FIRST so we do not
-    // record a boundary event for comments on issues Hatchery never ran (workspace-wide noise).
+    // record a boundary event for comments on issues MoreHands never ran (workspace-wide noise).
     const parent = await findLatestRunByLinearIssue(req.db, issueId);
     if (!parent) return { status: 200, body: { skipped: 'no run for issue' } };
     const blocked = continuationBlockReason(parent);

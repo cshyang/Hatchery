@@ -21,7 +21,7 @@ Status: Proposed (design) · Date: 2026-05-30 · Builds on [0001](0001-runtime-a
 > history at commit `56cc049`. Per-provider routing of the seam:
 > - **operator static keys (NOW):** Worker-secret ref — the v2a path.
 > - **OAuth providers (Google Ads, Meta — LATER):** a Composio/Nango account-ref; the vendor holds
->   + refreshes the token, Hatchery stores only the ref. No master key.
+>   + refreshes the token, MoreHands stores only the ref. No master key.
 > - **static-key self-service (IF the pain is real):** encrypted D1 or a managed vault — decide then.
 >
 > `pending_actions`/`approval_policies` (the write-approval machinery) return in **v2b**, which is
@@ -63,7 +63,7 @@ Status: Proposed (design) · Date: 2026-05-30 · Builds on [0001](0001-runtime-a
 
 The agent has identity, skills, memory, and self-scheduling — but no hands. It can't
 reach GitHub, analytics, or any external service. Tool-connectivity is the capability that
-turns Hatchery from "Slack assistant that remembers" into "agent that does work," and it's
+turns MoreHands from "Slack assistant that remembers" into "agent that does work," and it's
 use-case-independent: every real job needs it.
 
 This ADR specifies the **connection layer**: how a project's external credentials are
@@ -147,7 +147,7 @@ already live.
 | D3 | **Reads as direct-REST tools (v2a); GitHub remote MCP is a deferred swap** | The "use the robust MCP" thesis is sound, but MCP-in-DO connection lifetime is suspect (see Build sequence + Open #1). REST is ~5 trivial GET endpoints, stateless, nothing to `close()`. If the MCP-lifetime spike passes, swap REST->MCP behind the same `githubReadTools` seam for breadth. |
 | D4 | **The write is NOT a model-callable tool; it's a propose-tool + direct-REST executor** | Approval resolves in a *separate request* (the button click) where any live connection is gone — so the executor must be stateless direct REST regardless. The agent only proposes; the only code that exercises the PAT's write scope is the post-approval executor. |
 | D5 | **Credential values envelope-encrypted (AES-GCM) in D1; metadata-only columns otherwise** | One secret-zero (`MASTER_ENCRYPTION_KEY`, a Worker secret). No new vendor, no per-call bill. D1 stores ciphertext + fingerprint + status, never plaintext. **Honest scope:** the key lives in the same Worker env as the decrypt code and `DB`, so this defends against a *credential-store-only* leak (misscoped read replica, backup export where Worker secrets don't travel) — NOT against Worker/CF-account compromise (which yields the key too). A narrow, real win, not "strong encryption at rest." Upgrade to a KMS/Secrets-Store-backed key if the threat model hardens. |
-| D6 | **check_fn gating = the initializer builds the tool array from connection state** | Hatchery already does this for skills/memory (conditional `tools.push`). A tool is visible iff its credential is `connected`. Cleaner than a per-tool callback and fits the existing pattern. |
+| D6 | **check_fn gating = the initializer builds the tool array from connection state** | MoreHands already does this for skills/memory (conditional `tools.push`). A tool is visible iff its credential is `connected`. Cleaner than a per-tool callback and fits the existing pattern. |
 | D7 | **Approval scope tiers: once / always / deny** (Block Kit buttons) | From Hermes ("Approved once by Shyang"). `once` = approve this action; `always` = + write an `approval_policies` row so future *matching* calls skip the gate (scope rules in D9); `deny` = mark denied. Makes HITL bearable. |
 | D8 | **Operator-only approval, enforced at `app.ts` `/slack/interactivity`** | Multi-tenant: the person in-channel may be a *client*. Letting them approve a write = privilege escalation. The interactivity POST carries `user.id`. **Order matters:** verify the Slack signature FIRST, then read `user.id` ONLY from the verified payload — never from the button `value` (attacker-controllable). Known limitation: operator ids hardcoded in `bindings.ts` means a personnel change is a deploy; acceptable for v2/demo, revisit before real multi-tenant. |
 | D9 | **`always` is scoped + bounded, never "blanket approve this action"** | An `approval_policies` row is NOT keyed only by `(project, provider, action)` — that would auto-approve *any* future args (any issue, any repo). It carries a `constraint_json` (e.g. pinned `repo`), an `expires_at`, and an optional `max_per_day`. The executor re-checks the constraint at fire time. For v2b this can be **deferred entirely** (offer only `once`/`deny`); if `always` ships, it ships scoped. This is the guardrail that matters the day the same machinery points at ad-spend writes. |

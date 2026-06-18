@@ -58,7 +58,7 @@ boot the container only when actually used — the right shape for this agent.
 
 **Re-entry conditions** (revisit if any holds): Flue ships lazy/deferred workspace discovery;
 the coordinator demonstrably struggles with multi-file editing through `workspace_exec`; or
-Hatchery grows an agent persona whose primary job is file work (that persona can set
+MoreHands grows an agent persona whose primary job is file work (that persona can set
 `sandbox:` while the coordinator keeps the lazy tools — it's per-agent config).
 
 ## Out of scope
