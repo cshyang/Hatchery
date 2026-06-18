@@ -1,4 +1,4 @@
-// Slack slash-command dispatch (/hatchery <subcommand>) — run: npx tsx src/slack/commands.test.ts
+// Slack slash-command dispatch (/hands <subcommand>) — run: npx tsx src/slack/commands.test.ts
 import assert from 'node:assert/strict';
 import { createTestRunner } from '../shared/test-utils';
 import type { D1Like } from '../skills/repository';
@@ -123,9 +123,9 @@ function agentRunRow(over: Row = {}): Row {
 
 test('parseSlashCommandPayload decodes the form-encoded slash payload', () => {
   const raw =
-    'token=x&team_id=T1&channel_id=C1&user_id=U2&command=%2Fhatchery&text=runs+all&response_url=https%3A%2F%2Fhooks.slack.com%2Fr';
+    'token=x&team_id=T1&channel_id=C1&user_id=U2&command=%2Fhands&text=runs+all&response_url=https%3A%2F%2Fhooks.slack.com%2Fr';
   const p = parseSlashCommandPayload(raw);
-  assert.equal(p.command, '/hatchery');
+  assert.equal(p.command, '/hands');
   assert.equal(p.text, 'runs all');
   assert.equal(p.teamId, 'T1');
   assert.equal(p.channelId, 'C1');
@@ -133,7 +133,7 @@ test('parseSlashCommandPayload decodes the form-encoded slash payload', () => {
 });
 
 test('parseSlashCommandPayload tolerates missing fields', () => {
-  const p = parseSlashCommandPayload('command=%2Fhatchery');
+  const p = parseSlashCommandPayload('command=%2Fhands');
   assert.equal(p.text, '');
   assert.equal(p.teamId, '');
 });
@@ -143,19 +143,19 @@ test('parseSlashCommandPayload tolerates missing fields', () => {
 test('help lists every subcommand', async () => {
   const out = await runSlashCommand('help', { binding, env: {} });
   for (const cmd of ['status', 'runs', 'reminders', 'skills', 'help']) {
-    assert.ok(out.includes(`/hatchery ${cmd}`), `help should mention /hatchery ${cmd}`);
+    assert.ok(out.includes(`/hands ${cmd}`), `help should mention /hands ${cmd}`);
   }
 });
 
 test('empty text behaves like help', async () => {
   const out = await runSlashCommand('', { binding, env: {} });
-  assert.ok(out.includes('/hatchery status'));
+  assert.ok(out.includes('/hands status'));
 });
 
 test('unknown subcommand points at help', async () => {
   const out = await runSlashCommand('frobnicate', { binding, env: {} });
   assert.ok(out.includes('frobnicate'));
-  assert.ok(out.includes('/hatchery help'));
+  assert.ok(out.includes('/hands help'));
 });
 
 // ── status ────────────────────────────────────────────────────────────────────

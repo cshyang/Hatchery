@@ -1,4 +1,4 @@
-// Slack slash-command layer: /hatchery <subcommand>. One slash entry point (no per-command
+// Slack slash-command layer: /hands <subcommand>. One slash entry point (no per-command
 // manifest entries, no namespace collisions with other workspace apps); subcommands route here.
 // Read-only BY DESIGN: a group channel has no per-user privilege tiers, so slash commands are
 // observability views — mutations stay with the agent's gated tools and the /__admin routes.
@@ -44,11 +44,11 @@ const RUNS_LIMIT = 10;
 
 const HELP = [
   '*MoreHands commands*',
-  '• `/hatchery status` — binding, model, connections, and wiring for this channel',
-  '• `/hatchery runs` — recent agent runs (Linear → Trigger.dev coding runs)',
-  '• `/hatchery reminders` — scheduled reminders for this project',
-  '• `/hatchery skills` — active skill catalog',
-  '• `/hatchery help` — this list',
+  '• `/hands status` — binding, model, connections, and wiring for this channel',
+  '• `/hands runs` — recent agent runs (Linear → Trigger.dev coding runs)',
+  '• `/hands reminders` — scheduled reminders for this project',
+  '• `/hands skills` — active skill catalog',
+  '• `/hands help` — this list',
 ].join('\n');
 
 const NO_DB = 'This command needs the database binding, which is not configured on this deployment.';
@@ -116,7 +116,7 @@ async function skillsCommand(ctx: SlashCommandContext): Promise<string> {
   return ['*Skills*', ...lines].join('\n');
 }
 
-/** Dispatch `/hatchery <subcommand>` to its handler. Unknown/empty input → help. */
+/** Dispatch `/hands <subcommand>` to its handler. Unknown/empty input → help. */
 export async function runSlashCommand(text: string, ctx: SlashCommandContext): Promise<string> {
   const sub = text.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
   switch (sub) {
@@ -132,6 +132,6 @@ export async function runSlashCommand(text: string, ctx: SlashCommandContext): P
     case 'skills':
       return skillsCommand(ctx);
     default:
-      return `Unknown command \`${sub}\`. Try \`/hatchery help\`.`;
+      return `Unknown command \`${sub}\`. Try \`/hands help\`.`;
   }
 }

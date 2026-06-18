@@ -498,7 +498,7 @@ export async function failStaleRunningRun(db: D1Like, id: string, heartbeatCutof
   return getAgentRunById(db, id);
 }
 
-/** A project's most recent runs, newest first — the read behind the `/hatchery runs` slash command. */
+/** A project's most recent runs, newest first — the read behind the `/hands runs` slash command. */
 export async function listRecentAgentRuns(db: D1Like, projectId: string, limit: number): Promise<AgentRun[]> {
   const { results } = await db
     .prepare(

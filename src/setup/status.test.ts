@@ -249,9 +249,9 @@ test('setup_status surfaces the slash commands and the operator doctor check', a
     intent: 'run_agent',
   });
 
-  assert.ok(status.tips.some((t) => t.includes('/hatchery')), 'tips should mention the /hatchery slash command');
+  assert.ok(status.tips.some((t) => t.includes('/hands')), 'tips should mention the /hands slash command');
   assert.ok(status.tips.some((t) => t.includes('setup.sh doctor')), 'tips should mention the doctor check');
-  assert.match(status.slackText, /\/hatchery/);
+  assert.match(status.slackText, /\/hands/);
   assert.match(status.slackText, /setup\.sh doctor/);
   // The runner gap points operators at doctor, which shows exactly what is missing.
   const runnerGap = status.missing.find((m) => m.kind === 'runner');

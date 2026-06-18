@@ -967,7 +967,7 @@ app.post('/slack/events', async (c) => {
   return c.body(null, 200); // ack within Slack's 3s window; agent replies async
 });
 
-// Slash commands (/hatchery <subcommand>): read-only observability views, answered ephemerally
+// Slash commands (/hands <subcommand>): read-only observability views, answered ephemerally
 // in the direct slash response (all fast D1 reads — inside Slack's 3s window, no response_url).
 // Same signature verification as /slack/events; the command must also be declared in the Slack
 // app manifest or Slack won't deliver it.

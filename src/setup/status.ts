@@ -68,7 +68,7 @@ export interface SetupStatus {
 // Affordances that exist regardless of setup state; surfaced so the agent can mention them
 // instead of users discovering them from the repo docs.
 const SETUP_TIPS = [
-  'Slash commands give instant read-only views without an agent turn: `/hatchery status | runs | reminders | skills | help`.',
+  'Slash commands give instant read-only views without an agent turn: `/hands status | runs | reminders | skills | help`.',
   'Operators can verify the whole deployment leg by leg with `./scripts/setup.sh doctor`.',
 ];
 

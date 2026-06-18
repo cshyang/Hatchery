@@ -12,7 +12,7 @@
     },
     "slash_commands": [
       {
-        "command": "/hatchery",
+        "command": "/hands",
         "url": "https://REPLACE-WITH-YOUR-WORKER-URL/slack/commands",
         "description": "MoreHands status and read-only views",
         "usage_hint": "status | runs | reminders | skills | help",
