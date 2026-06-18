@@ -3,7 +3,7 @@ export type ConnectionAuthMode = 'oauth' | 'pat' | 'app';
 export type NangoIntegrationKeys = Record<string, string | Partial<Record<ConnectionAuthMode, string>>>;
 
 const DEFAULT_KEYS: Record<string, Partial<Record<ConnectionAuthMode, string>>> = {
-  github: { oauth: 'github', pat: 'github-pat', app: 'github-app' },
+  github: { oauth: 'github', pat: 'github-pat', app: 'github-app-oauth' },
   linear: { oauth: 'linear' },
   notion: { oauth: 'notion' },
 };

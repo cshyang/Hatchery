@@ -87,7 +87,24 @@ export default createAgent(async (ctx): Promise<AgentRuntimeConfig> => {
   const projectMem = db ? await loadProjectMemory(db, projectId).catch(() => []) : [];
   const memoryBlock = renderMemory(projectMem);
 
-  const connectionRuntime = await buildConnectionRuntime({ db, binding, env, projectId });
+  const connectionRuntime = await buildConnectionRuntime({
+    db,
+    binding,
+    env,
+    projectId,
+    // Post the connect link straight into the thread, so request_connection never hands the
+    // high-entropy URL to the model (which stalls reproducing it token-by-token).
+    postConnectionLink: async ({ conversationId, text }) => {
+      try {
+        const target = await resolveTarget(db, binding, projectId, slug, conversationId);
+        if (!target) return false;
+        await sendToConversationTarget(env, target, text, undefined, persona);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  });
 
   const replyToConversation = defineTool({
     name: 'reply_to_conversation',

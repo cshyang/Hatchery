@@ -405,7 +405,7 @@ test('request_connection: schema has setup metadata but NO secret/token paramete
   assert.equal(tool.name, 'request_connection');
   const props = (tool.parameters as { properties?: Record<string, unknown> }).properties ?? {};
   const keys = Object.keys(props);
-  assert.deepEqual(keys, ['provider', 'authMode', 'repo'], 'metadata only — no secret/token field exists');
+  assert.deepEqual(keys, ['provider', 'authMode', 'repo', 'conversationId'], 'metadata only — no secret/token field exists');
   for (const k of keys) assert.ok(!/secret|token|key|credential/i.test(k), `no credential-shaped param (${k})`);
 });
 
@@ -427,12 +427,96 @@ test('request_connection: starts a session bound to the channel (end_user_id = p
   });
 });
 
+test('request_connection: a catalog provider whose integration key is NOT enabled in Nango fails gracefully (no cryptic 400)', async () => {
+  // github oauth resolves to key "github", but only github-app / the sample are enabled.
+  const tool = requestConnectionTool(
+    { nangoSecretKey: 'nk', projectId: 'C123', enabledIntegrationKeys: ['github-app', 'github-getting-started', 'notion'] },
+    {
+      startConnectSession: async () => {
+        throw new Error('must not mint a session for a missing integration');
+      },
+    },
+  );
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'github', authMode: 'oauth' });
+  assert.match(out, /not enabled|isn't enabled/i, 'explains the integration is missing instead of a raw 400');
+  assert.match(out, /github-app/, 'tells the agent which github integrations ARE enabled so it can fall back');
+  assert.doesNotMatch(out, /https:\/\//, 'no link minted');
+});
+
+test('request_connection: a catalog provider whose key IS enabled proceeds normally', async () => {
+  // github "app" resolves to "github-app-oauth" (Hatchery's integration key) — and it's in the enabled list.
+  const tool = requestConnectionTool(
+    { nangoSecretKey: 'nk', projectId: 'C123', enabledIntegrationKeys: ['github-app-oauth', 'notion'] },
+    { startConnectSession: async () => ({ connectLink: 'https://connect.nango.dev/app', token: 't', expiresAt: 'e' }) },
+  );
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'github', authMode: 'app' });
+  assert.match(out, /connect\.nango\.dev\/app/, 'an enabled key mints the link as before');
+});
+
+test('request_connection: validation is skipped when the enabled list is unknown (back-compat)', async () => {
+  // No enabledIntegrationKeys passed → no gating, mints as before (the existing call sites/tests).
+  const tool = requestConnectionTool(
+    { nangoSecretKey: 'nk', projectId: 'C123' },
+    { startConnectSession: async () => ({ connectLink: 'https://connect.nango.dev/xyz', token: 't', expiresAt: 'e' }) },
+  );
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'notion' });
+  assert.match(out, /connect\.nango\.dev\/xyz/);
+});
+
+test('request_connection: with a thread poster, the high-entropy link goes to Slack and the model gets a URL-free result', async () => {
+  const posted: { conversationId: string; text: string }[] = [];
+  const fakeStart = async () => ({
+    connectLink: 'https://connect.nango.dev/?session_token=AAAA-very-long-random-session-token-BBBB',
+    token: 't',
+    expiresAt: 'e',
+  });
+  const tool = requestConnectionTool(
+    { nangoSecretKey: 'nk', projectId: 'C123' },
+    {
+      startConnectSession: fakeStart,
+      postConnectionLink: async (i) => {
+        posted.push(i);
+        return true;
+      },
+    },
+  );
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'notion', conversationId: 'slack:T:C:1.0' });
+  // The link (the thing the model would otherwise stall reproducing token-by-token) is posted to Slack…
+  assert.equal(posted.length, 1);
+  assert.match(posted[0].text, /connect\.nango\.dev/);
+  assert.equal(posted[0].conversationId, 'slack:T:C:1.0');
+  // …and the model's tool result never contains the URL, so it can't echo it.
+  assert.doesNotMatch(out, /connect\.nango\.dev/, 'the model never receives the URL');
+  assert.match(out, /posted|shared/i, 'the model is told the link is already in the thread');
+});
+
+test('request_connection: falls back to returning the link in-result when no thread can be posted to', async () => {
+  const fakeStart = async () => ({ connectLink: 'https://connect.nango.dev/xyz', token: 't', expiresAt: 'e' });
+  // Poster wired, but no conversationId to target → must still get the link to the user somehow.
+  const tool = requestConnectionTool(
+    { nangoSecretKey: 'nk', projectId: 'C123' },
+    { startConnectSession: fakeStart, postConnectionLink: async () => true },
+  );
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'notion' });
+  assert.match(out, /connect\.nango\.dev\/xyz/, 'without a conversationId, the link still reaches the model as before');
+});
+
+test('request_connection: if the direct post fails, the link falls back into the model result (never lost)', async () => {
+  const fakeStart = async () => ({ connectLink: 'https://connect.nango.dev/zzz', token: 't', expiresAt: 'e' });
+  const tool = requestConnectionTool(
+    { nangoSecretKey: 'nk', projectId: 'C123' },
+    { startConnectSession: fakeStart, postConnectionLink: async () => false },
+  );
+  const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'notion', conversationId: 'slack:T:C:1.0' });
+  assert.match(out, /connect\.nango\.dev\/zzz/, 'a failed post must not swallow the link');
+});
+
 // ── GitHub App auth mode (Phase 2: the agent can offer it) ───────────────────
 
-test('integrations: github supports the app auth mode → github-app integration key', () => {
+test('integrations: github supports the app auth mode → github-app-oauth integration key', () => {
   assert.ok(supportedAuthModes('github').includes('app'), 'github offers oauth, pat, AND app');
   assert.equal(normalizeAuthMode('github', 'app'), 'app');
-  assert.equal(nangoIntegrationKey('github', 'app'), 'github-app');
+  assert.equal(nangoIntegrationKey('github', 'app'), 'github-app-oauth');
 });
 
 test('integrations: app is github-only — linear/notion reject it', () => {
@@ -440,7 +524,7 @@ test('integrations: app is github-only — linear/notion reject it', () => {
   assert.equal(normalizeAuthMode('notion', 'app'), null);
 });
 
-test('request_connection: GitHub App mints a github-app session, needs no repo, returns install copy', async () => {
+test('request_connection: GitHub App mints a github-app-oauth session, needs no repo, returns install copy', async () => {
   const calls: { integrationId: string; tags?: Record<string, string> }[] = [];
   const fakeStart = async (a: { secretKey: string; endUserId: string; integrationId: string; tags?: Record<string, string> }) => {
     calls.push({ integrationId: a.integrationId, tags: a.tags });
@@ -449,7 +533,7 @@ test('request_connection: GitHub App mints a github-app session, needs no repo, 
   const tool = requestConnectionTool({ nangoSecretKey: 'nk', projectId: 'C123' }, { startConnectSession: fakeStart });
   const out = await (tool.execute as (a: unknown) => Promise<string>)({ provider: 'github', authMode: 'app' });
   assert.equal(calls.length, 1, 'app does NOT require a repo (unlike pat)');
-  assert.equal(calls[0].integrationId, 'github-app');
+  assert.equal(calls[0].integrationId, 'github-app-oauth');
   assert.deepEqual(calls[0].tags, { provider: 'github', auth_mode: 'app' });
   assert.match(out, /https:\/\/connect\.nango\.dev\/app/);
   assert.match(out, /install/i, 'copy explains it is an app install');

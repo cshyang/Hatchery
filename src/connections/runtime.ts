@@ -8,6 +8,7 @@ import {
   requestConnectionTool,
 } from './tools';
 import { PROVIDER_CATALOG, type ProviderCatalogEntry } from './catalog';
+import { toolCallRecorder } from './audit';
 import type { D1Like } from '../skills/repository';
 import { proposeAgentRouteTool } from '../agent-runs/route-tools';
 import { assignCodingRunTool } from '../agent-runs/assign-tool';
@@ -47,6 +48,9 @@ export async function buildConnectionRuntime(args: {
   projectId: string;
   /** Injectable for tests; defaults to the live Nango list (cached a few minutes). */
   listIntegrationsImpl?: typeof listIntegrations;
+  /** Post a connect link straight into the thread so request_connection never feeds the
+   *  high-entropy URL to the model (the connection-turn stall). Wired by the agent. */
+  postConnectionLink?: (input: { conversationId: string; text: string }) => Promise<boolean>;
 }): Promise<ConnectionRuntime> {
   const { db, binding, env, projectId } = args;
   const specs = await loadConnectionSpecs(db, binding).catch(() => binding.connections ?? []);
@@ -62,19 +66,27 @@ export async function buildConnectionRuntime(args: {
   const nangoSecretKey = typeof env.NANGO_SECRET_KEY === 'string' ? env.NANGO_SECRET_KEY : '';
   const nangoIntegrationKeys = parseNangoIntegrationKeys(env.NANGO_INTEGRATION_KEYS);
   const canRequestConnect = !!db && !!nangoSecretKey;
+  const available = canRequestConnect ? await enabledIntegrations(nangoSecretKey, args.listIntegrationsImpl ?? listIntegrations) : [];
   const nangoTools =
     canRequestConnect && db
-      ? [requestConnectionTool({ nangoSecretKey, projectId, nangoIntegrationKeys }), disconnectConnectionTool({ nangoSecretKey, projectId, db })]
+      ? [
+          requestConnectionTool(
+            { nangoSecretKey, projectId, nangoIntegrationKeys, enabledIntegrationKeys: available.map((i) => i.uniqueKey) },
+            { postConnectionLink: args.postConnectionLink },
+          ),
+          disconnectConnectionTool({ nangoSecretKey, projectId, db }),
+        ]
       : [];
   const autoActivate = env.ROUTES_AUTO_ACTIVATE === 'true'; // dogfood flag: skip the admin counter-signature on routes
   const routeTools = db
     ? [proposeAgentRouteTool({ db, projectId, autoActivate }), assignCodingRunTool({ db, projectId }), checkAgentRunsTool({ db, projectId })]
     : [];
 
-  const available = canRequestConnect ? await enabledIntegrations(nangoSecretKey, args.listIntegrationsImpl ?? listIntegrations) : [];
+  // Audit recorder bound to this project: fire-and-forget, so a dead D1 never fails a turn.
+  const audit = db ? toolCallRecorder(db, projectId) : undefined;
 
   return {
-    tools: [...nangoTools, ...routeTools, ...connectionTools(state, secrets, nangoSecretKey || undefined)],
+    tools: [...nangoTools, ...routeTools, ...connectionTools(state, secrets, nangoSecretKey || undefined, audit)],
     connectionsBlock:
       state.length || canRequestConnect ? renderConnectionsBlock(state, PROVIDER_CATALOG, canRequestConnect, available) : null,
     state,

@@ -17,6 +17,7 @@
 import { defineTool, type ToolDefinition } from '@flue/runtime';
 import { Type } from '@earendil-works/pi-ai';
 import { fetchWithTimeout, jsonMessageOrText } from './http';
+import type { ToolCallRecorder, ToolCallStatus } from '../connections/audit';
 
 export interface ProviderApiProfile {
   provider: string;
@@ -158,8 +159,15 @@ const MAX_BODY = 8000; // keep tool results small for the chat context
 const FETCH_TIMEOUT_MS = 12_000;
 
 /** The generic call tool for one connected provider. `secret` is the resolved credential; `config`
- *  is the connection's non-secret config (e.g. {repo}). Returns ONE tool named `<provider>_call_api`. */
-export function genericApiTool(profile: ProviderApiProfile, secret: string | (() => Promise<string>), config: Record<string, unknown>): ToolDefinition {
+ *  is the connection's non-secret config (e.g. {repo}). Returns ONE tool named `<provider>_call_api`.
+ *  `audit` (optional) gets one record per call — every outcome, including policy refusals: a blocked
+ *  DELETE is exactly the injection-probe trace the log exists to catch. */
+export function genericApiTool(
+  profile: ProviderApiProfile,
+  secret: string | (() => Promise<string>),
+  config: Record<string, unknown>,
+  audit?: ToolCallRecorder,
+): ToolDefinition {
   const policy = effectiveMethodPolicy(profile, config);
   const getOnly = policy === 'get-only';
   const methodNote =
@@ -185,16 +193,18 @@ export function genericApiTool(profile: ProviderApiProfile, secret: string | (()
     }),
     async execute({ method, path, body }) {
       const m = String(method).toUpperCase();
+      const p = String(path).startsWith('/') ? String(path) : `/${String(path)}`;
       if (getOnly && m !== 'GET') {
+        audit?.({ provider: profile.provider, method: m, path: p, status: 'blocked', durationMs: 0 });
         throw new Error(`Only GET is allowed for ${profile.provider} via ${profile.provider}_call_api; "${m}" is a write and needs approval (not wired yet).`);
       }
       if (policy === 'get-post' && m !== 'GET' && m !== 'POST') {
+        audit?.({ provider: profile.provider, method: m, path: p, status: 'blocked', durationMs: 0 });
         throw new Error(`"${m}" is blocked for ${profile.provider} via ${profile.provider}_call_api — destructive verbs need an operator to set methodPolicy:"all" on this connection.`);
       }
       // Resolve the credential at the network boundary: a literal Worker secret, or a lazy Nango
       // token fetched (and per-turn-memoized) only now that a call is actually being made.
       const resolvedSecret = typeof secret === 'function' ? await secret() : secret;
-      const p = String(path).startsWith('/') ? String(path) : `/${String(path)}`;
       const headers: Record<string, string> = {
         ...profile.auth(resolvedSecret),
         ...(profile.staticHeaders ?? {}),
@@ -206,18 +216,25 @@ export function genericApiTool(profile: ProviderApiProfile, secret: string | (()
         headers['content-type'] = 'application/json';
         init.body = String(body);
       }
-      const res = await fetchWithTimeout(`${profile.baseUrl}${p}`, init, {
-        timeoutMs: FETCH_TIMEOUT_MS,
-        timeoutMessage: `${profile.provider} request timed out after ${FETCH_TIMEOUT_MS}ms (${m} ${p}). Try a narrower call.`,
-        failurePrefix: `${profile.provider} request failed`,
-      });
-      const text = await res.text();
-      if (!res.ok) {
-        const msg = jsonMessageOrText(text, 300);
-        throw new Error(`${profile.provider} ${res.status}: ${msg}`);
+      const started = Date.now();
+      let status: ToolCallStatus = 'fetch_error'; // a throw out of fetchWithTimeout leaves this standing
+      try {
+        const res = await fetchWithTimeout(`${profile.baseUrl}${p}`, init, {
+          timeoutMs: FETCH_TIMEOUT_MS,
+          timeoutMessage: `${profile.provider} request timed out after ${FETCH_TIMEOUT_MS}ms (${m} ${p}). Try a narrower call.`,
+          failurePrefix: `${profile.provider} request failed`,
+        });
+        status = res.ok ? 'success' : 'http_error';
+        const text = await res.text();
+        if (!res.ok) {
+          const msg = jsonMessageOrText(text, 300);
+          throw new Error(`${profile.provider} ${res.status}: ${msg}`);
+        }
+        const out = text ?? '';
+        return out.length > MAX_BODY ? out.slice(0, MAX_BODY) + '\n…(truncated)' : out;
+      } finally {
+        audit?.({ provider: profile.provider, method: m, path: p, status, durationMs: Date.now() - started });
       }
-      const out = text ?? '';
-      return out.length > MAX_BODY ? out.slice(0, MAX_BODY) + '\n…(truncated)' : out;
     },
   });
 }

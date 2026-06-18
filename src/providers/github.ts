@@ -9,6 +9,7 @@
 import { defineTool, type ToolDefinition } from '@flue/runtime';
 import { Type } from '@earendil-works/pi-ai';
 import { fetchWithTimeout, jsonMessageOrText } from './http';
+import type { ToolCallRecorder, ToolCallStatus } from '../connections/audit';
 
 const API = 'https://api.github.com';
 const UA = 'hatchery-agent'; // GitHub requires a User-Agent or returns 403.
@@ -27,19 +28,27 @@ function ghHeaders(pat: string): Record<string, string> {
 // blockConcurrencyWhile(onStart) times out and resets the DO mid-turn.
 const GH_FETCH_TIMEOUT_MS = 12_000;
 
-async function ghGet(pat: string, path: string): Promise<unknown> {
-  const res = await fetchWithTimeout(`${API}${path}`, { headers: ghHeaders(pat) }, {
-    timeoutMs: GH_FETCH_TIMEOUT_MS,
-    timeoutMessage: `GitHub request timed out after ${GH_FETCH_TIMEOUT_MS}ms (${path}).`,
-    failurePrefix: 'GitHub request failed',
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    // Surface a sanitized error to the model — status + GitHub's message, never the PAT.
-    const msg = jsonMessageOrText(text, 200);
-    throw new Error(`GitHub ${res.status}: ${msg}`);
+// The single funnel every typed read goes through — which makes it the one audit point too.
+async function ghGet(pat: string, audit: ToolCallRecorder | undefined, path: string): Promise<unknown> {
+  const started = Date.now();
+  let status: ToolCallStatus = 'fetch_error'; // a throw out of fetchWithTimeout leaves this standing
+  try {
+    const res = await fetchWithTimeout(`${API}${path}`, { headers: ghHeaders(pat) }, {
+      timeoutMs: GH_FETCH_TIMEOUT_MS,
+      timeoutMessage: `GitHub request timed out after ${GH_FETCH_TIMEOUT_MS}ms (${path}).`,
+      failurePrefix: 'GitHub request failed',
+    });
+    status = res.ok ? 'success' : 'http_error';
+    const text = await res.text();
+    if (!res.ok) {
+      // Surface a sanitized error to the model — status + GitHub's message, never the PAT.
+      const msg = jsonMessageOrText(text, 200);
+      throw new Error(`GitHub ${res.status}: ${msg}`);
+    }
+    return text ? JSON.parse(text) : null;
+  } finally {
+    audit?.({ provider: 'github', method: 'GET', path, status, durationMs: Date.now() - started });
   }
-  return text ? JSON.parse(text) : null;
 }
 
 // Trim GitHub's enormous objects to what's useful in chat (keeps tool results small).
@@ -58,7 +67,7 @@ function slimIssue(i: Record<string, unknown>): Record<string, unknown> {
 
 /** Read-only GitHub tools, scoped to a repo via the connection's config (config.repo = "owner/name").
  *  Pass the decrypted PAT — these run at execute-time, so the PAT is used only when a tool fires. */
-export function githubReadTools(pat: string, repo: string | undefined): ToolDefinition[] {
+export function githubReadTools(pat: string, repo: string | undefined, audit?: ToolCallRecorder): ToolDefinition[] {
   const repoHint = repo ? ` Defaults to the connected repo (${repo}) when owner/name are omitted.` : '';
   const resolveRepo = (owner?: string, name?: string): { owner: string; name: string } => {
     if (owner && name) return { owner, name };
@@ -80,7 +89,7 @@ export function githubReadTools(pat: string, repo: string | undefined): ToolDefi
     async execute({ owner, repo: r, state }) {
       const { owner: o, name: n } = resolveRepo(owner as string | undefined, r as string | undefined);
       const st = ['open', 'closed', 'all'].includes(String(state)) ? String(state) : 'open';
-      const data = (await ghGet(pat, `/repos/${o}/${n}/issues?state=${st}&sort=updated&per_page=20`)) as Record<
+      const data = (await ghGet(pat, audit, `/repos/${o}/${n}/issues?state=${st}&sort=updated&per_page=20`)) as Record<
         string,
         unknown
       >[];
@@ -100,7 +109,7 @@ export function githubReadTools(pat: string, repo: string | undefined): ToolDefi
     }),
     async execute({ number, owner, repo: r }) {
       const { owner: o, name: n } = resolveRepo(owner as string | undefined, r as string | undefined);
-      const i = (await ghGet(pat, `/repos/${o}/${n}/issues/${Number(number)}`)) as Record<string, unknown>;
+      const i = (await ghGet(pat, audit, `/repos/${o}/${n}/issues/${Number(number)}`)) as Record<string, unknown>;
       return JSON.stringify({ ...slimIssue(i), body: i.body }, null, 2);
     },
   });
@@ -111,7 +120,7 @@ export function githubReadTools(pat: string, repo: string | undefined): ToolDefi
       'Search GitHub issues/PRs with the GitHub search syntax (e.g. "repo:owner/name is:issue is:open label:bug").',
     parameters: Type.Object({ q: Type.String({ description: 'GitHub issue-search query.' }) }),
     async execute({ q }) {
-      const data = (await ghGet(pat, `/search/issues?q=${encodeURIComponent(String(q))}&per_page=20`)) as {
+      const data = (await ghGet(pat, audit, `/search/issues?q=${encodeURIComponent(String(q))}&per_page=20`)) as {
         total_count: number;
         items: Record<string, unknown>[];
       };
@@ -124,7 +133,7 @@ export function githubReadTools(pat: string, repo: string | undefined): ToolDefi
     description: 'Search code with the GitHub code-search syntax (e.g. "repo:owner/name connectMcpServer").',
     parameters: Type.Object({ q: Type.String({ description: 'GitHub code-search query.' }) }),
     async execute({ q }) {
-      const data = (await ghGet(pat, `/search/code?q=${encodeURIComponent(String(q))}&per_page=20`)) as {
+      const data = (await ghGet(pat, audit, `/search/code?q=${encodeURIComponent(String(q))}&per_page=20`)) as {
         total_count: number;
         items: { path?: string; repository?: { full_name?: string }; html_url?: string }[];
       };
@@ -145,7 +154,7 @@ export function githubReadTools(pat: string, repo: string | undefined): ToolDefi
     async execute({ path, owner, repo: r, ref }) {
       const { owner: o, name: n } = resolveRepo(owner as string | undefined, r as string | undefined);
       const q = ref ? `?ref=${encodeURIComponent(String(ref))}` : '';
-      const data = (await ghGet(pat, `/repos/${o}/${n}/contents/${String(path)}${q}`)) as {
+      const data = (await ghGet(pat, audit, `/repos/${o}/${n}/contents/${String(path)}${q}`)) as {
         content?: string;
         encoding?: string;
         size?: number;
