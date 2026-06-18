@@ -43,7 +43,7 @@ Reaffirmed invariants (unchanged, but they matter more here):
 
 ## Runtime channel (CLI vs RPC)
 
-How the runner drives `pi` is selected by `HATCHERY_PI_RUNTIME` — default `cli` (one-shot `pi -p`,
+How the runner drives `pi` is selected by `MOREHANDS_PI_RUNTIME` — default `cli` (one-shot `pi -p`,
 prod-proven), or `rpc` (long-lived `pi --mode rpc` via `trigger/pi-rpc-client.ts`, opt-in, being proven
 in-container). The flag exists so RPC can be A/B'd on real deploys before it's promoted; failure logs
 tag `runtime=…`. Rationale and the promote-when-container-proven plan: `docs/decisions/0004-pi-runner-channel.md`.

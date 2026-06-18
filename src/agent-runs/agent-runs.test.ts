@@ -608,7 +608,7 @@ const continuationDispatchPayload = JSON.stringify({
   parentRunId: 'run-parent',
   targetRepo: 'https://github.com/acme/repo',
   baseBranch: 'main',
-  targetBranch: 'hatchery/lin-42',
+  targetBranch: 'morehands/lin-42',
   prUrl: 'https://github.com/acme/repo/pull/7',
   kit: 'coding-default',
   runtime: 'pi',
@@ -635,7 +635,7 @@ test('buildRunnerDispatch maps a continuation payload with issue null and carrie
   assert.equal(dispatch.mode, 'continuation');
   assert.equal(dispatch.issue, null);
   assert.equal(dispatch.feedback, 'use the existing helper');
-  assert.equal(dispatch.targetBranch, 'hatchery/lin-42');
+  assert.equal(dispatch.targetBranch, 'morehands/lin-42');
   assert.equal(dispatch.prUrl, 'https://github.com/acme/repo/pull/7');
 });
 
@@ -916,10 +916,10 @@ test('createAgentRun persists an explicit branch when given', async () => {
   const db = new FakeD1();
   const { run } = await createAgentRun(
     db,
-    { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'k-branch', targetRepo: 'https://github.com/o/r', branch: 'hatchery/eng-1' },
+    { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'k-branch', targetRepo: 'https://github.com/o/r', branch: 'morehands/eng-1' },
     seq(),
   );
-  assert.equal(run.branch, 'hatchery/eng-1');
+  assert.equal(run.branch, 'morehands/eng-1');
 });
 
 test('updateAgentRun round-trips triggerRunId', async () => {

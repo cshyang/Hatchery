@@ -14,7 +14,7 @@ The runner drives the `pi` coding agent. Three ways to do that:
 
 ## Decision
 
-**Default to the CLI. RPC is opt-in behind `HATCHERY_PI_RUNTIME=rpc`. The SDK is rejected for now.**
+**Default to the CLI. RPC is opt-in behind `MOREHANDS_PI_RUNTIME=rpc`. The SDK is rejected for now.**
 
 - **CLI default** — prod-proven, simplest lifecycle (spawn → it exits → read outcome), minimal coupling (~6 flags). Its one wart — the exit code lies, `pi` exits 0 even when the model call errored — is fixed: the outcome comes from `parsePiStream` / `outcomeFromEvents` (a terminal `agent_end` whose final-turn `stopReason` isn't `"error"`), not the exit code.
 - **RPC flagged, not promoted** — it adds live progress streaming, mid-run steer/abort, and a natural home for conversational continuation, but it's a long-lived process you must babysit (child-death detection, pi's SIGTERM-trap, cleanup within `maxDuration`) and is only locally-proven. Adopt it *only* on a forward bet on interactive agents — **not** on tracing/outcomes/robustness, which are parity or CLI-favored (both modes emit the same `AgentEvent` stream).
@@ -22,7 +22,7 @@ The runner drives the `pi` coding agent. Three ways to do that:
 
 ## Promotion path (do not big-bang)
 
-1. Set `HATCHERY_PI_RUNTIME=rpc` on a Trigger deploy and run real tasks.
+1. Set `MOREHANDS_PI_RUNTIME=rpc` on a Trigger deploy and run real tasks.
 2. Confirm in the **container**, not just locally: lifecycle within `maxDuration`, OOM-mid-stream → clean `failed` (not a hang or zombie pi). Failure logs tag `runtime=rpc` to tell the paths apart.
 3. Promote to default only once it's clean — then **delete the CLI path**. Don't carry both indefinitely.
 

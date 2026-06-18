@@ -22,7 +22,7 @@ import { Type } from '@earendil-works/pi-ai';
 // channel agent can only ever write its OWN project's skills (save/archive/restore stay channel-scoped),
 // so it can never edit the shared baseline.
 export const GLOBAL_PROJECT_ID = '__global__';
-export const PROTECTED_PLATFORM_SKILL_NAMES = new Set(['hatchery']);
+export const PROTECTED_PLATFORM_SKILL_NAMES = new Set(['morehands']);
 
 export function isProtectedPlatformSkillName(name: string): boolean {
   return PROTECTED_PLATFORM_SKILL_NAMES.has(name);

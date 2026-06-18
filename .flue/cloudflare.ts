@@ -34,7 +34,7 @@ async function callInternal(env: ScheduledEnv, ctx: ExecutionCtx, path: string, 
   const res = await app.fetch(
     new Request(`https://hatchery.internal${path}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-hatchery-token': env.HEARTBEAT_TOKEN ?? '' },
+      headers: { 'content-type': 'application/json', 'x-morehands-token': env.HEARTBEAT_TOKEN ?? '' },
       body: JSON.stringify(body ?? {}),
     }),
     env,

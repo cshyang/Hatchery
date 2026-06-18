@@ -8,11 +8,11 @@
 #   ./scripts/setup.sh secrets     push secrets from the env file to the worker
 #   ./scripts/setup.sh manifest [url]   print the Slack app manifest with the worker URL filled
 #                                  in, ready to paste at api.slack.com/apps -> App Manifest
-#                                  (url defaults to HATCHERY_PUBLIC_URL from the env file)
+#                                  (url defaults to MOREHANDS_PUBLIC_URL from the env file)
 #   ./scripts/setup.sh doctor      verify the deployment leg by leg: config, worker, Slack,
 #                                  optional integrations — with the exact next step for each gap
 #
-# Multi-account: HATCHERY_ENV selects the env file — HATCHERY_ENV=work reads .env.deploy.work
+# Multi-account: MOREHANDS_ENV selects the env file — MOREHANDS_ENV=work reads .env.deploy.work
 # (default: .env.deploy). Account-specific resource ids (D1/KV) live in the env file, NOT in
 # wrangler.jsonc: `resources` writes them there and `deploy` patches the BUILT dist config, so
 # deploying to a second account never dirties a tracked file. The ids committed in wrangler.jsonc
@@ -28,7 +28,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-ENV_FILE=".env.deploy${HATCHERY_ENV:+.$HATCHERY_ENV}"
+ENV_FILE=".env.deploy${MOREHANDS_ENV:+.$MOREHANDS_ENV}"
 DB_NAME="hatchery-skills"
 KV_BINDING="SLACK_EVENTS"
 WORKER="hatchery"
@@ -114,12 +114,12 @@ deploy() {
   fi
   DEPLOY_OUT="$(wrangler deploy --config "dist/$WORKER/wrangler.json" 2>&1 | tee /dev/stderr)"
   # Autofill the public URL on first deploy so manifest/doctor/secrets can use it.
-  if [ -z "${HATCHERY_PUBLIC_URL:-}" ]; then
+  if [ -z "${MOREHANDS_PUBLIC_URL:-}" ]; then
     URL="$(printf '%s' "$DEPLOY_OUT" | grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' | head -1 || true)"
     if [ -n "$URL" ]; then
-      set_env_kv HATCHERY_PUBLIC_URL "$URL"
-      HATCHERY_PUBLIC_URL="$URL"
-      echo "✓ HATCHERY_PUBLIC_URL=$URL written to $ENV_FILE"
+      set_env_kv MOREHANDS_PUBLIC_URL "$URL"
+      MOREHANDS_PUBLIC_URL="$URL"
+      echo "✓ MOREHANDS_PUBLIC_URL=$URL written to $ENV_FILE"
     fi
   fi
   echo "✓ deployed. Use the worker URL above for the Slack/Nango/Linear webhooks."
@@ -155,7 +155,7 @@ secrets() {
   fi
   # Bulk file holds only the keys that are actually set (blanks skipped → feature stays inert).
   HEARTBEAT_TOKEN="$HEARTBEAT_TOKEN" BULK_FILE="$BULK_FILE" node -e '
-    const keys=["OPENROUTER_API_KEY","HEARTBEAT_TOKEN","SLACK_SIGNING_SECRET","SLACK_BOT_TOKEN_DEFAULT","KNOWN_TEAM_IDS","SLACK_BOT_ID","SLACK_DEFAULT_TOKEN_REF","ADMIN_CONNECTIONS_TOKEN","NANGO_SECRET_KEY","NANGO_WEBHOOK_SECRET","LINEAR_WEBHOOK_SECRET","TRIGGER_SECRET_KEY","TRIGGER_API_URL","AGENT_RUNNER_TOKEN","HATCHERY_PUBLIC_URL","RUNNER_GITHUB_PAT_TEMP","LINEAR_AGENT_PROJECTS","WORKBENCH_RUNNER_TOKEN","CODING_RUNNER_URL","TAVILY_API_KEY"];
+    const keys=["OPENROUTER_API_KEY","HEARTBEAT_TOKEN","SLACK_SIGNING_SECRET","SLACK_BOT_TOKEN_DEFAULT","KNOWN_TEAM_IDS","SLACK_BOT_ID","SLACK_DEFAULT_TOKEN_REF","ADMIN_CONNECTIONS_TOKEN","NANGO_SECRET_KEY","NANGO_WEBHOOK_SECRET","LINEAR_WEBHOOK_SECRET","TRIGGER_SECRET_KEY","TRIGGER_API_URL","AGENT_RUNNER_TOKEN","MOREHANDS_PUBLIC_URL","RUNNER_GITHUB_PAT_TEMP","LINEAR_AGENT_PROJECTS","WORKBENCH_RUNNER_TOKEN","CODING_RUNNER_URL","TAVILY_API_KEY"];
     const out={}; for(const k of keys){const v=process.env[k]; if(v&&String(v).trim()) out[k]=String(v);}
     require("fs").writeFileSync(process.env.BULK_FILE, JSON.stringify(out));
   '
@@ -169,8 +169,8 @@ secrets() {
 }
 
 manifest() {
-  local url="${1:-${HATCHERY_PUBLIC_URL:-}}"
-  [ -n "$url" ] || { echo "❌ No worker URL. Set HATCHERY_PUBLIC_URL in $ENV_FILE or pass one: ./scripts/setup.sh manifest https://hatchery.<account>.workers.dev"; exit 1; }
+  local url="${1:-${MOREHANDS_PUBLIC_URL:-}}"
+  [ -n "$url" ] || { echo "❌ No worker URL. Set MOREHANDS_PUBLIC_URL in $ENV_FILE or pass one: ./scripts/setup.sh manifest https://hatchery.<account>.workers.dev"; exit 1; }
   # Parse → substitute → reprint: validates the JSON and drops the repo-reader _comment so the
   # output is exactly what api.slack.com/apps -> App Manifest expects.
   URL="${url%/}" node -e '
@@ -186,7 +186,7 @@ doctor() {
   ok()   { echo "  ✅ $1"; }
   bad()  { echo "  ✗ $1"; fails=$((fails + 1)); }
   todo() { echo "  ⬜ $1"; }
-  local url="${HATCHERY_PUBLIC_URL:-<worker-url>}"
+  local url="${MOREHANDS_PUBLIC_URL:-<worker-url>}"
 
   echo "MoreHands doctor — env file: $ENV_FILE"
   if [ ! -f "$ENV_FILE" ]; then
@@ -210,18 +210,18 @@ doctor() {
   fi
 
   echo "worker:"
-  if [ -n "${HATCHERY_PUBLIC_URL:-}" ]; then
+  if [ -n "${MOREHANDS_PUBLIC_URL:-}" ]; then
     local code
-    code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -X POST "$HATCHERY_PUBLIC_URL/slack/events" || true)"
+    code="$(curl -s -o /dev/null -w '%{http_code}' -m 10 -X POST "$MOREHANDS_PUBLIC_URL/slack/events" || true)"
     [ -n "$code" ] || code=000
     # An unsigned POST must bounce with 401 — that proves the worker is live AND verifying signatures.
     if [ "$code" = "401" ]; then
-      ok "worker live at $HATCHERY_PUBLIC_URL (unsigned /slack/events → 401)"
+      ok "worker live at $MOREHANDS_PUBLIC_URL (unsigned /slack/events → 401)"
     else
-      bad "POST $HATCHERY_PUBLIC_URL/slack/events returned $code (expected 401) — not deployed, wrong URL, or SLACK_SIGNING_SECRET not pushed"
+      bad "POST $MOREHANDS_PUBLIC_URL/slack/events returned $code (expected 401) — not deployed, wrong URL, or SLACK_SIGNING_SECRET not pushed"
     fi
   else
-    todo "HATCHERY_PUBLIC_URL not set — ./scripts/setup.sh deploy autofills it"
+    todo "MOREHANDS_PUBLIC_URL not set — ./scripts/setup.sh deploy autofills it"
   fi
 
   echo "slack:"
@@ -285,7 +285,7 @@ checklist() {
               webhook URL → <URL>/nango/webhook
 	  [ ] Linear  webhook URL → <URL>/linear/webhook ; enable Issue + Comment events
 	  [ ] Runner  create/deploy the Trigger.dev run-coding-task ; set TRIGGER_SECRET_KEY,
-	              AGENT_RUNNER_TOKEN, HATCHERY_PUBLIC_URL, RUNNER_GITHUB_PAT_TEMP ; re-run secrets
+	              AGENT_RUNNER_TOKEN, MOREHANDS_PUBLIC_URL, RUNNER_GITHUB_PAT_TEMP ; re-run secrets
 
   ./scripts/setup.sh doctor  re-checks all of this leg by leg, any time.
 ──────────────────────────────────────────────────────────────────────────
@@ -300,5 +300,5 @@ case "${1:-full}" in
   manifest)  manifest "${2:-}" ;;
   doctor)    doctor ;;
   full)      resources; migrate; deploy; secrets; checklist ;;
-  *) echo "usage: [HATCHERY_ENV=<name>] $0 [full|resources|migrate|deploy|secrets|manifest [url]|doctor]"; exit 1 ;;
+  *) echo "usage: [MOREHANDS_ENV=<name>] $0 [full|resources|migrate|deploy|secrets|manifest [url]|doctor]"; exit 1 ;;
 esac

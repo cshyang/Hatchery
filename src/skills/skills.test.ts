@@ -266,23 +266,23 @@ test('toolset has no hard-delete', async () => {
 
 test('project skills cannot shadow protected platform self-knowledge', async () => {
   const db = new FakeD1();
-  const base = { description: 'Use when testing hatchery.', state: 'active', created_by: 'seed', updated_by: 'seed', created_at: 1, updated_at: 1, archived_at: null };
-  db.rows.push({ project_id: '__global__', name: 'hatchery', body_md: mkmd('hatchery', 'GLOBAL'), ...base });
+  const base = { description: 'Use when testing morehands.', state: 'active', created_by: 'seed', updated_by: 'seed', created_at: 1, updated_at: 1, archived_at: null };
+  db.rows.push({ project_id: '__global__', name: 'morehands', body_md: mkmd('morehands', 'GLOBAL'), ...base });
 
   await assert.rejects(
-    () => invoke(skillTools(db, 'P'), 'save_skill', { skill_md: mkmd('hatchery', 'LOCAL') }),
+    () => invoke(skillTools(db, 'P'), 'save_skill', { skill_md: mkmd('morehands', 'LOCAL') }),
     /protected platform skill/,
   );
-  assert.equal(await loadActiveSkillBody(db, 'P', 'hatchery'), mkmd('hatchery', 'GLOBAL'));
+  assert.equal(await loadActiveSkillBody(db, 'P', 'morehands'), mkmd('morehands', 'GLOBAL'));
 });
 
 test('project skills cannot restore a protected local override', async () => {
   const db = new FakeD1();
-  const base = { description: 'Use when testing hatchery.', created_by: 'agent', updated_by: 'agent', created_at: 1, updated_at: 1 };
-  db.rows.push({ project_id: 'P', name: 'hatchery', body_md: mkmd('hatchery', 'STALE LOCAL'), state: 'archived', archived_at: 2, ...base });
+  const base = { description: 'Use when testing morehands.', created_by: 'agent', updated_by: 'agent', created_at: 1, updated_at: 1 };
+  db.rows.push({ project_id: 'P', name: 'morehands', body_md: mkmd('morehands', 'STALE LOCAL'), state: 'archived', archived_at: 2, ...base });
 
   await assert.rejects(
-    () => invoke(skillTools(db, 'P'), 'restore_skill', { name: 'hatchery' }),
+    () => invoke(skillTools(db, 'P'), 'restore_skill', { name: 'morehands' }),
     /protected platform skill/,
   );
 });

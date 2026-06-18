@@ -18,7 +18,7 @@ const execFile = promisify(execFileCb);
 async function callback(d: { callback: { url: string; token: string } }, body: RunnerCallback) {
   await fetch(d.callback.url, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-hatchery-agent-runner-token': d.callback.token },
+    headers: { 'content-type': 'application/json', 'x-morehands-agent-runner-token': d.callback.token },
     body: JSON.stringify(body),
   });
 }
@@ -38,12 +38,12 @@ function slug(s: string): string {
 /**
  * Branch the run should use.
  * - continuation (targetBranch set): the clone is already on it → return it as-is.
- * - initial: `hatchery/<slug(issue.identifier ?? runId)>-<short>`.
+ * - initial: `morehands/<slug(issue.identifier ?? runId)>-<short>`.
  * Pure so it can be unit-tested; `short` is supplied by the caller.
  */
 export function runBranchName(d: Pick<RunnerDispatch, 'targetBranch' | 'issue' | 'runId'>, short: string): string {
   if (d.targetBranch) return d.targetBranch;
-  return `hatchery/${slug(d.issue?.identifier ?? d.runId)}-${short}`;
+  return `morehands/${slug(d.issue?.identifier ?? d.runId)}-${short}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -176,11 +176,11 @@ async function fileExists(p: string): Promise<boolean> {
 export type PiRuntime = 'cli' | 'rpc';
 
 /**
- * Which pi runtime to drive. Default 'cli' (the prod-proven path); set HATCHERY_PI_RUNTIME=rpc to A/B
+ * Which pi runtime to drive. Default 'cli' (the prod-proven path); set MOREHANDS_PI_RUNTIME=rpc to A/B
  * the RPC client on real runs before promoting it. Env-based so it flips per deploy without a contract change.
  */
 export function piRuntime(env: NodeJS.ProcessEnv = process.env): PiRuntime {
-  return env.HATCHERY_PI_RUNTIME === 'rpc' ? 'rpc' : 'cli';
+  return env.MOREHANDS_PI_RUNTIME === 'rpc' ? 'rpc' : 'cli';
 }
 
 export interface AgentRun {

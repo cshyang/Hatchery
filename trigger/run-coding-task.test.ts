@@ -18,23 +18,23 @@ const issue = (identifier: string) => ({
 // ---------------------------------------------------------------------------
 
 test('runBranchName: continuation returns targetBranch verbatim', () => {
-  const branch = runBranchName({ targetBranch: 'hatchery/eng-12-abcd1234', issue: issue('ENG-12'), runId: 'run_1' }, 'ignored');
-  assert.equal(branch, 'hatchery/eng-12-abcd1234');
+  const branch = runBranchName({ targetBranch: 'morehands/eng-12-abcd1234', issue: issue('ENG-12'), runId: 'run_1' }, 'ignored');
+  assert.equal(branch, 'morehands/eng-12-abcd1234');
 });
 
-test('runBranchName: initial builds hatchery/<slug(identifier)>-<short>', () => {
+test('runBranchName: initial builds morehands/<slug(identifier)>-<short>', () => {
   const branch = runBranchName({ targetBranch: null, issue: issue('ENG-12'), runId: 'run_1' }, 'abcd1234');
-  assert.equal(branch, 'hatchery/eng-12-abcd1234');
+  assert.equal(branch, 'morehands/eng-12-abcd1234');
 });
 
 test('runBranchName: initial falls back to runId when issue is null', () => {
   const branch = runBranchName({ targetBranch: null, issue: null, runId: 'run_ABC_99' }, 'ef567890');
-  assert.equal(branch, 'hatchery/run-abc-99-ef567890');
+  assert.equal(branch, 'morehands/run-abc-99-ef567890');
 });
 
 test('runBranchName: slug collapses runs of non-alphanumerics and trims edge hyphens', () => {
   const branch = runBranchName({ targetBranch: null, issue: issue('  Foo / Bar!! '), runId: 'run_1' }, 'deadbeef');
-  assert.equal(branch, 'hatchery/foo-bar-deadbeef');
+  assert.equal(branch, 'morehands/foo-bar-deadbeef');
 });
 
 // ---------------------------------------------------------------------------
@@ -129,12 +129,12 @@ test('parsePiStream: a recovered intermediate error does not fail the run (last 
 
 test('piRuntime: defaults to cli (the prod-proven path)', () => {
   assert.equal(piRuntime({}), 'cli');
-  assert.equal(piRuntime({ HATCHERY_PI_RUNTIME: 'cli' }), 'cli');
-  assert.equal(piRuntime({ HATCHERY_PI_RUNTIME: 'CLI' }), 'cli'); // only exact 'rpc' opts in
-  assert.equal(piRuntime({ HATCHERY_PI_RUNTIME: 'something' }), 'cli');
+  assert.equal(piRuntime({ MOREHANDS_PI_RUNTIME: 'cli' }), 'cli');
+  assert.equal(piRuntime({ MOREHANDS_PI_RUNTIME: 'CLI' }), 'cli'); // only exact 'rpc' opts in
+  assert.equal(piRuntime({ MOREHANDS_PI_RUNTIME: 'something' }), 'cli');
 });
 
-test('piRuntime: opts into rpc only on exact HATCHERY_PI_RUNTIME=rpc', () => {
-  assert.equal(piRuntime({ HATCHERY_PI_RUNTIME: 'rpc' }), 'rpc');
+test('piRuntime: opts into rpc only on exact MOREHANDS_PI_RUNTIME=rpc', () => {
+  assert.equal(piRuntime({ MOREHANDS_PI_RUNTIME: 'rpc' }), 'rpc');
 });
 await run();

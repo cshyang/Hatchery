@@ -64,7 +64,7 @@ test('openOrUpdatePullRequest: existing open PR → returns created:false, makes
   };
 
   const result = await openOrUpdatePullRequest({
-    owner: 'acme', repo: 'repo', head: 'hatchery/eng-1', base: 'main',
+    owner: 'acme', repo: 'repo', head: 'morehands/eng-1', base: 'main',
     title: 'Fix it', body: 'Does the thing', token: TOKEN, fetchImpl,
   });
 
@@ -91,7 +91,7 @@ test('openOrUpdatePullRequest: no existing PR → POST to create, returns create
   };
 
   const result = await openOrUpdatePullRequest({
-    owner: 'acme', repo: 'repo', head: 'hatchery/eng-2', base: 'main',
+    owner: 'acme', repo: 'repo', head: 'morehands/eng-2', base: 'main',
     title: 'Add feature', body: 'Details here', token: TOKEN, fetchImpl,
   });
 
@@ -105,7 +105,7 @@ test('openOrUpdatePullRequest: no existing PR → POST to create, returns create
   // Verify POST body
   const postBody = JSON.parse(String(post!.init.body));
   assert.equal(postBody.title, 'Add feature');
-  assert.equal(postBody.head, 'hatchery/eng-2');
+  assert.equal(postBody.head, 'morehands/eng-2');
   assert.equal(postBody.base, 'main');
   assert.equal(postBody.body, 'Details here');
 
@@ -124,7 +124,7 @@ test('openOrUpdatePullRequest: non-2xx GET throws and does NOT include token in 
   let thrown: Error | null = null;
   try {
     await openOrUpdatePullRequest({
-      owner: 'acme', repo: 'repo', head: 'hatchery/eng-3', base: 'main',
+      owner: 'acme', repo: 'repo', head: 'morehands/eng-3', base: 'main',
       title: 'T', body: 'B', token: TOKEN, fetchImpl,
     });
   } catch (e) {
@@ -148,7 +148,7 @@ test('openOrUpdatePullRequest: non-2xx POST throws and does NOT include token in
   let thrown: Error | null = null;
   try {
     await openOrUpdatePullRequest({
-      owner: 'acme', repo: 'repo', head: 'hatchery/eng-4', base: 'main',
+      owner: 'acme', repo: 'repo', head: 'morehands/eng-4', base: 'main',
       title: 'T', body: 'B', token: TOKEN, fetchImpl,
     });
   } catch (e) {

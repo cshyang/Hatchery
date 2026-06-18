@@ -139,7 +139,7 @@ function runnerPayload(args: { projectId: string; workItemId: string; runId: str
     request: args.request,
     callback: {
       path: '/__internal/source-change-runs',
-      authHeader: 'x-hatchery-runner-token',
+      authHeader: 'x-morehands-runner-token',
     },
   };
 }
@@ -154,7 +154,7 @@ async function dispatchToRunner(args: {
     args.runnerUrl,
     {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-hatchery-runner-token': args.runnerToken },
+      headers: { 'content-type': 'application/json', 'x-morehands-runner-token': args.runnerToken },
       body: JSON.stringify(args.payload),
     },
     {

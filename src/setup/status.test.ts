@@ -139,7 +139,7 @@ test('setup_status reports missing Linear route when GitHub and Linear are conne
     db,
     binding: binding(),
     projectId: 'project_1',
-    env: { NANGO_SECRET_KEY: 'secret', TRIGGER_SECRET_KEY: 'trigger_secret', AGENT_RUNNER_TOKEN: 'runner_secret', RUNNER_GITHUB_PAT_TEMP: 'github_secret', HATCHERY_PUBLIC_URL: 'https://hatchery.example' },
+    env: { NANGO_SECRET_KEY: 'secret', TRIGGER_SECRET_KEY: 'trigger_secret', AGENT_RUNNER_TOKEN: 'runner_secret', RUNNER_GITHUB_PAT_TEMP: 'github_secret', MOREHANDS_PUBLIC_URL: 'https://hatchery.example' },
     targetRepo: 'acme/widgets',
     linearTeamKey: 'EDK',
   });
@@ -147,7 +147,7 @@ test('setup_status reports missing Linear route when GitHub and Linear are conne
   assert.equal(status.ready, false);
   assert.ok(status.missing.some((m) => m.kind === 'route' && m.provider === 'linear'));
   assert.equal(status.nextAction?.type, 'activate_route');
-  assert.doesNotMatch(JSON.stringify(status), /runner_secret|trigger_secret|github_secret|https:\/\/hatchery\.example|AGENT_RUNNER_TOKEN|TRIGGER_SECRET_KEY|RUNNER_GITHUB_PAT_TEMP|HATCHERY_PUBLIC_URL|NANGO_SECRET_KEY/);
+  assert.doesNotMatch(JSON.stringify(status), /runner_secret|trigger_secret|github_secret|https:\/\/hatchery\.example|AGENT_RUNNER_TOKEN|TRIGGER_SECRET_KEY|RUNNER_GITHUB_PAT_TEMP|MOREHANDS_PUBLIC_URL|NANGO_SECRET_KEY/);
 });
 
 test('setup_status reports ready when GitHub, Linear, active route, and runner config are present', async () => {
@@ -159,7 +159,7 @@ test('setup_status reports ready when GitHub, Linear, active route, and runner c
     db,
     binding: binding(),
     projectId: 'project_1',
-    env: { NANGO_SECRET_KEY: 'secret', TRIGGER_SECRET_KEY: 'trigger_secret', AGENT_RUNNER_TOKEN: 'runner_secret', RUNNER_GITHUB_PAT_TEMP: 'github_secret', HATCHERY_PUBLIC_URL: 'https://hatchery.example' },
+    env: { NANGO_SECRET_KEY: 'secret', TRIGGER_SECRET_KEY: 'trigger_secret', AGENT_RUNNER_TOKEN: 'runner_secret', RUNNER_GITHUB_PAT_TEMP: 'github_secret', MOREHANDS_PUBLIC_URL: 'https://hatchery.example' },
     targetRepo: 'acme/widgets',
     linearTeamKey: 'EDK',
     intent: 'run_agent',
@@ -185,7 +185,7 @@ test('setup_status reports the runner configured via a GitHub connection with no
     binding: binding(),
     projectId: 'project_1',
     // No RUNNER_GITHUB_PAT_TEMP — the App installation token from the github connection is the write credential.
-    env: { NANGO_SECRET_KEY: 'secret', TRIGGER_SECRET_KEY: 'trigger_secret', AGENT_RUNNER_TOKEN: 'runner_secret', HATCHERY_PUBLIC_URL: 'https://hatchery.example' },
+    env: { NANGO_SECRET_KEY: 'secret', TRIGGER_SECRET_KEY: 'trigger_secret', AGENT_RUNNER_TOKEN: 'runner_secret', MOREHANDS_PUBLIC_URL: 'https://hatchery.example' },
     linearTeamKey: 'EDK',
     intent: 'run_agent',
   });
@@ -202,7 +202,7 @@ test('setup_status flags legacy opencode active routes before Pi readiness', asy
     db,
     binding: binding(),
     projectId: 'project_1',
-    env: { NANGO_SECRET_KEY: 'secret', TRIGGER_SECRET_KEY: 'trigger_secret', AGENT_RUNNER_TOKEN: 'runner_secret', RUNNER_GITHUB_PAT_TEMP: 'github_secret', HATCHERY_PUBLIC_URL: 'https://hatchery.example' },
+    env: { NANGO_SECRET_KEY: 'secret', TRIGGER_SECRET_KEY: 'trigger_secret', AGENT_RUNNER_TOKEN: 'runner_secret', RUNNER_GITHUB_PAT_TEMP: 'github_secret', MOREHANDS_PUBLIC_URL: 'https://hatchery.example' },
     targetRepo: 'acme/widgets',
     linearTeamKey: 'EDK',
   });
@@ -222,7 +222,7 @@ test('setup_status tool returns structured JSON without exposing configured valu
     db,
     binding: binding(),
     projectId: 'project_1',
-    env: { NANGO_SECRET_KEY: 'secret', TRIGGER_SECRET_KEY: 'trigger_secret', AGENT_RUNNER_TOKEN: 'runner_secret', RUNNER_GITHUB_PAT_TEMP: 'github_secret', HATCHERY_PUBLIC_URL: 'https://hatchery.example' },
+    env: { NANGO_SECRET_KEY: 'secret', TRIGGER_SECRET_KEY: 'trigger_secret', AGENT_RUNNER_TOKEN: 'runner_secret', RUNNER_GITHUB_PAT_TEMP: 'github_secret', MOREHANDS_PUBLIC_URL: 'https://hatchery.example' },
   });
 
   const out = await (tool.execute as (a: unknown) => Promise<string>)({
@@ -236,7 +236,7 @@ test('setup_status tool returns structured JSON without exposing configured valu
   assert.equal(parsed.nextAction.type, 'none');
   assert.equal(parsed.connected.length, 2);
   assert.match(parsed.slackText, /Run Agent setup/);
-  assert.doesNotMatch(out, /runner_secret|trigger_secret|github_secret|https:\/\/hatchery\.example|NANGO_SECRET_KEY|AGENT_RUNNER_TOKEN|TRIGGER_SECRET_KEY|RUNNER_GITHUB_PAT_TEMP|HATCHERY_PUBLIC_URL/);
+  assert.doesNotMatch(out, /runner_secret|trigger_secret|github_secret|https:\/\/hatchery\.example|NANGO_SECRET_KEY|AGENT_RUNNER_TOKEN|TRIGGER_SECRET_KEY|RUNNER_GITHUB_PAT_TEMP|MOREHANDS_PUBLIC_URL/);
 });
 
 test('setup_status surfaces the slash commands and the operator doctor check', async () => {

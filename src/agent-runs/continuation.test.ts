@@ -320,7 +320,7 @@ const runnerDeps = { triggerApiUrl: 'https://trigger', triggerSecretKey: 'tr_sec
 test('createContinuationRun targets the parent branch and carries the feedback', async () => {
   const db = new FakeD1();
   const clock = seq();
-  const { run: parent0 } = await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'parent', targetRepo: 'https://github.com/o/r', branch: 'hatchery/eng-1' }, clock);
+  const { run: parent0 } = await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'parent', targetRepo: 'https://github.com/o/r', branch: 'morehands/eng-1' }, clock);
   await updateAgentRun(db, { id: parent0.id, status: 'waiting_approval', prUrl: 'https://github.com/o/r/pull/5' }, clock);
   const parent = (await getAgentRunById(db, parent0.id))!;
 
@@ -332,10 +332,10 @@ test('createContinuationRun targets the parent branch and carries the feedback',
 
   assert.equal(out.status, 'created');
   if (out.status !== 'created') return;
-  assert.equal(out.run.branch, 'hatchery/eng-1');
+  assert.equal(out.run.branch, 'morehands/eng-1');
   const payload = JSON.parse(out.run.dispatchPayload!);
   assert.equal(payload.mode, 'continuation');
-  assert.equal(payload.targetBranch, 'hatchery/eng-1');
+  assert.equal(payload.targetBranch, 'morehands/eng-1');
   assert.equal(payload.feedback, 'use the existing helper');
   assert.deepEqual(payload.replyTarget, { surface: 'linear', ref: 'ISSUE-1' });
 });

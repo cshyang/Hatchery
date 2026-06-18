@@ -72,7 +72,7 @@ interface Env {
   LINEAR_API_KEY?: string; // reserved for gateway-owned Linear status comments; never exposed to the model
   AGENT_RUNNER_URL?: string; // legacy generic runner dispatch endpoint; superseded by Trigger.dev
   AGENT_RUNNER_TOKEN?: string; // dedicated secret for agent-run callbacks
-  HATCHERY_PUBLIC_URL?: string; // absolute origin Trigger.dev calls back to (REQUIRED for coding dispatch)
+  MOREHANDS_PUBLIC_URL?: string; // absolute origin Trigger.dev calls back to (REQUIRED for coding dispatch)
   TRIGGER_SECRET_KEY?: string; // Trigger.dev secret key (Bearer) for the coding-task dispatch
   TRIGGER_API_URL?: string; // Trigger.dev REST base URL; defaults to https://api.trigger.dev
   RUNNER_GITHUB_PAT_TEMP?: string; // temporary GitHub PAT handed to the coding task (M0a stopgap; short-lived tokens later)
@@ -124,11 +124,11 @@ async function fireHeartbeat(topic?: string): Promise<number> {
 const app = new Hono<{ Bindings: Env }>();
 
 function requireHeartbeat(c: { env: Env; req: { header(n: string): string | undefined } }): boolean {
-  return hasMatchingSecretHeader(c.env.HEARTBEAT_TOKEN, c.req.header('x-hatchery-token'));
+  return hasMatchingSecretHeader(c.env.HEARTBEAT_TOKEN, c.req.header('x-morehands-token'));
 }
 
 // Manual heartbeat trigger. Token-guarded (inert unless HEARTBEAT_TOKEN is set
-// and the x-hatchery-token header matches) so it can't be fired publicly. An
+// and the x-morehands-token header matches) so it can't be fired publicly. An
 // optional {topic} in the body overrides the default.
 app.post('/__heartbeat', async (c) => {
   if (!requireHeartbeat(c)) return c.body(null, 404);
@@ -188,7 +188,7 @@ app.post('/__internal/work-items', async (c) => {
     {
       db: c.env.DB,
       expectedToken: c.env.HEARTBEAT_TOKEN,
-      actualToken: c.req.header('x-hatchery-token'),
+      actualToken: c.req.header('x-morehands-token'),
       body: await readJsonOrNull(() => c.req.json()),
     },
     { bindingByProject, dispatch },
@@ -205,7 +205,7 @@ app.post('/__internal/source-change-runs', async (c) => {
     {
       db: c.env.DB,
       expectedToken: c.env.WORKBENCH_RUNNER_TOKEN,
-      actualToken: c.req.header('x-hatchery-runner-token'),
+      actualToken: c.req.header('x-morehands-runner-token'),
       body: await readJsonOrNull(() => c.req.json()),
     },
   );
@@ -255,7 +255,7 @@ app.post('/linear/webhook', async (c) => {
     githubToken: c.env.RUNNER_GITHUB_PAT_TEMP, // transition fallback; resolveGithubToken is preferred
     resolveGithubToken: makeGithubTokenResolver(c.env),
     runnerToken: c.env.AGENT_RUNNER_TOKEN,
-    moreHandsPublicUrl: c.env.HATCHERY_PUBLIC_URL,
+    moreHandsPublicUrl: c.env.MOREHANDS_PUBLIC_URL,
     botActorId: c.env.LINEAR_BOT_ACTOR_ID,
     fetch,
   };
@@ -275,7 +275,7 @@ app.post('/__internal/agent-runs', async (c) => {
   const result = await handleAgentRunCallback({
     db: c.env.DB,
     expectedToken: c.env.AGENT_RUNNER_TOKEN,
-    actualToken: c.req.header('x-hatchery-agent-runner-token'),
+    actualToken: c.req.header('x-morehands-agent-runner-token'),
     body: await readJsonOrNull(() => c.req.json()),
   });
   if (result.status === 404) return c.body(null, 404);
@@ -339,7 +339,7 @@ app.post('/__internal/agent-runs/reconcile', async (c) => {
     githubToken: c.env.RUNNER_GITHUB_PAT_TEMP, // transition fallback; resolveGithubToken is preferred
     resolveGithubToken: makeGithubTokenResolver(c.env),
     runnerToken: c.env.AGENT_RUNNER_TOKEN,
-    moreHandsPublicUrl: c.env.HATCHERY_PUBLIC_URL,
+    moreHandsPublicUrl: c.env.MOREHANDS_PUBLIC_URL,
     fetch,
   });
   const notifications = await deliverPendingSlackRunNotifications({ db, env: c.env as Record<string, unknown> });
@@ -538,7 +538,7 @@ app.post('/__internal/review-sweep', async (c) => {
 // `wrangler secret put` and is only referenced here by name — this route never receives or stores it.
 // HARD LINE: this is OPERATOR-only and out-of-band; the agent (model) can never reach it.
 function requireAdmin(c: { env: Env; req: { header(n: string): string | undefined } }): boolean {
-  return hasMatchingSecretHeader(c.env.ADMIN_CONNECTIONS_TOKEN, c.req.header('x-hatchery-admin-token'));
+  return hasMatchingSecretHeader(c.env.ADMIN_CONNECTIONS_TOKEN, c.req.header('x-morehands-admin-token'));
 }
 
 // Manual wedged-session reset: bump a conversation's epoch so its next turn starts a fresh

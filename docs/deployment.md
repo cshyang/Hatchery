@@ -39,9 +39,9 @@ $EDITOR .env.deploy
 |---|---|
 | `resources` | creates D1 + KV if absent, writes ids into the env file (never into tracked `wrangler.jsonc`) |
 | `migrate` | applies D1 migrations to `hatchery-skills` |
-| `deploy` | builds Flue, patches the built config with the env file's resource ids, deploys `hatchery`, autofills `HATCHERY_PUBLIC_URL` |
+| `deploy` | builds Flue, patches the built config with the env file's resource ids, deploys `hatchery`, autofills `MOREHANDS_PUBLIC_URL` |
 | `secrets` | pushes set values from `.env.deploy` to the Worker (derives `SLACK_BOT_ID` + `KNOWN_TEAM_IDS` from the bot token via auth.test) |
-| `manifest [url]` | prints the Slack app manifest with the worker URL filled in, ready to paste (url defaults to `HATCHERY_PUBLIC_URL`) |
+| `manifest [url]` | prints the Slack app manifest with the worker URL filled in, ready to paste (url defaults to `MOREHANDS_PUBLIC_URL`) |
 | `doctor` | verifies the deployment leg by leg — config, worker liveness, Slack token, optional integrations — with the next step for each gap |
 
 After you create/install the Slack app, add the Slack bot token to `.env.deploy` and rerun:
@@ -52,11 +52,11 @@ After you create/install the Slack app, add the Slack bot token to `.env.deploy`
 
 ### Second account (e.g. work)
 
-`HATCHERY_ENV=<name>` points every phase at `.env.deploy.<name>`:
+`MOREHANDS_ENV=<name>` points every phase at `.env.deploy.<name>`:
 
 ```bash
-HATCHERY_ENV=work ./scripts/setup.sh full
-HATCHERY_ENV=work ./scripts/setup.sh doctor
+MOREHANDS_ENV=work ./scripts/setup.sh full
+MOREHANDS_ENV=work ./scripts/setup.sh doctor
 ```
 
 Account-specific resource ids stay in that env file; tracked files (`wrangler.jsonc`,
@@ -83,7 +83,7 @@ Everything account-specific lives in `.env.deploy` and is pushed as Worker secre
 | `TRIGGER_SECRET_KEY` | hatchery | dispatch to Trigger.dev `run-coding-task` |
 | `TRIGGER_API_URL` | hatchery | optional; defaults to `https://api.trigger.dev` |
 | `AGENT_RUNNER_TOKEN` | hatchery | runner callback auth |
-| `HATCHERY_PUBLIC_URL` | hatchery | public callback origin for Trigger.dev |
+| `MOREHANDS_PUBLIC_URL` | hatchery | public callback origin for Trigger.dev |
 | `RUNNER_GITHUB_PAT_TEMP` | hatchery | temporary dogfood GitHub token sent to the runner |
 | `GITHUB_SELF_TOKEN` | hatchery | optional; capability-request issues on MoreHands's own repo (see Self-Improvement Loop) |
 | `ROUTES_AUTO_ACTIVATE` | hatchery | optional; `true` auto-activates proposed agent-run routes (single-tenant dogfood — skips the admin counter-signature; repo allowlist still enforced). Leave unset for multi-tenant. |
@@ -110,7 +110,7 @@ Set Trigger.dev environment variables for the task (dashboard → Environment Va
 |---|---|
 | `OPENROUTER_API_KEY` | all Pi model calls — kits route through OpenRouter |
 | `KIT_ROOT` | optional override when packaged kit lookup differs |
-| `HATCHERY_PI_RUNTIME` | optional; `rpc` switches the pi channel, default is `cli` — runtime var, no redeploy needed |
+| `MOREHANDS_PI_RUNTIME` | optional; `rpc` switches the pi channel, default is `cli` — runtime var, no redeploy needed |
 
 The GitHub token and MoreHands callback token are sent in the dispatch payload by MoreHands. They do
 not need to be standing Trigger.dev secrets.
@@ -120,7 +120,7 @@ not need to be standing Trigger.dev secrets.
 The dispatch payload's `kit` field (from the agent-run route config, default `coding-default`)
 selects the execution path inside `run-coding-task`:
 
-- `coding-default` — a single Pi agent, run-scoped branch `hatchery/<slug>-<uuid8>`, regular PR.
+- `coding-default` — a single Pi agent, run-scoped branch `morehands/<slug>-<uuid8>`, regular PR.
 
 Kit names are validated at route creation against `SUPPORTED_KITS` in `src/agent-runs/events.ts` —
 unknown kits fail fast in the control plane instead of inside a Trigger run.
@@ -189,8 +189,8 @@ After deploy:
 
 ```bash
 curl -X POST \
-  -H "x-hatchery-admin-token: $ADMIN_CONNECTIONS_TOKEN" \
-  "$HATCHERY_PUBLIC_URL/__admin/agent-run-routes/<route-id>/activate"
+  -H "x-morehands-admin-token: $ADMIN_CONNECTIONS_TOKEN" \
+  "$MOREHANDS_PUBLIC_URL/__admin/agent-run-routes/<route-id>/activate"
 ```
 
 Then move a Linear issue into the configured `Run Agent` state. The expected loop is:
@@ -230,9 +230,9 @@ npx wrangler secret put GITHUB_SELF_TOKEN
    default). Via the guarded admin route:
 
 ```bash
-curl -X POST -H "x-hatchery-admin-token: $ADMIN_CONNECTIONS_TOKEN" \
+curl -X POST -H "x-morehands-admin-token: $ADMIN_CONNECTIONS_TOKEN" \
   -H "content-type: application/json" \
-  "$HATCHERY_PUBLIC_URL/__admin/connections" -d '{
+  "$MOREHANDS_PUBLIC_URL/__admin/connections" -d '{
     "projectId": "<channel-id>", "provider": "github-self",
     "tokenRef": "GITHUB_SELF_TOKEN",
     "config": { "repo": "<owner>/<repo>", "api": {

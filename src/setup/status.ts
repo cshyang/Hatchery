@@ -272,7 +272,7 @@ function runnerSummary(env: Record<string, unknown>, githubConnected: boolean): 
       // Write credential, mirroring resolveDispatchGithubToken: the project's GitHub connection
       // (App installation token, preferred) or the RUNNER_GITHUB_PAT_TEMP fallback.
       (githubConnected || hasEnvString(env, 'RUNNER_GITHUB_PAT_TEMP')) &&
-      hasEnvString(env, 'HATCHERY_PUBLIC_URL'),
+      hasEnvString(env, 'MOREHANDS_PUBLIC_URL'),
     runtime: DEFAULT_RUNNER_RUNTIME,
     sandboxProvider: DEFAULT_SANDBOX_PROVIDER,
   };

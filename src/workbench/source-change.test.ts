@@ -250,7 +250,7 @@ test('dispatch_coding_run creates a coding_webhook run and posts the generic run
   const sent = captured.current;
   assert.ok(sent);
   assert.equal(sent.url, 'https://runner.example/run');
-  assert.equal((sent.init.headers as Record<string, string>)['x-hatchery-runner-token'], 'runner-secret');
+  assert.equal((sent.init.headers as Record<string, string>)['x-morehands-runner-token'], 'runner-secret');
   assert.equal(JSON.stringify(sent.body).includes('runner-secret'), false);
   assert.equal(sent.body.workItemId, item.id);
   assert.equal(sent.body.runId, db.workRuns[0].id);

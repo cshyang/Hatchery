@@ -703,7 +703,7 @@ test('handleLinearWebhook does not create a rerun from the same Linear delivery 
 
 test('handleLinearComment records a boundary event and spawns a continuation for a human comment', async () => {
   const db = new FakeD1();
-  await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'parent', targetRepo: 'https://github.com/o/r', linearIssueId: 'ISSUE-1', branch: 'hatchery/eng-1' }, seq());
+  await createAgentRun(db, { projectId: 'p1', sourceType: 'linear', idempotencyKey: 'parent', targetRepo: 'https://github.com/o/r', linearIssueId: 'ISSUE-1', branch: 'morehands/eng-1' }, seq());
   // Parent must be in waiting_approval (PR open, idle) so continuation is not blocked by active-branch dedupe.
   db.agentRuns[0].status = 'waiting_approval';
   db.agentRuns[0].pr_url = 'https://github.com/o/r/pull/5';

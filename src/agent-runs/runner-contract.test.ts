@@ -9,7 +9,7 @@ const { test, run } = createTestRunner();
 test('a continuation dispatch parses against the contract', () => {
   const d = v.parse(RunnerDispatchSchema, {
     contractVersion: RUNNER_CONTRACT_VERSION, runId: 'r1', projectId: 'p1', mode: 'continuation',
-    targetRepo: 'https://github.com/o/r', baseBranch: 'main', targetBranch: 'hatchery/eng-1',
+    targetRepo: 'https://github.com/o/r', baseBranch: 'main', targetBranch: 'morehands/eng-1',
     kit: 'coding-default', runtime: 'pi', sandboxProvider: 'local',
     issue: null, feedback: 'use authGuard()', prUrl: 'https://github.com/o/r/pull/5',
     replyTarget: { surface: 'linear', ref: 'ISSUE-1' }, githubToken: 'ghp_x',

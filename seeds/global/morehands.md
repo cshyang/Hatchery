@@ -1,5 +1,5 @@
 ---
-name: hatchery
+name: morehands
 description: Use when the user asks what you can do, how MoreHands works, why you lack VM/env/repo access, or how skills, memory, reminders, connections, projects, and tools fit together.
 ---
 

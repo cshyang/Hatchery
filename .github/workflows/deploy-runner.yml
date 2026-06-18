@@ -13,7 +13,7 @@ name: deploy-runner
 #   TRIGGER_ACCESS_TOKEN — a Personal Access Token from the Trigger.dev dashboard
 #                          (Account → Personal Access Tokens). Without it, the deploy step fails.
 #
-# NOTE: the CLI↔RPC channel is a RUNTIME env var (HATCHERY_PI_RUNTIME) set in the Trigger dashboard,
+# NOTE: the CLI↔RPC channel is a RUNTIME env var (MOREHANDS_PI_RUNTIME) set in the Trigger dashboard,
 # not a deploy-time concern — promoting RPC does not require a redeploy.
 
 on:
