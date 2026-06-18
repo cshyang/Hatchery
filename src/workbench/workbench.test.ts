@@ -14,6 +14,7 @@ import {
 } from './repository';
 import { workbenchTools } from './tools';
 import { handleInternalWorkItemRequest } from './gateway';
+import { agentInstanceId } from '../project/bindings';
 
 const { test, run } = createTestRunner();
 
@@ -427,7 +428,7 @@ test('handleInternalWorkItemRequest authenticates, dedupes, and records dispatch
   assert.equal(dispatched.length, 1);
   assert.deepEqual(dispatched[0], {
     agent: 'project',
-    id: `project:P:agent:default/work:${first.body?.workItem.id}`,
+    id: agentInstanceId('P', `work:${first.body?.workItem.id}`),
     input: { kind: 'work_item', workItemId: first.body?.workItem.id, title: 'From Linear' },
   });
 

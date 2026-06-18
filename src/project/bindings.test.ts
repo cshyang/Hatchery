@@ -17,6 +17,8 @@ import {
   resolveModel,
   assertValidModel,
   DEFAULT_MODEL,
+  agentInstanceId,
+  parseAgentInstanceId,
   type BindingRecord,
 } from './bindings';
 import type { D1Like } from '../skills/repository';
@@ -275,6 +277,36 @@ test('autoCreateBinding rejects an unvalidated model pin', async () => {
     /model-guard/,
   );
   assert.equal((await loadBindings(db, 'C_ACB')).length, 0, 'no row written');
+});
+
+test('agentInstanceId round-trips through parseAgentInstanceId (with the session-generation token)', () => {
+  // Build → parse recovers projectId/slug/scope; the @g token must not leak into any of them.
+  for (const [scope, expectScope] of [
+    ['conv:slack:T1:C1:100.000', 'conv:slack:T1:C1:100.000'],
+    ['conv:slack:T1:C1:100.000~e3', 'conv:slack:T1:C1:100.000~e3'], // epoch + generation token compose: strip @g, keep ~e3
+    ['heartbeat', 'heartbeat'],
+    ['job:abc', 'job:abc'],
+    [undefined, null],
+  ] as const) {
+    const id = agentInstanceId('proj_1', scope, 'default');
+    assert.match(id, /@g\d+$/, `expected a generation token on ${id}`);
+    assert.deepEqual(parseAgentInstanceId(id), { projectId: 'proj_1', slug: 'default', scope: expectScope });
+  }
+});
+
+test('the session generation makes the id differ from the legacy (pre-bump) id → a fresh DO', () => {
+  const id = agentInstanceId('proj_1', 'conv:X');
+  assert.notEqual(id, 'project:proj_1:agent:default/conv:X', 'bumped id must differ so Flue maps it to a new, empty DO');
+});
+
+test('parseAgentInstanceId still resolves legacy ids with no generation token (back-compat)', () => {
+  assert.deepEqual(parseAgentInstanceId('project:proj_1:agent:default/conv:X'), {
+    projectId: 'proj_1',
+    slug: 'default',
+    scope: 'conv:X',
+  });
+  // bare legacy id (no :agent: suffix)
+  assert.deepEqual(parseAgentInstanceId('project:proj_1'), { projectId: 'proj_1', slug: 'default', scope: null });
 });
 
 await run();

@@ -96,17 +96,33 @@ export const DEFAULT_AGENT_SLUG = 'default';
 // The scope sits after `/` because scopes contain `:` and slugs never do. DO instance
 // ids are sticky — renaming one makes a NEW DO and orphans its history. Build + parse
 // go through these two functions so the format never drifts across dispatch sites.
+//
+// FLUE_SESSION_GENERATION bumps the id of EVERY instance at once. Flue stores per-DO
+// SessionData with a format version and throws on an older one (1.0 writes v6 and rejects
+// the v5 written by 0.11). Bumping this appends a token that makes every conversation,
+// heartbeat, and job resolve to a fresh, empty DO — discarding prior Flue session state in
+// one shot, no per-DO migration. The token is stripped before parsing, so projectId/slug/
+// scope (and every D1 lookup keyed on them) are unchanged. Bump only on such an upgrade.
+const FLUE_SESSION_GENERATION = 1;
+const GENERATION_SUFFIX = FLUE_SESSION_GENERATION > 0 ? `@g${FLUE_SESSION_GENERATION}` : '';
+
 export function agentInstanceId(projectId: string, scope?: string, slug: string = DEFAULT_AGENT_SLUG): string {
   const base = `project:${projectId}:agent:${slug}`;
-  return scope ? `${base}/${scope}` : base;
+  return (scope ? `${base}/${scope}` : base) + GENERATION_SUFFIX;
 }
 
-/** Parse projectId + slug + scope from an instance id. Tolerates scope-less ids and the
- *  legacy bare `project:<id>` (no `:agent:` suffix) so older callers still resolve. */
+/** Parse projectId + slug + scope from an instance id. Strips the session-generation token,
+ *  and tolerates scope-less ids and the legacy bare `project:<id>` (no `:agent:` suffix, no
+ *  token) so older callers and stored ids still resolve. */
 export function parseAgentInstanceId(id: string): { projectId: string; slug: string; scope: string | null } {
-  const slash = id.indexOf('/');
-  const base = slash === -1 ? id : id.slice(0, slash);
-  const scope = slash === -1 ? null : id.slice(slash + 1) || null;
+  // Strips a trailing `@g<n>` token. Safe because `@` never appears in a projectId or any
+  // scope we build (`conv:`, `heartbeat`, `job:`, `work:`, `review:`, `reflect:`, `overhear:`);
+  // never introduce an `@`-bearing scope or this strip would eat into it.
+  const gen = id.match(/@g\d+$/);
+  const core = gen ? id.slice(0, -gen[0].length) : id;
+  const slash = core.indexOf('/');
+  const base = slash === -1 ? core : core.slice(0, slash);
+  const scope = slash === -1 ? null : core.slice(slash + 1) || null;
   const m = base.match(/^project:(.+):agent:([^:]+)$/);
   if (m) return { projectId: m[1], slug: m[2], scope };
   const projectId = base.startsWith('project:') ? base.slice('project:'.length) : base;
