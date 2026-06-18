@@ -8,9 +8,11 @@ import {
   createSlackTurnActivity,
   handleObservedSlackActivity,
   loadSlackTurnActivity,
+  recordSlackStreamHeartbeat,
   recordSlackToolActivity,
   renderSlackActivityReceipt,
   reapStaleTurnActivities,
+  STREAM_HEARTBEAT_MS,
   shouldPostFinalBelowActivity,
   TURN_DIED_RESET_TEXT,
   TURN_DIED_TEXT,
@@ -118,6 +120,20 @@ class FakeD1 implements D1Like {
               const row = db.rows.find((item) => item.project_id === projectId && item.session_id === sessionId);
               if (!row || (query.includes('doa_count>0') && !((row.doa_count as number) > 0))) return { meta: { changes: 0 } };
               row.doa_count = 0;
+              return { meta: { changes: 1 } };
+            }
+            if (query.includes('SET updated_at=? WHERE') && query.includes("status='active' AND updated_at <=")) {
+              // Stream heartbeat: throttled, no-rewind bump of updated_at only (atomic WHERE clause).
+              const [now, projectId, sessionId, threshold] = values as [number, string, string, number];
+              const row = db.rows.find(
+                (item) =>
+                  item.project_id === projectId &&
+                  item.session_id === sessionId &&
+                  item.status === 'active' &&
+                  (item.updated_at as number) <= threshold,
+              );
+              if (!row) return { meta: { changes: 0 } };
+              row.updated_at = now;
               return { meta: { changes: 1 } };
             }
             if (query.startsWith('UPDATE slack_turn_activity')) {
@@ -553,6 +569,57 @@ test('completed turn resets the DOA streak', async () => {
   await completeSlackTurnActivity(db, 'P', 'conv:slack:T:C:100.000', 'completed', TURN_DOA_STALE_MS + 90_000);
   const row = db.rows.find((r) => r.session_id === 'conv:slack:T:C:100.000');
   assert.equal(row?.doa_count, 0, 'success clears the wedge counter');
+});
+
+// ── stream heartbeat (token-level proof of life) ──────────────────────────────
+
+test('stream heartbeat: a delta past the throttle window refreshes the liveness clock', async () => {
+  const db = new FakeD1();
+  await createSlackTurnActivity(db, input({ now: 1000 }));
+  const t = 1000 + STREAM_HEARTBEAT_MS + 1;
+  await recordSlackStreamHeartbeat(db, { projectId: 'P', sessionId: 'conv:slack:T:C:100.000', now: t });
+  const activity = await loadSlackTurnActivity(db, 'P', 'conv:slack:T:C:100.000');
+  assert.equal(activity?.updatedAt, t, 'a token delta bumps updated_at — the model is provably alive');
+});
+
+test('stream heartbeat: throttled to one write per window regardless of token rate', async () => {
+  const db = new FakeD1();
+  await createSlackTurnActivity(db, input({ now: 1000 }));
+  // A burst of deltas inside the window — none may move the clock (or we hammer D1 per token).
+  await recordSlackStreamHeartbeat(db, { projectId: 'P', sessionId: 'conv:slack:T:C:100.000', now: 1001 });
+  await recordSlackStreamHeartbeat(db, { projectId: 'P', sessionId: 'conv:slack:T:C:100.000', now: 1500 });
+  let activity = await loadSlackTurnActivity(db, 'P', 'conv:slack:T:C:100.000');
+  assert.equal(activity?.updatedAt, 1000, 'deltas within the throttle window do not write');
+  // One delta a full window later does write.
+  await recordSlackStreamHeartbeat(db, { projectId: 'P', sessionId: 'conv:slack:T:C:100.000', now: 1000 + STREAM_HEARTBEAT_MS });
+  activity = await loadSlackTurnActivity(db, 'P', 'conv:slack:T:C:100.000');
+  assert.equal(activity?.updatedAt, 1000 + STREAM_HEARTBEAT_MS, 'a delta past the window refreshes the clock');
+});
+
+test('stream heartbeat: never revives a completed or failed turn', async () => {
+  const db = new FakeD1();
+  await createSlackTurnActivity(db, input({ now: 1000 }));
+  await completeSlackTurnActivity(db, 'P', 'conv:slack:T:C:100.000', 'completed', 2000);
+  await recordSlackStreamHeartbeat(db, { projectId: 'P', sessionId: 'conv:slack:T:C:100.000', now: 2000 + STREAM_HEARTBEAT_MS + 1 });
+  const activity = await loadSlackTurnActivity(db, 'P', 'conv:slack:T:C:100.000');
+  assert.equal(activity?.status, 'completed');
+  assert.equal(activity?.updatedAt, 2000, 'a stray late delta cannot bump a finished turn');
+});
+
+test('stream heartbeat: a fresh delta keeps a turn the reaper would otherwise lose, and reaping still works once tokens stop', async () => {
+  const db = new FakeD1();
+  await createSlackTurnActivity(db, input({ now: 0 }));
+  // Last tool beat was early; without a heartbeat this clock would be long stale.
+  await recordSlackToolActivity(db, { projectId: 'P', sessionId: 'conv:slack:T:C:100.000', toolName: 'execute_code', now: 1000 });
+  const streamingNow = TURN_STALE_MS + 60_000;
+  await recordSlackStreamHeartbeat(db, { projectId: 'P', sessionId: 'conv:slack:T:C:100.000', now: streamingNow });
+
+  const reaped = await reapStaleTurnActivities(db, {}, { now: streamingNow + 1000, editMessage: async () => {}, log: () => {} });
+  assert.equal(reaped, 0, 'a turn still emitting tokens is not reaped, even long after its last tool beat');
+
+  // Tokens stop — once the clock goes stale again, the reaper claims it as before.
+  const reapedLater = await reapStaleTurnActivities(db, { SLACK_BOT_TOKEN_DEFAULT: 'x' }, { now: streamingNow + TURN_STALE_MS + 1000, editMessage: async () => {}, log: () => {} });
+  assert.equal(reapedLater, 1, 'once the deltas stop the stale turn is reaped — the heartbeat shifts the deadline, it does not remove it');
 });
 
 await run();

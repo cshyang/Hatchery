@@ -152,6 +152,29 @@ async function recordSlackActivityLabel(
   return { activity, shouldPost };
 }
 
+/** A streaming model emits token deltas many times a second — far too often to write D1 per token.
+ *  A delta bumps updated_at at most once per this window: enough to prove the stream is alive, cheap
+ *  enough to ignore. Without it the clock freezes at message_start, and a healthy long generation is
+ *  indistinguishable from a hung stream — the gap that forces the reaper's conservative window. */
+export const STREAM_HEARTBEAT_MS = 5_000;
+
+/** Token-level stream beat (text/thinking delta). The model still emitting tokens is the truest proof
+ *  of life we have. A single throttled, side-effect-free UPDATE: it touches only updated_at — never
+ *  activities or the Slack receipt — so it can't clobber a concurrent tool write and never spams the
+ *  thread. The throttle and the no-rewind guard both live in the WHERE clause (atomic). */
+export async function recordSlackStreamHeartbeat(
+  db: D1Like,
+  input: { projectId: string; sessionId: string; now?: number },
+): Promise<void> {
+  const now = input.now ?? Date.now();
+  await db
+    .prepare(
+      `UPDATE slack_turn_activity SET updated_at=? WHERE project_id=? AND session_id=? AND status='active' AND updated_at <= ?`,
+    )
+    .bind(now, input.projectId, input.sessionId, now - STREAM_HEARTBEAT_MS)
+    .run();
+}
+
 export async function completeSlackTurnActivity(
   db: D1Like,
   projectId: string,
@@ -208,6 +231,11 @@ export async function handleObservedSlackActivity(event: FlueEvent, ctx: FlueCon
 
     const activityEvent = observedSlackActivityEvent(event);
     if (!activityEvent) return;
+
+    if ('heartbeat' in activityEvent) {
+      await recordSlackStreamHeartbeat(db, { projectId, sessionId: scope });
+      return;
+    }
 
     const base = {
       projectId,
@@ -380,7 +408,8 @@ function parseActivities(value: string): SlackActivityItem[] {
 
 type ObservedSlackActivityEvent =
   | { toolName: string; isError?: boolean; terminal?: boolean }
-  | { label: string; isError?: boolean; terminal?: boolean; forcePost?: boolean; requireExistingActivity?: boolean };
+  | { label: string; isError?: boolean; terminal?: boolean; forcePost?: boolean; requireExistingActivity?: boolean }
+  | { heartbeat: true };
 
 function observedSlackActivityEvent(event: FlueEvent): ObservedSlackActivityEvent | null {
   if (event.type === 'tool_start') {
@@ -391,6 +420,9 @@ function observedSlackActivityEvent(event: FlueEvent): ObservedSlackActivityEven
   }
   if (event.type === 'message_start') {
     return { label: STREAM_RESPONSE_LABEL, requireExistingActivity: true, forcePost: true };
+  }
+  if (event.type === 'text_delta' || event.type === 'thinking_delta') {
+    return { heartbeat: true };
   }
   return null;
 }
