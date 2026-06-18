@@ -1,8 +1,8 @@
-diff --git a/node_modules/@flue/runtime/dist/sandbox-B4vW9Ijf.mjs b/node_modules/@flue/runtime/dist/sandbox-B4vW9Ijf.mjs
-index d04d813..01ff548 100644
---- a/node_modules/@flue/runtime/dist/sandbox-B4vW9Ijf.mjs
-+++ b/node_modules/@flue/runtime/dist/sandbox-B4vW9Ijf.mjs
-@@ -1568,6 +1568,22 @@ async function discoverSessionContext(env, instructions, definitionSkills = [])
+diff --git a/node_modules/@flue/runtime/dist/persisted-image-placement-qyxGKalp.mjs b/node_modules/@flue/runtime/dist/persisted-image-placement-qyxGKalp.mjs
+index 7c691a8..eb1e8de 100644
+--- a/node_modules/@flue/runtime/dist/persisted-image-placement-qyxGKalp.mjs
++++ b/node_modules/@flue/runtime/dist/persisted-image-placement-qyxGKalp.mjs
+@@ -807,6 +807,16 @@ function isImageBlock(value) {
  //#endregion
  //#region src/runtime/stream-chunks.ts
  const STREAM_FLUSH_INTERVAL_MS = 3e3;
@@ -14,18 +14,12 @@ index d04d813..01ff548 100644
 +// Canonical/tested copy: src/shared/stream-journal.ts.
 +function stripPartialContentForJournal(event) {
 +	if (!event || typeof event !== "object" || !event.partial || typeof event.partial !== "object") return event;
-+	return {
-+		...event,
-+		partial: {
-+			...event.partial,
-+			content: []
-+		}
-+	};
++	return { ...event, partial: { ...event.partial, content: [] } };
 +}
  var StreamChunkWriter = class {
  	store;
  	streamKey;
-@@ -1583,7 +1599,7 @@ var StreamChunkWriter = class {
+@@ -822,7 +832,7 @@ var StreamChunkWriter = class {
  	}
  	write(event) {
  		if (!this.active || this.failed) return;

@@ -18,8 +18,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const distDir = join(here, '../../node_modules/@flue/runtime/dist');
 
 test('Flue stream-journal patch is applied in the installed runtime', () => {
-  const files = readdirSync(distDir).filter((f) => f.startsWith('sandbox-') && f.endsWith('.mjs'));
-  assert.ok(files.length > 0, 'expected a sandbox-*.mjs bundle in @flue/runtime/dist');
+  const files = readdirSync(distDir).filter((f) => f.endsWith('.mjs'));
+  assert.ok(files.length > 0, 'expected bundled .mjs files in @flue/runtime/dist');
 
   const patched = files.some((f) =>
     readFileSync(join(distDir, f), 'utf8').includes('stripPartialContentForJournal'),
