@@ -12,7 +12,7 @@ import { fetchWithTimeout, jsonMessageOrText } from './http';
 import type { ToolCallRecorder, ToolCallStatus } from '../connections/audit';
 
 const API = 'https://api.github.com';
-const UA = 'hatchery-agent'; // GitHub requires a User-Agent or returns 403.
+const UA = 'morehands-agent'; // GitHub requires a User-Agent or returns 403.
 
 function ghHeaders(pat: string): Record<string, string> {
   return {

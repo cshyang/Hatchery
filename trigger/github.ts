@@ -62,7 +62,7 @@ export async function openOrUpdatePullRequest(opts: OpenOrUpdatePullRequestOpts)
     Authorization: `Bearer ${token}`,
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
-    'User-Agent': 'hatchery-runner',
+    'User-Agent': 'morehands-runner',
     'Content-Type': 'application/json',
   };
 

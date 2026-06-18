@@ -166,7 +166,7 @@ export async function buildDynamicWorkerId(args: {
   network: CodeNetworkMode;
 }): Promise<string> {
   const codeHash = await hashText(`${args.language}:${args.network}:${args.code}`);
-  return `hatchery-code:${args.language}:${args.network}:${codeHash.slice(0, 32)}`;
+  return `morehands-code:${args.language}:${args.network}:${codeHash.slice(0, 32)}`;
 }
 
 export async function buildWorkerCodeSpec(args: {

@@ -38,7 +38,7 @@ export interface ProviderApiProfile {
   crib: (config: Record<string, unknown>) => string;
 }
 
-const UA = 'hatchery-agent';
+const UA = 'morehands-agent';
 
 export const PROVIDER_API_PROFILES: Record<string, ProviderApiProfile> = {
   github: {

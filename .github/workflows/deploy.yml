@@ -70,7 +70,7 @@ jobs:
         run: |
           url="$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.out | head -1)"
           if [ -z "$url" ]; then echo "Could not parse deployed URL; skipping smoke."; exit 0; fi
-          code="$(curl -s -o /dev/null -w '%{http_code}' -A 'hatchery-ci-smoke' "$url/")"
+          code="$(curl -s -o /dev/null -w '%{http_code}' -A 'morehands-ci-smoke' "$url/")"
           echo "smoke: $url/ → HTTP $code"
           case "$code" in
             000|5*) echo "::warning::Smoke check returned $code — worker may not have booted cleanly." ;;

@@ -72,7 +72,7 @@ export const localWorkspace: WorkspaceProvider = {
     const cloneUrl = authenticatedCloneUrl(repo, githubToken);
 
     // mkdtemp guarantees uniqueness; no need for an extra randomUUID.
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hatchery-ws-'));
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'morehands-ws-'));
 
     try {
       // Args as an array — avoids shell injection and keeps the token out of shell history.
