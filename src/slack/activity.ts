@@ -386,7 +386,7 @@ function observedSlackActivityEvent(event: FlueEvent): ObservedSlackActivityEven
   if (event.type === 'tool_start') {
     return { toolName: event.toolName };
   }
-  if (event.type === 'tool_call' && event.isError) {
+  if (event.type === 'tool' && event.isError) {
     return { toolName: event.toolName, isError: true, terminal: true };
   }
   if (event.type === 'message_start') {

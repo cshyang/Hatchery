@@ -396,7 +396,7 @@ test('Flue observer hides unknown tools and never posts args or results', async 
     );
     await handleObservedSlackActivity(
       {
-        type: 'tool_call',
+        type: 'tool',
         instanceId: 'project:P:agent:default/conv:slack:T:C:100.000',
         session: 'default',
         toolName: 'execute_code',
