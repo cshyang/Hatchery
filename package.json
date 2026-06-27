@@ -1,7 +1,7 @@
 {
   "name": "morehands",
   "version": "1.0.0",
-  "description": "",
+  "description": "Slack-first AI teammate and maintainer automation platform on Cloudflare Workers.",
   "main": "index.js",
   "directories": {
     "doc": "docs"

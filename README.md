@@ -1,9 +1,41 @@
 # MoreHands
 
-A channel-scoped AI teammate on Cloudflare Workers. Slack is the front door; each bound channel
-gets its own agent running in a Durable Object (via [Flue](https://flueframework.com)); Linear
-state transitions can dispatch an external Trigger.dev-hosted Pi runner; provider connections
+MoreHands is an Apache-2.0 maintainer automation platform for teams that live in
+Slack. Each bound channel gets a long-running AI teammate on Cloudflare Workers:
+it remembers project context, brokers provider connections, coordinates coding
+runs, and leaves deterministic audit trails around anything that touches source
+code or external systems.
+
+Slack is the front door; each bound channel gets its own agent running in a
+Durable Object (via [Flue](https://flueframework.com)); Linear state transitions
+can dispatch an external Trigger.dev-hosted Pi runner; provider connections
 (GitHub, Linear, Notion) are brokered through Nango.
+
+## Why this exists
+
+Small open-source projects lose time in the gaps around the actual code:
+triaging issues, remembering project-specific context, reviewing changes,
+running release chores, and moving work across Slack, GitHub, Linear, and docs.
+MoreHands explores a lightweight, self-hostable control plane for those
+maintainer workflows.
+
+The project is intentionally not a black-box autonomous coder. The model sits
+between deterministic layers: ingress is verified and deduped in code, tools are
+gated by explicit connection state, coding runs report through a versioned
+contract, and state lands in D1/KV ledgers that maintainers can inspect.
+
+Current status: early-stage and actively dogfooded. The repository is public so
+other agent builders and OSS maintainers can inspect the architecture, reuse the
+patterns, and help harden the maintainer workflows.
+
+## Maintainer workflows
+
+- Slack-native project assistant with per-channel memory and personas.
+- GitHub, Linear, Notion, and generic API connections through Nango.
+- Linear-triggered coding runs through a Trigger.dev-hosted Pi runner.
+- Workspace and code-mode tools with explicit limits and audit records.
+- Nightly memory/reflection jobs plus scheduled reminders.
+- Deterministic setup/status checks for deployments and integrations.
 
 Since the Flue 0.11 upgrade it deploys as **one Cloudflare Worker plus one Trigger.dev runner**
 (the old `hatchery-ticker` cron worker is gone — the clock moved in-house):
